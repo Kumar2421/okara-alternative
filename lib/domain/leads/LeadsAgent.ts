@@ -16,14 +16,25 @@ export type ExtractedLead = {
   sourceUrl: string | null;
 };
 
-const MAX_LEADS = 15;
+const MAX_LEADS = 40;
+const RESULTS_PER_QUERY = 20; // Tavily's real max
+const MAX_RESULTS_FOR_LLM = 80; // keep the extraction prompt bounded for small local models
 
+/** More distinct queries = more raw candidates before the LLM even runs —
+ * cheap lever (same Tavily key, just more credits/search) that's the first
+ * thing to turn up before reaching for a paid leads DB. Kept genuinely
+ * distinct (not near-duplicate phrasing) so each one earns its credit cost. */
 function buildSearchQueries(q: LeadSearchQuery): string[] {
   const parts = [q.role, q.companyOrIndustry, q.location].filter(Boolean).join(" ");
-  return [
+  const queries = [
     `"${q.role}" ${q.companyOrIndustry} ${q.location} site:linkedin.com/in`,
     `${parts} email contact`,
-  ].filter((s) => s.trim().length > 0);
+    `"${q.role}" ${q.companyOrIndustry} linkedin profile`,
+    `${q.companyOrIndustry} ${q.role} ${q.location} directory`,
+    `${q.companyOrIndustry} ${q.role} "contact us"`,
+  ];
+  if (q.location) queries.push(`"${q.role}" ${q.companyOrIndustry} linkedin`); // same role/company, no location — wider net
+  return queries.filter((s) => s.trim().length > 0);
 }
 
 /** Same quirk-tolerant JSON extraction as CompetitorDiscoveryAgent — small
@@ -77,9 +88,19 @@ export class LeadsAgent {
   async search(query: LeadSearchQuery, tavilyApiKey: string, model: string): Promise<ExtractedLead[]> {
     const queries = buildSearchQueries(query);
     const resultSets = await Promise.all(
-      queries.map((q) => tavilySearchRaw(tavilyApiKey, q, 8).catch(() => [] as TavilyResult[]))
+      queries.map((q) => tavilySearchRaw(tavilyApiKey, q, RESULTS_PER_QUERY).catch(() => [] as TavilyResult[]))
     );
-    const allResults = resultSets.flat();
+
+    // Different queries legitimately return the same URL — dedupe before
+    // spending LLM context on the same snippet twice.
+    const seenUrls = new Set<string>();
+    const allResults: TavilyResult[] = [];
+    for (const r of resultSets.flat()) {
+      if (seenUrls.has(r.url)) continue;
+      seenUrls.add(r.url);
+      allResults.push(r);
+      if (allResults.length >= MAX_RESULTS_FOR_LLM) break;
+    }
     if (allResults.length === 0) return [];
 
     const resultsBlock = allResults

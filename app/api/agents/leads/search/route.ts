@@ -1,8 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getDriver } from "@/lib/llm";
-import { LeadsAgent } from "@/lib/domain/leads/LeadsAgent";
+import { LeadsAgent, type ExtractedLead } from "@/lib/domain/leads/LeadsAgent";
+import { guessAndVerifyEmail } from "@/lib/domain/leads/emailVerify";
 import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
+
+const SMTP_VERIFY_CONCURRENCY = 5;
+
+/** Runs guessAndVerifyEmail only for leads search extraction left with no
+ * email — bounded concurrency so we're not opening dozens of SMTP sockets
+ * at once. Mutates nothing; returns which leads got a verified email. */
+async function verifyMissingEmails(leads: ExtractedLead[]): Promise<Map<number, string>> {
+  const verified = new Map<number, string>();
+  const candidates = leads
+    .map((lead, index) => ({ lead, index }))
+    .filter(({ lead }) => !lead.email && lead.company && lead.name.trim().split(/\s+/).length >= 2);
+
+  for (let i = 0; i < candidates.length; i += SMTP_VERIFY_CONCURRENCY) {
+    const batch = candidates.slice(i, i + SMTP_VERIFY_CONCURRENCY);
+    const results = await Promise.all(
+      batch.map(({ lead }) => guessAndVerifyEmail(lead.name, lead.company).catch(() => null))
+    );
+    results.forEach((email, j) => {
+      if (email) verified.set(batch[j].index, email);
+    });
+  }
+  return verified;
+}
 
 export async function GET() {
   const activeId = getActiveProjectId();
@@ -68,15 +92,23 @@ export async function POST(req: NextRequest) {
     const query = `${role} ${companyOrIndustry} ${location}`.trim();
     const leads = await agent.search({ role, companyOrIndustry, location }, tavilyKeyRow.value, model);
 
+    // Tier 1: for leads search left with no email, try a real SMTP-verified
+    // guess (see emailVerify.ts) — never overrides an email search already
+    // found, only upgrades a null.
+    const verifiedEmails = await verifyMissingEmails(leads);
+
     const now = new Date().toISOString();
     const insert = db.prepare(
-      `INSERT INTO leads (id, project_id, name, title, company, location, email, source_url, query, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO leads (id, project_id, name, title, company, location, email, email_verified, source_url, query, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
-    const saved = leads.map((lead) => {
+    const saved = leads.map((lead, index) => {
       const id = `lead_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-      insert.run(id, activeId, lead.name, lead.title, lead.company, lead.location, lead.email, lead.sourceUrl, query, now);
-      return { id, project_id: activeId, ...lead, query, created_at: now };
+      const verifiedEmail = verifiedEmails.get(index);
+      const email = lead.email ?? verifiedEmail ?? null;
+      const emailVerified = !lead.email && !!verifiedEmail;
+      insert.run(id, activeId, lead.name, lead.title, lead.company, lead.location, email, emailVerified ? 1 : 0, lead.sourceUrl, query, now);
+      return { id, project_id: activeId, ...lead, email, email_verified: emailVerified, query, created_at: now };
     });
 
     return NextResponse.json({ leads: saved });

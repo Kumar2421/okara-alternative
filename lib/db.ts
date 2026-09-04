@@ -176,6 +176,7 @@ function init(): Database.Database {
       company    TEXT NOT NULL DEFAULT '',
       location   TEXT NOT NULL DEFAULT '',
       email      TEXT,
+      email_verified INTEGER NOT NULL DEFAULT 0,
       source_url TEXT,
       query      TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL
@@ -195,6 +196,11 @@ function migrate(db: Database.Database) {
   const cols = db.prepare("PRAGMA table_info(provider_connections)").all() as { name: string }[];
   if (!cols.some((c) => c.name === "base_url")) {
     db.exec(`ALTER TABLE provider_connections ADD COLUMN base_url TEXT`);
+  }
+
+  const leadsCols = db.prepare("PRAGMA table_info(leads)").all() as { name: string }[];
+  if (leadsCols.length > 0 && !leadsCols.some((c) => c.name === "email_verified")) {
+    db.exec(`ALTER TABLE leads ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0`);
   }
 }
 

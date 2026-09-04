@@ -15,6 +15,7 @@ type Lead = {
   company: string;
   location: string;
   email: string | null;
+  email_verified?: number | boolean;
   source_url: string | null;
   query: string;
   created_at: string;
@@ -66,7 +67,10 @@ export default function LeadsPanel({ open, onToggle }: { open: boolean; onToggle
     }
 
     setSearching(true);
-    log(`Searching leads: ${[role, companyOrIndustry, location].filter(Boolean).join(" · ") || "(no filters)"}...`);
+    const filters = [role, companyOrIndustry, location].filter(Boolean).join(" · ") || "(no filters)";
+    log(`Searching leads: ${filters}...`);
+    log("Running real web searches (Tavily) and extracting real people from the results...");
+    log("Then SMTP-verifying a guessed email for any lead search didn't find one for — this can take a minute...");
     try {
       const res = await fetch("/api/agents/leads/search", {
         method: "POST",
@@ -81,8 +85,13 @@ export default function LeadsPanel({ open, onToggle }: { open: boolean; onToggle
       }
       const found: Lead[] = data.leads ?? [];
       setLeads((prev) => [...found, ...prev]);
-      const withEmail = found.filter((l) => l.email).length;
-      logDone(`Found ${found.length} lead${found.length === 1 ? "" : "s"} — ${withEmail} with a real email.`);
+
+      const foundEmail = found.filter((l) => l.email && !l.email_verified).length;
+      const verifiedEmail = found.filter((l) => l.email_verified).length;
+      const noEmail = found.length - foundEmail - verifiedEmail;
+      logDone(
+        `Found ${found.length} lead${found.length === 1 ? "" : "s"} — ${foundEmail} email${foundEmail === 1 ? "" : "s"} from search, ${verifiedEmail} SMTP-verified, ${noEmail} with no email.`
+      );
       show(`Found ${found.length} lead${found.length === 1 ? "" : "s"}.`);
     } catch {
       log("⚠ Failed to search leads.");
@@ -231,7 +240,13 @@ export default function LeadsPanel({ open, onToggle }: { open: boolean; onToggle
                   {lead.location && <div className="truncate text-[11px] text-gray-400">{lead.location}</div>}
                   <div className="mt-1 flex items-center gap-2 text-[11px]">
                     {lead.email ? (
-                      <span className="rounded-full bg-[#e6f7f4] px-2 py-0.5 font-medium text-[#00846f]">{lead.email}</span>
+                      <span
+                        title={lead.email_verified ? "SMTP-verified guess — not found directly, but the mail server accepted it" : "Found directly in real search results"}
+                        className="rounded-full bg-[#e6f7f4] px-2 py-0.5 font-medium text-[#00846f]"
+                      >
+                        {lead.email}
+                        {!!lead.email_verified && " ✓ verified"}
+                      </span>
                     ) : (
                       <span className="rounded-full bg-gray-100 px-2 py-0.5 font-medium text-gray-400">No email found</span>
                     )}
@@ -254,7 +269,7 @@ export default function LeadsPanel({ open, onToggle }: { open: boolean; onToggle
       </div>
 
       <div className="flex shrink-0 items-center justify-between border-t border-gray-200 px-4 py-2.5 text-[11px] text-gray-400">
-        <span>Real search results only — no email is ever guessed.</span>
+        <span>Emails are found in real search results or SMTP-verified — never shown unverified.</span>
         <button onClick={loadLeads} className="flex items-center gap-1 hover:text-gray-700">
           <RefreshCw size={11} /> Refresh
         </button>
