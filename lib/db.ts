@@ -163,6 +163,23 @@ function init(): Database.Database {
       payload    TEXT NOT NULL,
       checked_at TEXT NOT NULL
     );
+
+    -- Real leads (outreach prospects) — row-per-lead, not a JSON blob, since
+    -- per-row state (email sent/not, notes) is coming in a later phase. Every
+    -- row must carry a real source_url it was extracted from; email is
+    -- nullable and stays null rather than ever being invented.
+    CREATE TABLE IF NOT EXISTS leads (
+      id         TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      name       TEXT NOT NULL,
+      title      TEXT NOT NULL DEFAULT '',
+      company    TEXT NOT NULL DEFAULT '',
+      location   TEXT NOT NULL DEFAULT '',
+      email      TEXT,
+      source_url TEXT,
+      query      TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL
+    );
   `);
 
   migrate(db);

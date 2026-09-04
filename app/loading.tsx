@@ -1,3 +1,7 @@
+"use client";
+
+import { DotLottieReact } from "@lottiefiles/dotlottie-react";
+
 function Pulse({ className }: { className: string }) {
   return <div className={`animate-pulse rounded-md bg-gray-200 ${className}`} />;
 }
@@ -17,10 +21,10 @@ function ColumnSkeleton({ dark = false }: { dark?: boolean }) {
 
 export default function Loading() {
   return (
-    <div className="flex h-screen flex-col bg-white">
+    <div className="relative flex h-screen flex-col bg-white">
       <div className="flex h-[52px] shrink-0 items-center justify-between bg-[#110f0e] px-4">
         <div className="flex items-center gap-2">
-          <div className="h-4 w-4 animate-pulse rounded-full bg-white/10" />
+          <DotLottieReact src="/ghost-loader.lottie" autoplay loop className="h-8 w-8" />
           <div className="h-4 w-28 animate-pulse rounded bg-white/10" />
         </div>
         <div className="flex items-center gap-2">

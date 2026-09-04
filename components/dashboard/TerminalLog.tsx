@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { DotLottieReact } from "@lottiefiles/dotlottie-react";
 import {
   ChevronDown,
   ChevronUp,
@@ -297,6 +298,7 @@ export default function TerminalLog() {
     <div className="flex shrink-0 flex-col bg-[#110f0e]">
       <div className="flex h-[52px] shrink-0 items-center justify-between px-4">
         <div className="flex items-center gap-1">
+          <DotLottieReact src="/ghost-loader.lottie" autoplay loop className="mr-1 h-7 w-7 shrink-0" />
           <button
             onClick={() => setLogOpen((v) => !v)}
             className="mr-1 flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-white/10 hover:text-white"

@@ -11,6 +11,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",
     "@google/generative-ai": "^0.24.1",
+    "@lottiefiles/dotlottie-react": "^0.19.16",
     "better-sqlite3": "^13.0.3",
     "cheerio": "^1.2.0",
     "lucide-react": "^1.38.0",
