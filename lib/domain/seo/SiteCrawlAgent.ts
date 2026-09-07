@@ -14,7 +14,42 @@ export type CrawledPage = {
    * each call takes 10-20s). Absent until that action runs. */
   pageSpeed?: PageSpeedResult["pageSpeed"];
   pageSpeedError?: string;
+  /** Real cross-page similarity check (see markDuplicateContent) — set to
+   * the URL of the earlier-crawled page this one is a near-duplicate of. */
+  duplicateOfUrl?: string;
 };
+
+const DUPLICATE_SIMILARITY_THRESHOLD = 0.85;
+
+function wordSet(text: string): Set<string> {
+  return new Set(text.toLowerCase().match(/[a-z0-9]+/g) ?? []);
+}
+
+function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let intersection = 0;
+  for (const word of a) if (b.has(word)) intersection++;
+  const union = a.size + b.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
+
+/** Real cross-page duplicate-content check over pages already crawled — no
+ * extra fetches. Word-set Jaccard similarity, not exact string match, so
+ * boilerplate-with-minor-differences still counts (that's the real-world
+ * duplicate-content problem, not byte-identical pages). Each page only ever
+ * points at the FIRST earlier page it matches, so a family of duplicates
+ * doesn't produce a many-to-many mess. */
+function markDuplicateContent(pages: CrawledPage[]): CrawledPage[] {
+  const sets = pages.map((p) => wordSet(p.content));
+  return pages.map((page, i) => {
+    for (let j = 0; j < i; j++) {
+      if (jaccardSimilarity(sets[i], sets[j]) >= DUPLICATE_SIMILARITY_THRESHOLD) {
+        return { ...page, duplicateOfUrl: pages[j].url };
+      }
+    }
+    return page;
+  });
+}
 
 const MIN_CONTENT_LENGTH = 200;
 const PAGE_TIMEOUT_MS = 8000;
@@ -92,5 +127,5 @@ export async function crawlSitePages(seedLinks: { href: string }[]): Promise<Cra
       pages.push({ url, title: jina.title, content: jina.content.slice(0, 3000), source: "jina-fallback" });
     }
   }
-  return pages;
+  return markDuplicateContent(pages);
 }

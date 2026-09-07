@@ -69,6 +69,12 @@ export type SEOAuditPayload = {
     pageSizeBytes: number;
     domSize: number;
     cacheable: boolean;
+    /** Real hops followed to reach the final page — 0 means no redirect. */
+    redirectCount: number;
+    /** Real robots.txt fetch+parse (User-agent: * group only) — whether the
+     * file exists at all, and whether it disallows the crawled path. Doesn't
+     * block the crawl (this is the owner auditing their own site), just reports it. */
+    robotsTxt: { exists: boolean; disallowsThisPage: boolean };
   };
   /** Real network-phase timings from a raw Node http(s) request — connect/TLS/
    * TTFB/download are genuinely measurable server-side. "Time to Interactive"
@@ -150,6 +156,7 @@ type TimedFetchResult = {
   status: number;
   headers: IncomingHttpHeaders;
   timing: FetchTiming;
+  redirectCount: number;
 };
 
 /** Real network-phase timing (connect/TLS/TTFB/download) requires the raw
@@ -164,15 +171,15 @@ const MAX_REDIRECTS = 5;
  * Only the timing of the FINAL hop is reported (that's the one whose HTML we
  * actually use), which is honest — real total time is expected to be dominated
  * by that connection, not the redirect hops. */
-async function timedFetch(url: URL, timeoutMs: number, redirectsLeft = MAX_REDIRECTS): Promise<TimedFetchResult> {
+async function timedFetch(url: URL, timeoutMs: number, redirectsLeft = MAX_REDIRECTS, hopsSoFar = 0): Promise<TimedFetchResult> {
   const result = await timedFetchOnce(url, timeoutMs);
   const location = result.headers.location;
   if (result.status >= 300 && result.status < 400 && location && redirectsLeft > 0) {
     const nextUrl = new URL(location, url);
     assertPublicHttpUrl(nextUrl.toString());
-    return timedFetch(nextUrl, timeoutMs, redirectsLeft - 1);
+    return timedFetch(nextUrl, timeoutMs, redirectsLeft - 1, hopsSoFar + 1);
   }
-  return result;
+  return { ...result, redirectCount: hopsSoFar };
 }
 
 function timedFetchOnce(url: URL, timeoutMs: number): Promise<TimedFetchResult> {
@@ -211,6 +218,7 @@ function timedFetchOnce(url: URL, timeoutMs: number): Promise<TimedFetchResult> 
               ttfbMs,
               downloadMs: Number(process.hrtime.bigint() - downloadStart) / 1e6,
             },
+            redirectCount: 0, // overwritten by timedFetch() once the real hop count is known
           });
         });
         res.on("error", reject);
@@ -237,6 +245,46 @@ function timedFetchOnce(url: URL, timeoutMs: number): Promise<TimedFetchResult> 
   });
 }
 
+const ROBOTS_TIMEOUT_MS = 5000;
+
+/** Real fetch+parse of /robots.txt — only the "User-agent: *" group (we
+ * don't spoof a specific bot's UA, so per-bot groups don't apply to us).
+ * Simple prefix matching on Disallow paths, which is how robots.txt matching
+ * actually works for the common case. Never blocks the crawl itself — this
+ * is the site owner auditing their own page, not a generic bot — just reports
+ * what a generic crawler would see. */
+async function checkRobotsTxt(origin: string, pagePath: string): Promise<{ exists: boolean; disallowsThisPage: boolean }> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), ROBOTS_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${origin}/robots.txt`, { signal: controller.signal, headers: { "User-Agent": "OkaraAlternative/1.0" } });
+    if (!res.ok) return { exists: false, disallowsThisPage: false };
+    const text = await res.text();
+
+    let inWildcardGroup = false;
+    const disallowPaths: string[] = [];
+    for (const rawLine of text.split("\n")) {
+      const line = rawLine.split("#")[0].trim();
+      if (!line) continue;
+      const [rawKey, ...rest] = line.split(":");
+      const key = rawKey.trim().toLowerCase();
+      const value = rest.join(":").trim();
+      if (key === "user-agent") {
+        inWildcardGroup = value === "*";
+      } else if (key === "disallow" && inWildcardGroup && value) {
+        disallowPaths.push(value);
+      }
+    }
+
+    const disallowsThisPage = disallowPaths.some((p) => pagePath.startsWith(p));
+    return { exists: true, disallowsThisPage };
+  } catch {
+    return { exists: false, disallowsThisPage: false };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export class SEOAgent {
   constructor(private pageSpeedApiKey?: string) {}
 
@@ -259,6 +307,20 @@ export class SEOAgent {
       throw new Error(`Failed to crawl URL: ${detail}`);
     }
     const html = crawl.html;
+
+    // Redirect-chain/loop — real signal from the hop-following already done
+    // in timedFetch(). A single hop (http→https, apex↔www) is normal and not
+    // worth flagging; 2+ hops or hitting the cap while still 3xx (a loop) is.
+    if (crawl.redirectCount >= MAX_REDIRECTS && crawl.status >= 300 && crawl.status < 400) {
+      issues.push({ label: `Redirect loop detected — didn't resolve after ${MAX_REDIRECTS} hops`, level: "Error" });
+    } else if (crawl.redirectCount >= 2) {
+      issues.push({ label: `Redirect chain detected (${crawl.redirectCount} hops before reaching the final page)`, level: "Warning" });
+    }
+
+    const robotsTxt = await checkRobotsTxt(validated.origin, validated.pathname);
+    if (robotsTxt.disallowsThisPage) {
+      issues.push({ label: "This page is disallowed by robots.txt for general crawlers", level: "Warning" });
+    }
 
     const $ = cheerio.load(html);
 
@@ -300,6 +362,20 @@ export class SEOAgent {
 
     if (headings.h1 === 0) issues.push({ label: "No H1 tag found", level: "Error" });
     if (headings.h1 > 1) issues.push({ label: "Multiple H1 tags found", level: "Warning" });
+
+    // Heading order — real DOM-order walk, flag the first level skip found
+    // (e.g. h1 straight to h3 with no h2 between them). Cheerio returns
+    // matches in document order, so this reflects the real page structure.
+    let lastLevel = 0;
+    $("h1, h2, h3, h4, h5, h6").each((_, el) => {
+      const level = Number(el.tagName?.slice(1));
+      if (lastLevel > 0 && level - lastLevel > 1) {
+        issues.push({ label: `Heading order skips a level (h${lastLevel} → h${level})`, level: "Warning" });
+        lastLevel = level;
+        return false; // stop after the first skip — one flag is enough signal
+      }
+      lastLevel = level;
+    });
 
     const openGraph: { key: string; value: string; ok: boolean }[] = [];
     $("meta[property^='og:']").each((_, el) => {
@@ -491,7 +567,7 @@ export class SEOAgent {
       bodyText,
       contentSource,
       design: { themeColor, fonts: Array.from(fonts), logoUrl, faviconUrl },
-      technical: { onPageScore, server, status: crawl.status, encoding, pageSizeBytes, domSize, cacheable },
+      technical: { onPageScore, server, status: crawl.status, encoding, pageSizeBytes, domSize, cacheable, redirectCount: crawl.redirectCount, robotsTxt },
       serverTiming: crawl.timing,
       renderBlocking: { blockingScripts, blockingStylesheets },
       contentRelevance,
