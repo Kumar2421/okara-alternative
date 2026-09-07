@@ -5,6 +5,7 @@ import { CompetitorAnalysisGenerator, fetchCompetitorSnippet } from "@/lib/domai
 import type { SEOAuditPayload } from "@/lib/domain/seo/SEOAgent";
 import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
 import { appendFooterToStream, NO_TAVILY_FOOTER } from "@/lib/domain/shared/appendFooterToStream";
+import { lookupEntityDescription } from "@/lib/domain/shared/knowledgeGraph";
 
 const DOC_TYPE = "competitor_analysis";
 
@@ -86,10 +87,23 @@ export async function POST(req: NextRequest) {
     | undefined;
   const tavilyApiKey = tavilyKeyRow?.value && providerSupportsTools(providerId) ? tavilyKeyRow.value : undefined;
 
+  const googleKeyRow = db.prepare("SELECT value FROM settings WHERE key = 'google_cloud_api_key'").get() as
+    | { value: string }
+    | undefined;
+  const googleApiKey = googleKeyRow?.value || undefined;
+
   try {
     // Real fetch per competitor (title + meta description) — bounded and
     // parallel, not a full SEO audit per competitor.
-    const competitors = await Promise.all(competitorRows.map((c) => fetchCompetitorSnippet(c.url)));
+    const competitors = await Promise.all(
+      competitorRows.map(async (c) => {
+        const snippet = await fetchCompetitorSnippet(c.url);
+        const kgDescription = googleApiKey
+          ? (await lookupEntityDescription(googleApiKey, snippet.title).catch(() => null)) ?? undefined
+          : undefined;
+        return { ...snippet, kgDescription };
+      })
+    );
 
     const generator = new CompetitorAnalysisGenerator(driver, keyRow.api_key, keyRow.base_url ?? undefined);
     const result = await generator.generate({

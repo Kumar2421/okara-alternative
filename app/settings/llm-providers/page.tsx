@@ -2,9 +2,6 @@
 
 import { Info } from "lucide-react";
 import ProviderCard from "@/components/settings/ProviderCard";
-import PageSpeedCard from "@/components/settings/PageSpeedCard";
-import TavilyCard from "@/components/settings/TavilyCard";
-import CompetitorDiscoveryToggle from "@/components/settings/CompetitorDiscoveryToggle";
 import { providers } from "@/lib/mock-providers";
 import { useProviders } from "@/lib/providers-store";
 
@@ -32,18 +29,6 @@ export default function LlmProvidersPage() {
         {providers.map((p) => (
           <ProviderCard key={p.id} provider={p} />
         ))}
-      </div>
-
-      <div className="mt-8">
-        <h2 className="text-[15px] font-semibold text-gray-900">API Services</h2>
-        <p className="mb-4 text-[13px] text-gray-500">
-          Connect external services for data enrichment.
-        </p>
-        <div className="space-y-3">
-          <PageSpeedCard />
-          <TavilyCard />
-          <CompetitorDiscoveryToggle />
-        </div>
       </div>
     </div>
   );

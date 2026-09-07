@@ -6,6 +6,9 @@ export type CompetitorSnippet = {
   url: string;
   title: string;
   description: string;
+  /** Real Google Knowledge Graph entity description, if the company matched
+   * one — an authoritative signal beyond just the crawled title/description. */
+  kgDescription?: string;
 };
 
 export type CompetitorAnalysisRequest = {
@@ -78,7 +81,8 @@ with the judgment of someone who actually does competitive positioning for a
 living, not a generic report generator.
 
 Base every claim about a competitor on the crawled title/description provided
-for it below${hasWebSearch ? ", plus the web_search tool if you need to confirm or fill in something the crawl doesn't cover (current pricing, recent positioning, news)" : ""}.
+for it below (plus its Google Knowledge Graph entry when one is given — that's
+a real, authoritative signal, not a guess)${hasWebSearch ? ", plus the web_search tool if you need to confirm or fill in something the crawl doesn't cover (current pricing, recent positioning, news)" : ""}.
 If a competitor's crawl failed or its description is too thin to say anything
 specific${hasWebSearch ? " even after searching" : ""}, say so plainly instead
 of guessing what the company does. Never invent competitor pricing, feature
@@ -86,7 +90,11 @@ lists, or company size. Never disparage a competitor — describe differences
 factually.`;
 
     const competitorBlock = req.competitors
-      .map((c, i) => `${i + 1}. ${c.url}\n   Title: ${c.title}\n   Description: ${c.description}`)
+      .map(
+        (c, i) =>
+          `${i + 1}. ${c.url}\n   Title: ${c.title}\n   Description: ${c.description}` +
+          (c.kgDescription ? `\n   Google Knowledge Graph: ${c.kgDescription}` : "")
+      )
       .join("\n\n");
 
     const prompt = `Our product — ${req.projectName} (${req.url}):

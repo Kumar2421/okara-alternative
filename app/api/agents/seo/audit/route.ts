@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
   try {
     const db = getDb();
 
-    // Settings table (user-entered, via Settings → LLM Providers → API Services)
+    // Settings table (user-entered, via Settings → API Credentials)
     // takes priority; env var is a fallback for anyone running this outside the UI.
     const stored = db.prepare("SELECT value FROM settings WHERE key = 'pagespeed_api_key'").get() as
       | { value: string }

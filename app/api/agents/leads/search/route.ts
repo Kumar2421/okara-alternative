@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
     | undefined;
   if (!tavilyKeyRow?.value) {
     return NextResponse.json(
-      { error: "Connect a Tavily API key in Settings → LLM Providers to search for real leads." },
+      { error: "Connect a Tavily API key in Settings → API Credentials to search for real leads." },
       { status: 422 }
     );
   }
@@ -82,6 +82,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `${providerId} isn't connected yet.` }, { status: 422 });
   }
 
+  const googleKeyRow = db.prepare("SELECT value FROM settings WHERE key = 'google_cloud_api_key'").get() as
+    | { value: string }
+    | undefined;
+  const googleCxRow = db.prepare("SELECT value FROM settings WHERE key = 'google_cse_id'").get() as
+    | { value: string }
+    | undefined;
+  const google = googleKeyRow?.value && googleCxRow?.value ? { apiKey: googleKeyRow.value, cx: googleCxRow.value } : undefined;
+
   const activeId = getActiveProjectId();
   if (!activeId) {
     return NextResponse.json({ error: "No active project. Link a website first." }, { status: 422 });
@@ -90,7 +98,7 @@ export async function POST(req: NextRequest) {
   try {
     const agent = new LeadsAgent(driver, keyRow.api_key, keyRow.base_url ?? undefined);
     const query = `${role} ${companyOrIndustry} ${location}`.trim();
-    const leads = await agent.search({ role, companyOrIndustry, location }, tavilyKeyRow.value, model);
+    const leads = await agent.search({ role, companyOrIndustry, location }, tavilyKeyRow.value, model, google);
 
     // Tier 1: for leads search left with no email, try a real SMTP-verified
     // guess (see emailVerify.ts) — never overrides an email search already

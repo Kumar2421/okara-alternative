@@ -13,4 +13,4 @@ export function appendFooterToStream(stream: ReadableStream<Uint8Array>, footer:
 }
 
 export const NO_TAVILY_FOOTER =
-  "\n\n---\n*Add a Tavily API key in Settings → LLM Providers for deeper, web-researched analysis.*";
+  "\n\n---\n*Add a Tavily API key in Settings → API Credentials for deeper, web-researched analysis.*";

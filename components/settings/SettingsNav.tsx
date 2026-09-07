@@ -12,11 +12,13 @@ import {
   UserCircle,
   Shield,
   Smartphone,
+  KeyRound,
 } from "lucide-react";
 
 const AI_CMO_ITEMS = [
   { href: "/settings/websites", label: "Websites", icon: Globe },
   { href: "/settings/llm-providers", label: "LLM Providers", icon: Cpu, dot: true },
+  { href: "/settings/api-credentials", label: "API Credentials", icon: KeyRound },
   { href: "/settings/agents", label: "Agents", icon: SlidersHorizontal },
   { href: "/settings/integrations", label: "Integrations", icon: Plug },
   { href: "/settings/team", label: "Team", icon: Users, dot: true },

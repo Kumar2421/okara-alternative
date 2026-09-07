@@ -1,5 +1,6 @@
 import type { LlmDriver } from "@/lib/llm";
 import { tavilySearchRaw, type TavilyResult } from "@/lib/domain/shared/webSearchTool";
+import { googleSearchRaw } from "@/lib/domain/shared/googleSearch";
 
 export type LeadSearchQuery = {
   role: string;
@@ -85,17 +86,31 @@ function parseLeads(raw: string): ExtractedLead[] {
 export class LeadsAgent {
   constructor(private driver: LlmDriver, private apiKey: string, private baseUrl?: string) {}
 
-  async search(query: LeadSearchQuery, tavilyApiKey: string, model: string): Promise<ExtractedLead[]> {
+  async search(
+    query: LeadSearchQuery,
+    tavilyApiKey: string,
+    model: string,
+    google?: { apiKey: string; cx: string }
+  ): Promise<ExtractedLead[]> {
     const queries = buildSearchQueries(query);
     const resultSets = await Promise.all(
       queries.map((q) => tavilySearchRaw(tavilyApiKey, q, RESULTS_PER_QUERY).catch(() => [] as TavilyResult[]))
     );
 
-    // Different queries legitimately return the same URL — dedupe before
-    // spending LLM context on the same snippet twice.
+    // Custom Search as a second real source — only the first 2 (most
+    // targeted) queries, since it has a much tighter free-tier quota than
+    // Tavily. Silently contributes nothing if no key/cx is configured.
+    const googleResultSets = google
+      ? await Promise.all(
+          queries.slice(0, 2).map((q) => googleSearchRaw(google.apiKey, google.cx, q, 10).catch(() => [] as TavilyResult[]))
+        )
+      : [];
+
+    // Different queries/sources legitimately return the same URL — dedupe
+    // before spending LLM context on the same snippet twice.
     const seenUrls = new Set<string>();
     const allResults: TavilyResult[] = [];
-    for (const r of resultSets.flat()) {
+    for (const r of [...resultSets.flat(), ...googleResultSets.flat()]) {
       if (seenUrls.has(r.url)) continue;
       seenUrls.add(r.url);
       allResults.push(r);

@@ -24,7 +24,7 @@ export async function POST() {
     | undefined;
   if (!tavilyKeyRow?.value) {
     return NextResponse.json(
-      { error: "Connect a Tavily API key in Settings → LLM Providers to run a real citation check." },
+      { error: "Connect a Tavily API key in Settings → API Credentials to run a real citation check." },
       { status: 422 }
     );
   }

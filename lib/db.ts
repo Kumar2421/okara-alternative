@@ -179,6 +179,13 @@ function init(): Database.Database {
       email_verified INTEGER NOT NULL DEFAULT 0,
       source_url TEXT,
       query      TEXT NOT NULL DEFAULT '',
+      -- Local Business mode (Places API) fields — null for person leads.
+      phone      TEXT,
+      place_id   TEXT,
+      lead_type  TEXT NOT NULL DEFAULT 'person',
+      -- Gmail send phase — null until a real send is attempted.
+      email_status TEXT,
+      emailed_at   TEXT,
       created_at TEXT NOT NULL
     );
   `);
@@ -199,8 +206,25 @@ function migrate(db: Database.Database) {
   }
 
   const leadsCols = db.prepare("PRAGMA table_info(leads)").all() as { name: string }[];
-  if (leadsCols.length > 0 && !leadsCols.some((c) => c.name === "email_verified")) {
-    db.exec(`ALTER TABLE leads ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0`);
+  if (leadsCols.length > 0) {
+    if (!leadsCols.some((c) => c.name === "email_verified")) {
+      db.exec(`ALTER TABLE leads ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0`);
+    }
+    if (!leadsCols.some((c) => c.name === "phone")) {
+      db.exec(`ALTER TABLE leads ADD COLUMN phone TEXT`);
+    }
+    if (!leadsCols.some((c) => c.name === "place_id")) {
+      db.exec(`ALTER TABLE leads ADD COLUMN place_id TEXT`);
+    }
+    if (!leadsCols.some((c) => c.name === "lead_type")) {
+      db.exec(`ALTER TABLE leads ADD COLUMN lead_type TEXT NOT NULL DEFAULT 'person'`);
+    }
+    if (!leadsCols.some((c) => c.name === "email_status")) {
+      db.exec(`ALTER TABLE leads ADD COLUMN email_status TEXT`);
+    }
+    if (!leadsCols.some((c) => c.name === "emailed_at")) {
+      db.exec(`ALTER TABLE leads ADD COLUMN emailed_at TEXT`);
+    }
   }
 }
 

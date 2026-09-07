@@ -20,7 +20,7 @@ export async function POST() {
     | undefined;
   if (!keyRow?.value) {
     return NextResponse.json(
-      { error: "Connect a PageSpeed API key in Settings → LLM Providers to run real Lighthouse scores." },
+      { error: "Connect a PageSpeed API key in Settings → API Credentials to run real Lighthouse scores." },
       { status: 422 }
     );
   }
