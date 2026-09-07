@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { BarChart2, ChevronLeft, Link2, X, Lock, Search, Cpu, Globe2, Check, Loader2, RefreshCw, AlertTriangle, ExternalLink } from "lucide-react";
+import { useSearchParams } from "next/navigation";
+import { BarChart2, ChevronLeft, Link2, X, Lock, Search, Cpu, Globe2, Check, Loader2, RefreshCw, AlertTriangle, ExternalLink, TrendingUp } from "lucide-react";
 import CollapsedRail, { RailButton } from "./CollapsedRail";
 import { useToast } from "./Toast";
 import ScoreCircle from "./ScoreCircle";
@@ -10,8 +11,22 @@ import type { GeoCitationRow } from "@/lib/domain/geo/GEOAgent";
 import { useProject } from "@/lib/project-store";
 import { useTerminalLog } from "@/lib/terminal-log-store";
 
-const TABS = ["SEO", "Links", "Technical", "GEO"] as const;
+const TABS = ["SEO", "Links", "Technical", "GEO", "Traffic"] as const;
 type Tab = (typeof TABS)[number];
+
+type TrafficByDate = { date: string; clicks: number; impressions: number; ctr: number; position: number };
+type TrafficQuery = { query: string; clicks: number; impressions: number; ctr: number; position: number };
+type TrafficResult = {
+  range: { startDate: string; endDate: string };
+  site: string | null;
+  propertyName: string | null;
+  byDate: TrafficByDate[];
+  topQueries: TrafficQuery[];
+  totals: { clicks: number; impressions: number; ctr: number; position: number };
+  gscError: string | null;
+  ga4: { sessions: number; activeUsers: number; screenPageViews: number } | null;
+  ga4Error: string | null;
+};
 
 type CheckedLink = { href: string; text: string; internal: boolean; reachable: boolean; status?: number };
 type PageSpeedScores = { performance: number; accessibility: number; bestPractices: number; seo: number };
@@ -22,13 +37,28 @@ type CrawledPage = {
   source: "crawl" | "jina-fallback";
   pageSpeed?: { desktop: PageSpeedScores; mobile: PageSpeedScores };
   pageSpeedError?: string;
+  duplicateOfUrl?: string;
 };
 
-function ConnectGoogleServices() {
+function ConnectGoogleServices({ onViewTraffic }: { onViewTraffic: () => void }) {
   const [dismissed, setDismissed] = useState(false);
   const [gaConnected, setGaConnected] = useState(false);
   const [gscConnected, setGscConnected] = useState(false);
-  if (dismissed) return null;
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((data) => {
+        const find = (key: string) => data.settings?.find((s: { key: string; value: string }) => s.key === key)?.value || "";
+        setGaConnected(!!find("ga_property_id"));
+        setGscConnected(!!find("gsc_site_url"));
+      })
+      .catch(() => {})
+      .finally(() => setLoaded(true));
+  }, []);
+
+  if (dismissed || !loaded) return null;
 
   return (
     <div className="mb-5 rounded-xl border border-gray-200 bg-gray-50 p-3">
@@ -54,13 +84,19 @@ function ConnectGoogleServices() {
             )}
           </div>
           {gaConnected ? (
-            <div className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#e6f7f4] py-1.5 text-[13px] font-medium text-[#00846f]">
+            <button
+              onClick={onViewTraffic}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#e6f7f4] py-1.5 text-[13px] font-medium text-[#00846f] hover:bg-[#d7f0eb]"
+            >
               <Check size={13} /> Connected
-            </div>
-          ) : (
-            <button onClick={() => setGaConnected(true)} className="w-full rounded-lg bg-[#111111] py-1.5 text-[13px] font-medium text-white hover:bg-black">
-              Connect
             </button>
+          ) : (
+            <a
+              href="/api/auth/google-analytics/connect?return=dashboard"
+              className="flex w-full items-center justify-center rounded-lg bg-[#111111] py-1.5 text-[13px] font-medium text-white hover:bg-black"
+            >
+              Connect
+            </a>
           )}
         </div>
         {/* GSC Card */}
@@ -78,13 +114,19 @@ function ConnectGoogleServices() {
             )}
           </div>
           {gscConnected ? (
-            <div className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#e6f7f4] py-1.5 text-[13px] font-medium text-[#00846f]">
+            <button
+              onClick={onViewTraffic}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#e6f7f4] py-1.5 text-[13px] font-medium text-[#00846f] hover:bg-[#d7f0eb]"
+            >
               <Check size={13} /> Connected
-            </div>
-          ) : (
-            <button onClick={() => setGscConnected(true)} className="w-full rounded-lg bg-[#111111] py-1.5 text-[13px] font-medium text-white hover:bg-black">
-              Connect
             </button>
+          ) : (
+            <a
+              href="/api/auth/google-analytics/connect?return=dashboard"
+              className="flex w-full items-center justify-center rounded-lg bg-[#111111] py-1.5 text-[13px] font-medium text-white hover:bg-black"
+            >
+              Connect
+            </a>
           )}
         </div>
       </div>
@@ -119,9 +161,24 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
   const [siteCrawlResult, setSiteCrawlResult] = useState<{ pages: CrawledPage[]; checkedAt: string } | null>(null);
   const [siteCrawling, setSiteCrawling] = useState(false);
   const [pageSpeedRunning, setPageSpeedRunning] = useState(false);
+  const [trafficResult, setTrafficResult] = useState<TrafficResult | null>(null);
+  const [trafficLoading, setTrafficLoading] = useState(false);
+  const [trafficError, setTrafficError] = useState<string | null>(null);
   const { show } = useToast();
   const { project } = useProject();
   const { log, logDone } = useTerminalLog();
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    const error = searchParams.get("ga_error");
+    const connected = searchParams.get("ga_connected");
+    if (error) show(`Google Analytics connect failed: ${error}`);
+    if (connected) {
+      setTab("Traffic");
+      show("Connected — loading real Traffic data.");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   useEffect(() => {
     if (open && project?.url) {
@@ -148,6 +205,27 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
         .then((r) => r.json())
         .then((data) => data.result && setSiteCrawlResult(data.result))
         .catch(() => {});
+    }
+    if (tab === "Traffic" && !trafficResult) {
+      setTrafficLoading(true);
+      setTrafficError(null);
+      log("Fetching real Search Console + Analytics data...");
+      fetch("/api/agents/analytics/traffic")
+        .then(async (r) => {
+          const data = await r.json();
+          if (!r.ok) {
+            setTrafficError(data.error ?? "Failed to load Traffic data.");
+            logDone(`⚠ ${data.error ?? "Failed to load Traffic data."}`);
+            return;
+          }
+          setTrafficResult(data);
+          logDone(`Traffic data loaded — ${data.totals.clicks} clicks over the last 28 days.`);
+        })
+        .catch(() => {
+          setTrafficError("Failed to load Traffic data.");
+          logDone("⚠ Failed to load Traffic data.");
+        })
+        .finally(() => setTrafficLoading(false));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, project?.id, tab]);
@@ -291,6 +369,7 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
         <RailButton icon={<Link2 size={15} />} label="Links" active={tab === "Links"} onClick={() => { setTab("Links"); onToggle(); }} />
         <RailButton icon={<Cpu size={15} />} label="Technical" active={tab === "Technical"} onClick={() => { setTab("Technical"); onToggle(); }} />
         <RailButton icon={<Globe2 size={15} />} label="GEO" active={tab === "GEO"} onClick={() => { setTab("GEO"); onToggle(); }} />
+        <RailButton icon={<TrendingUp size={15} />} label="Traffic" active={tab === "Traffic"} onClick={() => { setTab("Traffic"); onToggle(); }} />
       </CollapsedRail>
     );
   }
@@ -338,7 +417,132 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
       </div>
 
       <div className="okara-scroll flex-1 overflow-y-auto p-4">
-        {!auditData ? (
+        {tab === "Traffic" ? (
+          <Section
+            title="Traffic"
+            subtitle={
+              trafficResult
+                ? `Real Search Console data, ${trafficResult.range.startDate} → ${trafficResult.range.endDate}${trafficResult.site ? ` — ${trafficResult.site}` : ""}`
+                : "Real search clicks, rankings and top queries from Search Console"
+            }
+          >
+            {trafficLoading ? (
+              <div className="flex flex-col items-center justify-center py-12 text-center text-gray-500">
+                <Loader2 className="animate-spin text-gray-400 mb-2" size={24} />
+                <p className="text-sm">Fetching real Search Console + Analytics data...</p>
+              </div>
+            ) : trafficError ? (
+              <div className="rounded-xl border border-dashed border-gray-200 p-6 text-center text-[13px] text-gray-500">
+                <TrendingUp className="mx-auto mb-2 text-gray-300" size={28} />
+                {trafficError}
+                <div className="mt-3">
+                  <a href="/settings/api-credentials" className="text-[12px] font-medium text-[#00846f] hover:underline">
+                    Go to Settings → API Credentials
+                  </a>
+                </div>
+              </div>
+            ) : trafficResult ? (
+              <>
+                {trafficResult.gscError && (
+                  <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] text-amber-800">
+                    <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                    <span>Search Console: {trafficResult.gscError}</span>
+                  </div>
+                )}
+                {!trafficResult.site && !trafficResult.gscError && (
+                  <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] text-amber-800">
+                    <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                    <span>No verified Search Console site found on this Google account.</span>
+                  </div>
+                )}
+
+                {trafficResult.byDate.length > 0 && (
+                  <div className="mb-5 rounded-xl border border-gray-200 bg-gray-50 p-4">
+                    <div className="mb-3 flex h-24 items-end gap-1">
+                      {trafficResult.byDate.map((d, i) => {
+                        const max = Math.max(...trafficResult.byDate.map((r) => r.clicks), 1);
+                        return (
+                          <div
+                            key={i}
+                            title={`${d.date}: ${d.clicks} clicks`}
+                            className="flex-1 rounded-t bg-[#00ab92]"
+                            style={{ height: `${Math.max(2, (d.clicks / max) * 100)}%` }}
+                          />
+                        );
+                      })}
+                    </div>
+                    <div className="flex justify-between text-[11px] text-gray-400">
+                      <span>{trafficResult.byDate[0]?.date}</span>
+                      <span>{trafficResult.byDate[trafficResult.byDate.length - 1]?.date}</span>
+                    </div>
+                  </div>
+                )}
+
+                <div className="mb-5 grid grid-cols-3 gap-3">
+                  <div className="rounded-lg border border-gray-200 bg-white p-3">
+                    <div className="mb-1 text-[11px] uppercase text-gray-500">Total Clicks</div>
+                    <div className="text-lg font-semibold text-gray-900">{trafficResult.totals.clicks.toLocaleString()}</div>
+                  </div>
+                  <div className="rounded-lg border border-gray-200 bg-white p-3">
+                    <div className="mb-1 text-[11px] uppercase text-gray-500">Click Rate</div>
+                    <div className="text-lg font-semibold text-gray-900">{(trafficResult.totals.ctr * 100).toFixed(1)}%</div>
+                  </div>
+                  <div className="rounded-lg border border-gray-200 bg-white p-3">
+                    <div className="mb-1 text-[11px] uppercase text-gray-500">Avg. Position</div>
+                    <div className="text-lg font-semibold text-gray-900">{trafficResult.totals.position.toFixed(1)}</div>
+                  </div>
+                </div>
+
+                {trafficResult.ga4 && (
+                  <div className="mb-5 grid grid-cols-3 gap-3">
+                    <div className="rounded-lg border border-gray-200 bg-white p-3">
+                      <div className="mb-1 text-[11px] uppercase text-gray-500">Sessions (GA4)</div>
+                      <div className="text-lg font-semibold text-gray-900">{trafficResult.ga4.sessions.toLocaleString()}</div>
+                    </div>
+                    <div className="rounded-lg border border-gray-200 bg-white p-3">
+                      <div className="mb-1 text-[11px] uppercase text-gray-500">Users</div>
+                      <div className="text-lg font-semibold text-gray-900">{trafficResult.ga4.activeUsers.toLocaleString()}</div>
+                    </div>
+                    <div className="rounded-lg border border-gray-200 bg-white p-3">
+                      <div className="mb-1 text-[11px] uppercase text-gray-500">Pageviews</div>
+                      <div className="text-lg font-semibold text-gray-900">{trafficResult.ga4.screenPageViews.toLocaleString()}</div>
+                    </div>
+                  </div>
+                )}
+                {trafficResult.ga4Error && (
+                  <div className="mb-5 text-[11px] text-amber-600">⚠ Google Analytics: {trafficResult.ga4Error}</div>
+                )}
+
+                <h4 className="mb-2 text-[12px] font-semibold text-gray-700">Top Queries</h4>
+                {trafficResult.topQueries.length === 0 ? (
+                  <div className="rounded-xl border border-gray-200 p-3 text-sm text-gray-500">No query data for this range yet.</div>
+                ) : (
+                  <div className="overflow-hidden rounded-xl border border-gray-200">
+                    <div className="grid grid-cols-[1fr_60px_60px_50px] gap-2 border-b border-gray-100 bg-gray-50 px-3 py-2 text-[11px] font-semibold uppercase text-gray-500">
+                      <span>Query</span>
+                      <span className="text-right">Clicks</span>
+                      <span className="text-right">CTR</span>
+                      <span className="text-right">Pos.</span>
+                    </div>
+                    {trafficResult.topQueries.map((q, i) => (
+                      <div key={i} className="grid grid-cols-[1fr_60px_60px_50px] gap-2 border-t border-gray-100 px-3 py-2 text-[13px] first:border-t-0">
+                        <span className="truncate text-gray-800">{q.query}</span>
+                        <span className="text-right font-medium text-gray-900">{q.clicks}</span>
+                        <span className="text-right text-gray-500">{(q.ctr * 100).toFixed(1)}%</span>
+                        <span className="text-right text-gray-500">{q.position.toFixed(1)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="rounded-xl border border-dashed border-gray-200 p-6 text-center text-[13px] text-gray-500">
+                <TrendingUp className="mx-auto mb-2 text-gray-300" size={28} />
+                Loading...
+              </div>
+            )}
+          </Section>
+        ) : !auditData ? (
           <div className="flex flex-col items-center justify-center h-full text-center text-gray-500">
              {loading ? <Loader2 className="animate-spin text-gray-400 mb-2" size={24} /> : <Search className="text-gray-300 mb-2" size={24} />}
              <p className="text-sm">
@@ -353,7 +557,7 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
           <>
             {tab === "SEO" && (
               <>
-                <ConnectGoogleServices />
+                <ConnectGoogleServices onViewTraffic={() => setTab("Traffic")} />
 
                 {!auditData.pageSpeed && (
                   <div className="mb-5 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] text-amber-800">
@@ -362,7 +566,7 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
                       No PageSpeed API key connected, so Performance/Accessibility/Best Practices/SEO scores and
                       Core Web Vitals aren&apos;t available — below is real data from our own crawl instead, not a
                       substitute score. Connect a key in{" "}
-                      <span className="font-medium">Settings → LLM Providers → API Services</span> for real
+                      <span className="font-medium">Settings → API Credentials</span> for real
                       Lighthouse scores.
                     </span>
                   </div>
@@ -579,8 +783,21 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
                                 JS-rendered
                               </span>
                             )}
+                            {page.duplicateOfUrl && (
+                              <span className="shrink-0 rounded-full bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-700">
+                                Duplicate content
+                              </span>
+                            )}
                           </div>
                           <div className="truncate text-[11px] text-gray-400">{page.url}</div>
+                          {page.duplicateOfUrl && (
+                            <div className="truncate text-[11px] text-red-600">
+                              Near-duplicate of{" "}
+                              <a href={page.duplicateOfUrl} target="_blank" rel="noreferrer" className="hover:underline">
+                                {page.duplicateOfUrl}
+                              </a>
+                            </div>
+                          )}
                           <p className="mt-1 line-clamp-2 text-[12px] text-gray-500">{page.content.slice(0, 200)}</p>
                           {page.pageSpeed && (
                             <div className="mt-2 flex flex-wrap gap-3 text-[11px]">
@@ -622,6 +839,15 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
                         ["Page Size", `${(auditData.technical.pageSizeBytes / 1024).toFixed(1)} KB`],
                         ["DOM Size", `${auditData.technical.domSize} elements`],
                         ["Cacheable", auditData.technical.cacheable ? "Yes" : "No"],
+                        ["Redirects", auditData.technical.redirectCount === 0 ? "None" : `${auditData.technical.redirectCount} hop${auditData.technical.redirectCount === 1 ? "" : "s"}`],
+                        [
+                          "robots.txt",
+                          !auditData.technical.robotsTxt.exists
+                            ? "Not found"
+                            : auditData.technical.robotsTxt.disallowsThisPage
+                              ? "Disallows this page"
+                              : "Allows this page",
+                        ],
                       ].map(([label, value]) => (
                         <div key={label} className="flex items-center justify-between border-t border-gray-100 px-3 py-2.5 text-[13px] first:border-t-0">
                           <span className="font-medium text-gray-500">{label}</span>
@@ -748,7 +974,7 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
                     <Globe2 className="mx-auto mb-2 text-gray-300" size={28} />
                     Searches the live web for real queries around your product and checks whether your own
                     domain actually shows up — a real citation gap, not a guess. Requires a Tavily API key
-                    (Settings → LLM Providers).
+                    (Settings → API Credentials).
                   </div>
                 ) : (
                   <div className="overflow-hidden rounded-xl border border-gray-200">

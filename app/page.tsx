@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import TerminalLog from "@/components/dashboard/TerminalLog";
 import ContextPanel from "@/components/dashboard/ContextPanel";
 import AnalyticsPanel from "@/components/dashboard/AnalyticsPanel";
@@ -38,7 +38,9 @@ export default function Home() {
       <TerminalLog />
       <div className="grid min-h-0 flex-1" style={{ gridTemplateColumns: cols }}>
         <ContextPanel open={contextOpen} onToggle={() => setContextOpen((v) => !v)} />
-        <AnalyticsPanel open={analyticsOpen} onToggle={() => setAnalyticsOpen((v) => !v)} />
+        <Suspense fallback={null}>
+          <AnalyticsPanel open={analyticsOpen} onToggle={() => setAnalyticsOpen((v) => !v)} />
+        </Suspense>
         <LeadsPanel open={agentsOpen} onToggle={() => setAgentsOpen((v) => !v)} />
         <ChatPanel open={chatOpen} onToggle={() => setChatOpen((v) => !v)} />
       </div>
