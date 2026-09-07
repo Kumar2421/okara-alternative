@@ -27,6 +27,13 @@ type Ctx = {
   /** Switches which saved project is active — Context, Analytics, and every
    * agent immediately start reading this one's data instead. */
   switchProject: (id: string) => Promise<void>;
+  /** Real edit — name/category/description/url. A URL change is
+   * re-validated server-side the same way project creation is. */
+  updateProject: (id: string, input: { name?: string; category?: string; description?: string; url?: string }) => Promise<void>;
+  /** Real delete — wipes every table scoped to this project (documents,
+   * competitors, cached checks, leads) server-side. If this was the active
+   * project, the most-recently-updated remaining one becomes active. */
+  deleteProject: (id: string) => Promise<void>;
   /** Bumped after auto-discovery adds competitors post-creation — ContextPanel
    * watches this to refresh its competitor list without polling. */
   competitorsVersion: number;
@@ -202,8 +209,40 @@ export default function ProjectProvider({ children }: { children: React.ReactNod
     [projects, log, logDone, refresh]
   );
 
+  const updateProject = useCallback(
+    async (id: string, input: { name?: string; category?: string; description?: string; url?: string }) => {
+      const res = await fetch(`/api/project/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error ?? "Failed to update project");
+      }
+      await refresh();
+    },
+    [refresh]
+  );
+
+  const deleteProject = useCallback(
+    async (id: string) => {
+      const target = projects.find((p) => p.id === id);
+      const res = await fetch(`/api/project/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error ?? "Failed to delete project");
+      }
+      if (target) log(`Deleted ${target.name} and all its data.`);
+      await refresh();
+    },
+    [projects, log, refresh]
+  );
+
   return (
-    <ProjectCtx.Provider value={{ project, projects, loading, createProject, switchProject, competitorsVersion }}>
+    <ProjectCtx.Provider
+      value={{ project, projects, loading, createProject, switchProject, updateProject, deleteProject, competitorsVersion }}
+    >
       {children}
     </ProjectCtx.Provider>
   );

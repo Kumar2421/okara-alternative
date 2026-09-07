@@ -127,7 +127,7 @@ function UserMenu() {
   );
 }
 
-function NewProjectModal({ onClose }: { onClose: () => void }) {
+export function NewProjectModal({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [category, setCategory] = useState("");

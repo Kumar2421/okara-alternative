@@ -5,6 +5,7 @@ import { Check, ExternalLink } from "lucide-react";
 import type { Provider } from "@/lib/mock-providers";
 import { useProviders } from "@/lib/providers-store";
 import { useToast } from "@/components/dashboard/Toast";
+import BrandIcon from "@/components/settings/BrandIcon";
 
 export default function ProviderCard({ provider }: { provider: Provider }) {
   const { state, connect, disconnect, primaryModel, setPrimaryModel } = useProviders();
@@ -56,12 +57,8 @@ export default function ProviderCard({ provider }: { provider: Provider }) {
     <div className="rounded-xl border border-gray-200 bg-white p-4">
       <div className="mb-3 flex items-start justify-between">
         <div className="flex items-center gap-3">
-          <span
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[15px] font-bold text-white"
-            style={{ backgroundColor: provider.color }}
-          >
-            {provider.icon}
-          </span>
+          <BrandIcon id={provider.id} color={provider.color} fallback={provider.icon} size={19} />
+
           <div>
             <div className="flex items-center gap-2 text-[13px] font-semibold text-gray-900">
               {provider.name}

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Check, ExternalLink } from "lucide-react";
 import { useToast } from "@/components/dashboard/Toast";
+import BrandIcon from "@/components/settings/BrandIcon";
 
 export default function PageSpeedCard() {
   const { show } = useToast();
@@ -75,9 +76,7 @@ export default function PageSpeedCard() {
     <div className="rounded-xl border border-gray-200 bg-white p-4">
       <div className="mb-3 flex items-start justify-between">
         <div className="flex items-center gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#4285f4] text-[13px] font-bold text-white">
-            G
-          </span>
+          <BrandIcon id="lighthouse" color="#f44b21" fallback="G" />
           <div>
             <div className="flex items-center gap-2 text-[13px] font-semibold text-gray-900">
               Google PageSpeed Insights API
