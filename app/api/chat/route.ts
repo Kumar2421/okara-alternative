@@ -2,6 +2,39 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getDriver } from "@/lib/llm";
 import type { ChatMessage } from "@/lib/llm";
+import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
+import { getActiveProjectContext } from "@/lib/domain/shared/getActiveProject";
+import { buildProjectContextBlock } from "@/lib/domain/shared/projectContextPrompt";
+import { buildTrafficContextBlock } from "@/lib/domain/shared/trafficContextPrompt";
+
+/** ChatPanel renders replies as plain text — no markdown parser (see
+ * components/dashboard/ChatPanel.tsx, `<p>{msg.text}</p>`) — so `**bold**`,
+ * numbered-list markdown, headers, and emoji-heavy formatting all show up
+ * as literal clutter instead of rendering as anything. This is the fix:
+ * tell the model to write what the UI actually displays, not a markdown
+ * renderer it doesn't have. Always present, even with no active project. */
+const STYLE_INSTRUCTION = `Write in plain conversational text only — this is displayed as-is, with no markdown rendering. Never use markdown syntax: no **bold**, no # headers, no markdown bullet/numbered lists, no code fences. Use plain sentences and, if you need a list, write it as short lines separated by a real line break, not markdown dashes or asterisks. Don't use emoji unless the user uses them first. Be concise — skip preamble and filler.`;
+
+/** Chat had zero project awareness before this — no system prompt at all,
+ * so it didn't know the product's name, let alone its real Product
+ * Information/Marketing Strategy docs or how it's actually performing in
+ * search. Reuses the same context block the content agents (Articles,
+ * LinkedIn, Reddit, X) already ground their prompts in, plus real cached
+ * Traffic data on top — nothing fabricated when either is missing. */
+function buildChatSystemPrompt(): string {
+  const activeId = getActiveProjectId();
+  if (!activeId) return STYLE_INSTRUCTION;
+
+  const project = getActiveProjectContext();
+  const block = buildProjectContextBlock(project);
+
+  const traffic = buildTrafficContextBlock(activeId);
+  const trafficBlock = traffic
+    ? `\nReal traffic/ranking data:\n${traffic}`
+    : "\nNo real Traffic data cached yet — the user hasn't opened Analytics → Traffic for this project. Don't invent traffic or ranking numbers; say so if asked.";
+
+  return `${STYLE_INSTRUCTION}\n\n${block}\n${trafficBlock}`;
+}
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
@@ -45,9 +78,11 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    const system = buildChatSystemPrompt();
     const result = await driver({
       apiKey: row.api_key,
       model,
+      system,
       messages: [...(history ?? []), { role: "user", content: message }],
       baseUrl: row.base_url ?? undefined,
     });

@@ -9,6 +9,14 @@ export function buildProjectContextBlock(project: ProjectContext): string {
   let block = `Product: ${project.name} (${project.category})
 What it does: ${project.description}`;
 
+  if (project.productInfo) {
+    block += `\n\nUse this Product Information document as ground truth for real features, pricing, and
+capabilities — don't invent anything it doesn't state:
+"""
+${project.productInfo}
+"""`;
+  }
+
   if (project.marketingStrategy) {
     block += `\n\nUse this Marketing Strategy document as ground truth for positioning, ideal
 customer, and messaging — align with it, don't contradict it:

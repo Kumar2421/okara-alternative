@@ -25,8 +25,10 @@ import { useTerminalLog } from "@/lib/terminal-log-store";
 import ProductInfoPanel from "./documents/ProductInfoPanel";
 import MarketingStrategyPanel from "./documents/MarketingStrategyPanel";
 import CompetitorAnalysisPanel from "./documents/CompetitorAnalysisPanel";
+import CompetitorComparisonPanel from "./documents/CompetitorComparisonPanel";
 import ContentStrategyPanel from "./documents/ContentStrategyPanel";
 import DesignGuidePanel from "./documents/DesignGuidePanel";
+import { WebsiteIcon } from "@/components/shared/WebsiteIcon";
 
 type Competitor = { id: string; url: string; created_at: string };
 
@@ -42,6 +44,7 @@ export default function ContextPanel({
   const [productInfoOpen, setProductInfoOpen] = useState(false);
   const [marketingStrategyOpen, setMarketingStrategyOpen] = useState(false);
   const [competitorAnalysisOpen, setCompetitorAnalysisOpen] = useState(false);
+  const [comparisonOpen, setComparisonOpen] = useState(false);
   const [contentStrategyOpen, setContentStrategyOpen] = useState(false);
   const [designGuideOpen, setDesignGuideOpen] = useState(false);
   const [productInfoExists, setProductInfoExists] = useState(false);
@@ -394,6 +397,14 @@ export default function ContextPanel({
                 </button>
               </div>
             )}
+            {competitors.length > 0 && (
+              <button
+                onClick={() => setComparisonOpen(true)}
+                className="mb-3 flex w-full items-center justify-center rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[12px] font-medium text-blue-700 hover:bg-blue-100"
+              >
+                View Comparison Table
+              </button>
+            )}
             {competitorsLoading ? (
               <p className="text-[12px] text-gray-400">Loading...</p>
             ) : competitors.length === 0 ? (
@@ -402,14 +413,17 @@ export default function ContextPanel({
               <div className="space-y-1.5 text-[13px] text-gray-700">
                 {competitors.map((c) => (
                   <div key={c.id} className="group flex items-center justify-between gap-2">
-                    <a
-                      href={c.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="truncate hover:text-gray-900 hover:underline"
-                    >
-                      {c.url.replace(/^https?:\/\//, "")}
-                    </a>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <WebsiteIcon url={c.url} size={6} />
+                      <a
+                        href={c.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="truncate hover:text-gray-900 hover:underline"
+                      >
+                        {c.url.replace(/^https?:\/\//, "")}
+                      </a>
+                    </div>
                     <button
                       onClick={() => handleRemoveCompetitor(c.id)}
                       className="shrink-0 text-gray-300 opacity-0 hover:text-gray-600 group-hover:opacity-100"
@@ -452,6 +466,7 @@ export default function ContextPanel({
           }}
         />
       )}
+      {comparisonOpen && <CompetitorComparisonPanel onClose={() => setComparisonOpen(false)} />}
       {contentStrategyOpen && (
         <ContentStrategyPanel
           onClose={() => {

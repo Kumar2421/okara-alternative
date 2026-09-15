@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
+import { redactSettingsForClient } from "@/lib/domain/shared/settingsRedaction";
 
 export async function GET(req: NextRequest) {
   try {
     const db = getDb();
-    const settings = db.prepare("SELECT * FROM settings").all();
-    return NextResponse.json({ settings });
+    const settings = db.prepare("SELECT * FROM settings").all() as { key: string; value: string }[];
+    return NextResponse.json({ settings: redactSettingsForClient(settings) });
   } catch (err) {
     const raw = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: raw }, { status: 500 });

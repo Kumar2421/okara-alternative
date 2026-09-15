@@ -5,6 +5,7 @@ import { Pencil, Trash2, Loader2, Plus, ExternalLink, AlertTriangle } from "luci
 import { useToast } from "@/components/dashboard/Toast";
 import { useProject, type ActiveProject } from "@/lib/project-store";
 import { NewProjectModal } from "@/components/dashboard/TerminalLog";
+import { WebsiteIcon } from "@/components/shared/WebsiteIcon";
 
 function EditForm({ project, onClose }: { project: ActiveProject; onClose: () => void }) {
   const { updateProject } = useProject();
@@ -101,7 +102,7 @@ function ProjectRow({ p, isActive }: { p: ActiveProject; isActive: boolean }) {
     <div className="overflow-hidden rounded-xl border border-gray-200 bg-gray-50">
       <div className="flex items-center justify-between px-4 py-3">
         <div className="flex min-w-0 items-center gap-3">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-base">🌐</span>
+          <WebsiteIcon url={p.url} size={8} />
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <span className="truncate text-[13px] font-semibold text-gray-900">{p.name}</span>

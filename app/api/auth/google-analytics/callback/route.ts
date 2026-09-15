@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
+import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
 import {
   exchangeCodeForTokens,
   getConnectedEmail,
-  listFirstSearchConsoleSite,
+  listSearchConsoleSites,
+  pickBestSearchConsoleSite,
   listFirstGA4Property,
 } from "@/lib/domain/shared/googleAnalyticsOAuth";
 
@@ -32,13 +34,24 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const [email, gscSite, ga4Property] = await Promise.all([
+    const db = getDb();
+    const activeId = getActiveProjectId();
+    const activeProject = activeId
+      ? (db.prepare("SELECT url FROM projects WHERE id = ?").get(activeId) as { url: string } | undefined)
+      : undefined;
+
+    const [email, gscSites, ga4Property] = await Promise.all([
       getConnectedEmail(tokens.accessToken),
-      listFirstSearchConsoleSite(tokens.accessToken),
+      listSearchConsoleSites(tokens.accessToken),
       listFirstGA4Property(tokens.accessToken),
     ]);
+    // Domain-matched to the active project's own URL, not just "whichever
+    // site this account happened to list first" — an account can have many
+    // verified sites, and picking blindly means Traffic data for the wrong
+    // domain (or a 403 if that other site's permission level doesn't
+    // actually allow querying it).
+    const gscSite = pickBestSearchConsoleSite(gscSites, activeProject?.url ?? "");
 
-    const db = getDb();
     upsertSetting(db, "ga_access_token", tokens.accessToken);
     upsertSetting(db, "ga_refresh_token", tokens.refreshToken);
     upsertSetting(db, "ga_token_expiry", String(tokens.expiresAt));

@@ -3,7 +3,7 @@ import { refreshAccessToken } from "@/lib/domain/shared/googleAnalyticsOAuth";
 
 /** Same refresh-on-demand pattern as leads/gmailSend.ts's getValidAccessToken —
  * persists the refreshed token back to settings so the next call skips it. */
-async function getValidAccessToken(): Promise<string> {
+export async function getValidAccessToken(): Promise<string> {
   const db = getDb();
   const rows = db
     .prepare("SELECT key, value FROM settings WHERE key IN ('ga_access_token', 'ga_refresh_token', 'ga_token_expiry')")
@@ -75,4 +75,55 @@ export async function fetchGA4Summary(propertyId: string, startDate: string, end
   const data = await res.json();
   const values: string[] = data.rows?.[0]?.metricValues?.map((m: { value: string }) => m.value) ?? ["0", "0", "0"];
   return { sessions: Number(values[0] ?? 0), activeUsers: Number(values[1] ?? 0), screenPageViews: Number(values[2] ?? 0) };
+}
+
+/** Real daily total-sessions time series — GA4 `date` dimension is
+ * "YYYYMMDD" (no separators), reformatted to match GSC's "YYYY-MM-DD" so
+ * the Traffic chart can key both series off the same date string. */
+export async function fetchGA4DailySessions(propertyId: string, startDate: string, endDate: string): Promise<{ date: string; sessions: number }[]> {
+  const accessToken = await getValidAccessToken();
+  const res = await fetch(`https://analyticsdata.googleapis.com/v1beta/${propertyId}:runReport`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      dateRanges: [{ startDate, endDate }],
+      dimensions: [{ name: "date" }],
+      metrics: [{ name: "sessions" }],
+    }),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`GA4 report failed: HTTP ${res.status}${detail ? ` — ${detail.slice(0, 200)}` : ""}`);
+  }
+  const data = await res.json();
+  const rows: { dimensionValues: { value: string }[]; metricValues: { value: string }[] }[] = data.rows ?? [];
+  return rows.map((r) => {
+    const raw = r.dimensionValues[0].value; // YYYYMMDD
+    const date = `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
+    return { date, sessions: Number(r.metricValues[0]?.value ?? 0) };
+  });
+}
+
+/** Real sessions attributed to organic search only (GA4's own default
+ * channel grouping) — this is what genuinely maps to "a search result
+ * turning into a visit", not overall site traffic. */
+export async function fetchGA4OrganicSessions(propertyId: string, startDate: string, endDate: string): Promise<number> {
+  const accessToken = await getValidAccessToken();
+  const res = await fetch(`https://analyticsdata.googleapis.com/v1beta/${propertyId}:runReport`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      dateRanges: [{ startDate, endDate }],
+      metrics: [{ name: "sessions" }],
+      dimensionFilter: {
+        filter: { fieldName: "sessionDefaultChannelGroup", stringFilter: { value: "Organic Search", matchType: "EXACT" } },
+      },
+    }),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`GA4 report failed: HTTP ${res.status}${detail ? ` — ${detail.slice(0, 200)}` : ""}`);
+  }
+  const data = await res.json();
+  return Number(data.rows?.[0]?.metricValues?.[0]?.value ?? 0);
 }

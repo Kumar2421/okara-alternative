@@ -19,11 +19,14 @@ export function getActiveProjectContext(): ProjectContext {
   if (!row) return NO_PROJECT_CONTEXT;
 
   const docs = db
-    .prepare("SELECT doc_type, content FROM project_documents WHERE project_id = ? AND doc_type IN ('marketing_strategy', 'competitor_analysis')")
+    .prepare(
+      "SELECT doc_type, content FROM project_documents WHERE project_id = ? AND doc_type IN ('product_info', 'marketing_strategy', 'competitor_analysis')"
+    )
     .all(activeId) as { doc_type: string; content: string }[];
 
+  const productInfo = docs.find((d) => d.doc_type === "product_info")?.content || undefined;
   const marketingStrategy = docs.find((d) => d.doc_type === "marketing_strategy")?.content || undefined;
   const competitorAnalysis = docs.find((d) => d.doc_type === "competitor_analysis")?.content || undefined;
 
-  return { name: row.name, category: row.category, description: row.description, marketingStrategy, competitorAnalysis };
+  return { name: row.name, category: row.category, description: row.description, productInfo, marketingStrategy, competitorAnalysis };
 }

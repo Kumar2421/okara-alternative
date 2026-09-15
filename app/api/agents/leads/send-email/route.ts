@@ -37,15 +37,20 @@ export async function POST(req: NextRequest) {
     .prepare(`SELECT id, name, company, title, email FROM leads WHERE id IN (${placeholders})`)
     .all(...leadIds) as { id: string; name: string; company: string; title: string; email: string | null }[];
 
-  const results: { id: string; status: "sent" | "failed"; error?: string }[] = [];
+  const results: { id: string; status: "sent" | "failed"; error?: string; threadId?: string; messageId?: string }[] = [];
   for (let i = 0; i < leads.length; i += SEND_CONCURRENCY) {
     const batch = leads.slice(i, i + SEND_CONCURRENCY);
     const batchResults = await Promise.all(
       batch.map(async (lead) => {
         if (!lead.email) return { id: lead.id, status: "failed" as const, error: "No email on this lead." };
         try {
-          await sendGmail(lead.email, fromEmailRow.value, mergeTags(subjectTemplate, lead), mergeTags(bodyTemplate, lead));
-          return { id: lead.id, status: "sent" as const };
+          const { threadId, messageId } = await sendGmail(
+            lead.email,
+            fromEmailRow.value,
+            mergeTags(subjectTemplate, lead),
+            mergeTags(bodyTemplate, lead)
+          );
+          return { id: lead.id, status: "sent" as const, threadId, messageId };
         } catch (err) {
           return { id: lead.id, status: "failed" as const, error: err instanceof Error ? err.message : String(err) };
         }
@@ -55,9 +60,11 @@ export async function POST(req: NextRequest) {
   }
 
   const now = new Date().toISOString();
-  const update = db.prepare("UPDATE leads SET email_status = ?, emailed_at = ? WHERE id = ?");
+  const update = db.prepare(
+    "UPDATE leads SET email_status = ?, emailed_at = ?, gmail_thread_id = ?, gmail_message_id = ? WHERE id = ?"
+  );
   for (const r of results) {
-    update.run(r.status, r.status === "sent" ? now : null, r.id);
+    update.run(r.status, r.status === "sent" ? now : null, r.threadId ?? null, r.messageId ?? null, r.id);
   }
 
   return NextResponse.json({ results });

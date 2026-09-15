@@ -45,6 +45,7 @@ type Ctx = {
  * failure here shouldn't block the rest of project setup, it just logs and
  * moves on — competitors can always be found/added manually afterward. */
 async function maybeDiscoverCompetitors(
+  projectId: string,
   log: (text: string) => void,
   primaryModel: string | null,
   onAdded: () => void
@@ -63,10 +64,16 @@ async function maybeDiscoverCompetitors(
     if (!providerId) return;
 
     log("Looking for real competitors...");
+    // Explicit projectId — this runs as a background continuation after
+    // creation's crawl, which can take a while. Without pinning the target
+    // here, a project switch/creation that happens to land in the meantime
+    // would make the route's getActiveProjectId() resolve to whichever
+    // project is active BY THE TIME this call reaches the server, silently
+    // attaching these competitors to the wrong project.
     const res = await fetch("/api/project/competitors/discover", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: primaryModel, providerId }),
+      body: JSON.stringify({ model: primaryModel, providerId, projectId }),
     });
 
     if (!res.ok) {
@@ -178,7 +185,27 @@ export default function ProjectProvider({ children }: { children: React.ReactNod
       }
 
       if (crawlSucceeded) {
-        await maybeDiscoverCompetitors(log, primaryModel, () => setCompetitorsVersion((v) => v + 1));
+        const providerId = primaryModel ? findProviderForModel(primaryModel) : null;
+        if (primaryModel && providerId) {
+          try {
+            log("Writing a real description from what's actually on the page...");
+            const descRes = await fetch(`/api/project/${data.project.id}/generate-description`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ model: primaryModel, providerId }),
+            });
+            if (descRes.ok) {
+              const { description } = await descRes.json();
+              setProject((prev) => (prev && prev.id === data.project.id ? { ...prev, description } : prev));
+              setProjects((prev) => prev.map((p) => (p.id === data.project.id ? { ...p, description } : p)));
+              logDone(`Description: "${description}"`);
+            }
+          } catch {
+            // non-fatal — description stays blank, editable manually in Settings → Websites
+          }
+        }
+
+        await maybeDiscoverCompetitors(data.project.id, log, primaryModel, () => setCompetitorsVersion((v) => v + 1));
       }
 
       logDone("Done!");

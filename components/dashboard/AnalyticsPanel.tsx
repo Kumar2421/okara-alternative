@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
-import { BarChart2, ChevronLeft, Link2, X, Lock, Search, Cpu, Globe2, Check, Loader2, RefreshCw, AlertTriangle, ExternalLink, TrendingUp } from "lucide-react";
+import { BarChart2, ChevronLeft, Link2, X, Lock, Search, Cpu, Globe2, Check, Loader2, RefreshCw, AlertTriangle, ExternalLink, TrendingUp, Code2 } from "lucide-react";
 import CollapsedRail, { RailButton } from "./CollapsedRail";
 import { useToast } from "./Toast";
 import ScoreCircle from "./ScoreCircle";
-import type { SEOAuditPayload } from "@/lib/domain/seo/SEOAgent";
+import CodeFixModal from "./CodeFixModal";
+import type { SEOAuditPayload, Finding } from "@/lib/domain/seo/SEOAgent";
 import type { GeoCitationRow } from "@/lib/domain/geo/GEOAgent";
 import { useProject } from "@/lib/project-store";
 import { useTerminalLog } from "@/lib/terminal-log-store";
@@ -14,17 +15,29 @@ import { useTerminalLog } from "@/lib/terminal-log-store";
 const TABS = ["SEO", "Links", "Technical", "GEO", "Traffic"] as const;
 type Tab = (typeof TABS)[number];
 
-type TrafficByDate = { date: string; clicks: number; impressions: number; ctr: number; position: number };
-type TrafficQuery = { query: string; clicks: number; impressions: number; ctr: number; position: number };
+type TrafficChartPoint = { date: string; clicks: number; sessions: number };
+type TrafficQuery = { query: string; clicks: number; ctr: number };
+type TrafficPage = { page: string; clicks: number };
+type TrafficCountry = { code: string; name: string; clicks: number; share: number };
 type TrafficResult = {
-  range: { startDate: string; endDate: string };
+  range: { startDate: string; endDate: string; days: number };
   site: string | null;
   propertyName: string | null;
-  byDate: TrafficByDate[];
+  funnel: {
+    impressions: number;
+    impressionsChange: number | null;
+    clicks: number;
+    clicksChange: number | null;
+    organicSessions: number | null;
+    organicSessionsChange: number | null;
+    clickRate: number;
+  };
+  chart: TrafficChartPoint[];
+  totals: { clicks: number; impressions: number; ctr: number; position: number; ctrChange: number | null; positionChange: number | null; clicksChange: number | null };
   topQueries: TrafficQuery[];
-  totals: { clicks: number; impressions: number; ctr: number; position: number };
+  topPages: TrafficPage[];
+  topCountries: TrafficCountry[];
   gscError: string | null;
-  ga4: { sessions: number; activeUsers: number; screenPageViews: number } | null;
   ga4Error: string | null;
 };
 
@@ -149,6 +162,314 @@ function StatusDot({ status }: { status: "good" | "warn" | "bad" | "Pass" | "War
   return <span className={`h-1.5 w-1.5 rounded-full ${color}`} />;
 }
 
+/** Green = improved, red = worse — inverted for `lowerIsBetter` metrics
+ * (position: a smaller number is a better rank, so a negative change there
+ * is good news, shown green). null (no real previous-period baseline)
+ * renders nothing rather than a fabricated 0%. */
+function DeltaBadge({ change, lowerIsBetter = false }: { change: number | null; lowerIsBetter?: boolean }) {
+  if (change === null) return null;
+  const improved = lowerIsBetter ? change < 0 : change > 0;
+  return (
+    <span className={`inline-flex items-center gap-0.5 text-[11px] font-medium ${improved ? "text-[#00ab92]" : "text-red-500"}`}>
+      {change > 0 ? "↑" : change < 0 ? "↓" : "•"} {Math.abs(change).toFixed(1)}%
+    </span>
+  );
+}
+
+function TrafficTab({
+  result,
+  loading,
+  error,
+  range,
+  onChangeRange,
+  gscSites,
+  gscCurrentSite,
+  gscSiteSaving,
+  onChangeGscSite,
+  ga4Properties,
+  ga4CurrentProperty,
+  ga4PropertySaving,
+  onChangeGa4Property,
+}: {
+  result: TrafficResult | null;
+  loading: boolean;
+  error: string | null;
+  range: 7 | 30;
+  onChangeRange: (r: 7 | 30) => void;
+  gscSites: { siteUrl: string; permissionLevel: string }[] | null;
+  gscCurrentSite: string | null;
+  gscSiteSaving: boolean;
+  onChangeGscSite: (siteUrl: string) => void;
+  ga4Properties: { id: string; name: string; accountName: string }[] | null;
+  ga4CurrentProperty: string | null;
+  ga4PropertySaving: boolean;
+  onChangeGa4Property: (propertyId: string) => void;
+}) {
+  return (
+    <div>
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <h3 className="text-[13px] font-semibold text-gray-900">Traffic</h3>
+          <p className="text-[12px] text-gray-500">Real Search Console + Analytics data — no mock numbers.</p>
+        </div>
+        <div className="flex rounded-lg bg-gray-100 p-0.5 text-[12px]">
+          <button
+            onClick={() => onChangeRange(7)}
+            className={`rounded-md px-2.5 py-1 font-medium ${range === 7 ? "bg-[#111111] text-white" : "text-gray-500 hover:text-gray-800"}`}
+          >
+            Last 7 days
+          </button>
+          <button
+            onClick={() => onChangeRange(30)}
+            className={`rounded-md px-2.5 py-1 font-medium ${range === 30 ? "bg-[#111111] text-white" : "text-gray-500 hover:text-gray-800"}`}
+          >
+            Last 30 days
+          </button>
+        </div>
+      </div>
+
+      {gscSites && gscSites.length > 0 && (
+        <div className="mb-2 flex items-center gap-2">
+          <span className="w-24 shrink-0 text-[11px] font-medium text-gray-500">Search Console:</span>
+          <select
+            value={gscCurrentSite ?? ""}
+            onChange={(e) => onChangeGscSite(e.target.value)}
+            disabled={gscSiteSaving}
+            className="flex-1 rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-[12px] text-gray-800 disabled:opacity-50"
+          >
+            {!gscCurrentSite && <option value="">Select a site...</option>}
+            {gscSites.map((s) => (
+              <option key={s.siteUrl} value={s.siteUrl}>
+                {s.siteUrl} {s.permissionLevel !== "siteOwner" && s.permissionLevel !== "siteFullUser" ? `(${s.permissionLevel})` : ""}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+      {gscSites && gscSites.length === 0 && (
+        <p className="mb-2 text-[11px] text-amber-600">
+          ⚠ No Search Console sites on this account —{" "}
+          <a href="https://search.google.com/search-console" target="_blank" rel="noreferrer" className="underline">
+            add and verify one
+          </a>
+          .
+        </p>
+      )}
+      {ga4Properties && ga4Properties.length > 0 && (
+        <div className="mb-4 flex items-center gap-2">
+          <span className="w-24 shrink-0 text-[11px] font-medium text-gray-500">Analytics:</span>
+          <select
+            value={ga4CurrentProperty ?? ""}
+            onChange={(e) => onChangeGa4Property(e.target.value)}
+            disabled={ga4PropertySaving}
+            className="flex-1 rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-[12px] text-gray-800 disabled:opacity-50"
+          >
+            {!ga4CurrentProperty && <option value="">Select a property...</option>}
+            {ga4Properties.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name} — {p.accountName}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+      {ga4Properties && ga4Properties.length === 0 && (
+        <p className="mb-4 text-[11px] text-amber-600">⚠ No GA4 properties found on this account.</p>
+      )}
+
+      {loading ? (
+        <div className="flex flex-col items-center justify-center py-12 text-center text-gray-500">
+          <Loader2 className="animate-spin text-gray-400 mb-2" size={24} />
+          <p className="text-sm">Fetching real Search Console + Analytics data...</p>
+        </div>
+      ) : error ? (
+        <div className="rounded-xl border border-dashed border-gray-200 p-6 text-center text-[13px] text-gray-500">
+          <TrendingUp className="mx-auto mb-2 text-gray-300" size={28} />
+          {error}
+          <div className="mt-3">
+            <a href="/settings/api-credentials" className="text-[12px] font-medium text-[#00846f] hover:underline">
+              Go to Settings → API Credentials
+            </a>
+          </div>
+        </div>
+      ) : result ? (
+        <>
+          {result.gscError && (
+            <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] text-amber-800">
+              <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+              <span>Search Console: {result.gscError}</span>
+            </div>
+          )}
+          {result.ga4Error && (
+            <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] text-amber-800">
+              <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+              <span>Google Analytics: {result.ga4Error}</span>
+            </div>
+          )}
+
+          {/* How people found you */}
+          <div className="mb-5 rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <div className="mb-3 text-[12px] font-medium text-gray-700">
+              How people found you <span className="font-normal text-gray-400">— from a search result to a visit on your site</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="flex-1 text-center">
+                <div className="text-[11px] text-gray-500">Saw you in Google</div>
+                <div className="text-xl font-semibold text-gray-900">{result.funnel.impressions.toLocaleString()}</div>
+                <DeltaBadge change={result.funnel.impressionsChange} />
+              </div>
+              <div className="px-2 text-gray-300">→</div>
+              <div className="flex-1 text-center">
+                <div className="text-[11px] text-gray-500">Clicked through</div>
+                <div className="text-xl font-semibold text-gray-900">{result.funnel.clicks.toLocaleString()}</div>
+                <DeltaBadge change={result.funnel.clicksChange} />
+              </div>
+              <div className="px-2 text-gray-300">→</div>
+              <div className="flex-1 text-center">
+                <div className="text-[11px] text-gray-500">Visited your site</div>
+                <div className="text-xl font-semibold text-gray-900">
+                  {result.funnel.organicSessions === null ? "—" : result.funnel.organicSessions.toLocaleString()}
+                </div>
+                <DeltaBadge change={result.funnel.organicSessionsChange} />
+              </div>
+            </div>
+            <div className="mt-3 border-t border-gray-200 pt-2 text-center text-[11px] text-gray-500">
+              {(result.funnel.clickRate * 100).toFixed(1)}% click rate
+              {result.funnel.organicSessions === null &&
+                (result.propertyName ? " · real visit counts unavailable — see Google Analytics note above" : " · connect Google Analytics for real visit counts")}
+            </div>
+          </div>
+
+          {/* Traffic over time */}
+          {result.chart.length > 0 && (
+            <div className="mb-5 rounded-xl border border-gray-200 bg-gray-50 p-4">
+              <div className="mb-1 text-[12px] font-medium text-gray-700">Traffic over time</div>
+              <div className="mb-3 flex items-center gap-3 text-[11px] text-gray-500">
+                {result.funnel.organicSessions !== null && (
+                  <span className="flex items-center gap-1">
+                    <span className="inline-block h-0.5 w-3 bg-[#4285f4]" /> Visits
+                  </span>
+                )}
+                <span className="flex items-center gap-1">
+                  <span className="inline-block h-0.5 w-3 border-t border-dashed border-[#00ab92]" /> Search clicks
+                </span>
+              </div>
+              <svg viewBox="0 0 300 80" className="h-24 w-full" preserveAspectRatio="none">
+                {(() => {
+                  const maxVal = Math.max(...result.chart.map((d) => Math.max(d.clicks, d.sessions)), 1);
+                  const stepX = result.chart.length > 1 ? 300 / (result.chart.length - 1) : 0;
+                  const toPoints = (key: "clicks" | "sessions") =>
+                    result.chart.map((d, i) => `${i * stepX},${76 - (d[key] / maxVal) * 72}`).join(" ");
+                  return (
+                    <>
+                      {result.funnel.organicSessions !== null && (
+                        <polyline points={toPoints("sessions")} fill="none" stroke="#4285f4" strokeWidth="2" />
+                      )}
+                      <polyline points={toPoints("clicks")} fill="none" stroke="#00ab92" strokeWidth="2" strokeDasharray="4 3" />
+                    </>
+                  );
+                })()}
+              </svg>
+              <div className="flex justify-between text-[11px] text-gray-400">
+                <span>{result.chart[0]?.date}</span>
+                <span>{result.chart[result.chart.length - 1]?.date}</span>
+              </div>
+            </div>
+          )}
+
+          {/* How well you're ranking */}
+          <div className="mb-2 text-[12px] font-medium text-gray-700">How well you&apos;re ranking</div>
+          <div className="mb-5 grid grid-cols-3 gap-3">
+            <div className="rounded-lg border border-gray-200 bg-white p-3">
+              <div className="mb-1 text-[11px] uppercase text-gray-500">Avg. Position</div>
+              <div className="text-lg font-semibold text-gray-900">{result.totals.position.toFixed(1)}</div>
+              <DeltaBadge change={result.totals.positionChange} lowerIsBetter />
+            </div>
+            <div className="rounded-lg border border-gray-200 bg-white p-3">
+              <div className="mb-1 text-[11px] uppercase text-gray-500">Click Rate</div>
+              <div className="text-lg font-semibold text-gray-900">{(result.totals.ctr * 100).toFixed(1)}%</div>
+              <DeltaBadge change={result.totals.ctrChange} />
+            </div>
+            <div className="rounded-lg border border-gray-200 bg-white p-3">
+              <div className="mb-1 text-[11px] uppercase text-gray-500">Total Clicks</div>
+              <div className="text-lg font-semibold text-gray-900">{result.totals.clicks.toLocaleString()}</div>
+              <DeltaBadge change={result.totals.clicksChange} />
+            </div>
+          </div>
+
+          {/* Top queries */}
+          <h4 className="mb-2 text-[12px] font-semibold text-gray-700">Top Queries</h4>
+          {result.topQueries.length === 0 ? (
+            <div className="mb-5 rounded-xl border border-gray-200 p-3 text-sm text-gray-500">No query data for this range yet.</div>
+          ) : (
+            <div className="mb-5 overflow-hidden rounded-xl border border-gray-200">
+              <div className="grid grid-cols-[1fr_60px_60px] gap-2 border-b border-gray-100 bg-gray-50 px-3 py-2 text-[11px] font-semibold uppercase text-gray-500">
+                <span>Query</span>
+                <span className="text-right">Clicks</span>
+                <span className="text-right">CTR</span>
+              </div>
+              {result.topQueries.map((q, i) => (
+                <div key={i} className="grid grid-cols-[1fr_60px_60px] gap-2 border-t border-gray-100 px-3 py-2 text-[13px] first:border-t-0">
+                  <span className="truncate text-gray-800">{q.query}</span>
+                  <span className="text-right font-medium text-gray-900">{q.clicks}</span>
+                  <span className="text-right text-gray-500">{(q.ctr * 100).toFixed(1)}%</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Top pages */}
+          <h4 className="mb-2 text-[12px] font-semibold text-gray-700">Top Pages</h4>
+          {result.topPages.length === 0 ? (
+            <div className="mb-5 rounded-xl border border-gray-200 p-3 text-sm text-gray-500">No page data for this range yet.</div>
+          ) : (
+            <div className="mb-5 overflow-hidden rounded-xl border border-gray-200">
+              <div className="grid grid-cols-[1fr_60px] gap-2 border-b border-gray-100 bg-gray-50 px-3 py-2 text-[11px] font-semibold uppercase text-gray-500">
+                <span>Page</span>
+                <span className="text-right">Clicks</span>
+              </div>
+              {result.topPages.map((p, i) => (
+                <div key={i} className="grid grid-cols-[1fr_60px] gap-2 border-t border-gray-100 px-3 py-2 text-[13px] first:border-t-0">
+                  <span className="truncate text-gray-800">{p.page.replace(result.site ?? "", "") || "/"}</span>
+                  <span className="text-right font-medium text-gray-900">{p.clicks}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Where in the world */}
+          <h4 className="mb-2 text-[12px] font-semibold text-gray-700">Where in the world</h4>
+          {result.topCountries.length === 0 ? (
+            <div className="rounded-xl border border-gray-200 p-3 text-sm text-gray-500">No country data for this range yet.</div>
+          ) : (
+            <div className="space-y-2">
+              {result.topCountries.map((c) => (
+                <div key={c.code} className="flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                  <span className="w-7 shrink-0 text-[11px] font-semibold text-gray-500">{c.code}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-1 flex items-center justify-between text-[12px]">
+                      <span className="truncate text-gray-800">{c.name}</span>
+                      <span className="shrink-0 font-medium text-gray-900">{c.share.toFixed(1)}%</span>
+                    </div>
+                    <div className="h-1 overflow-hidden rounded-full bg-gray-200">
+                      <div className="h-full rounded-full bg-[#4285f4]" style={{ width: `${c.share}%` }} />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="rounded-xl border border-dashed border-gray-200 p-6 text-center text-[13px] text-gray-500">
+          <TrendingUp className="mx-auto mb-2 text-gray-300" size={28} />
+          Loading...
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onToggle: () => void; }) {
   const [tab, setTab] = useState<Tab>("SEO");
   const [auditData, setAuditData] = useState<SEOAuditPayload | null>(null);
@@ -164,6 +485,16 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
   const [trafficResult, setTrafficResult] = useState<TrafficResult | null>(null);
   const [trafficLoading, setTrafficLoading] = useState(false);
   const [trafficError, setTrafficError] = useState<string | null>(null);
+  const [gscSites, setGscSites] = useState<{ siteUrl: string; permissionLevel: string }[] | null>(null);
+  const [gscCurrentSite, setGscCurrentSite] = useState<string | null>(null);
+  const [gscSiteSaving, setGscSiteSaving] = useState(false);
+  const [ga4Properties, setGa4Properties] = useState<{ id: string; name: string; accountName: string }[] | null>(null);
+  const [ga4CurrentProperty, setGa4CurrentProperty] = useState<string | null>(null);
+  const [ga4PropertySaving, setGa4PropertySaving] = useState(false);
+  const [trafficRange, setTrafficRange] = useState<7 | 30>(7);
+  const [githubConnected, setGithubConnected] = useState(false);
+  const [codeFixes, setCodeFixes] = useState<Record<string, { status: string; pr_url: string | null }>>({});
+  const [fixingFinding, setFixingFinding] = useState<Finding | null>(null);
   const { show } = useToast();
   const { project } = useProject();
   const { log, logDone } = useTerminalLog();
@@ -186,6 +517,31 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
     }
   }, [open, project?.url]);
 
+  const fetchTraffic = useCallback((range: 7 | 30) => {
+    setTrafficLoading(true);
+    setTrafficError(null);
+    log(`Fetching real Search Console + Analytics data (last ${range} days)...`);
+    fetch(`/api/agents/analytics/traffic?range=${range}`)
+      .then(async (r) => {
+        const data = await r.json();
+        if (!r.ok) {
+          setTrafficResult(null);
+          setTrafficError(data.error ?? "Failed to load Traffic data.");
+          logDone(`⚠ ${data.error ?? "Failed to load Traffic data."}`);
+          return;
+        }
+        setTrafficResult(data);
+        logDone(`Traffic data loaded — ${data.funnel.clicks} clicks over the last ${range} days.`);
+      })
+      .catch(() => {
+        setTrafficResult(null);
+        setTrafficError("Failed to load Traffic data.");
+        logDone("⚠ Failed to load Traffic data.");
+      })
+      .finally(() => setTrafficLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     if (!open || !project) return;
     if (tab === "Links" && !linksResult) {
@@ -206,26 +562,43 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
         .then((data) => data.result && setSiteCrawlResult(data.result))
         .catch(() => {});
     }
-    if (tab === "Traffic" && !trafficResult) {
-      setTrafficLoading(true);
-      setTrafficError(null);
-      log("Fetching real Search Console + Analytics data...");
-      fetch("/api/agents/analytics/traffic")
-        .then(async (r) => {
-          const data = await r.json();
-          if (!r.ok) {
-            setTrafficError(data.error ?? "Failed to load Traffic data.");
-            logDone(`⚠ ${data.error ?? "Failed to load Traffic data."}`);
-            return;
-          }
-          setTrafficResult(data);
-          logDone(`Traffic data loaded — ${data.totals.clicks} clicks over the last 28 days.`);
+    if (tab === "Traffic" && !trafficResult && !trafficLoading) {
+      fetchTraffic(trafficRange);
+    }
+    if (tab === "Traffic" && gscSites === null) {
+      fetch("/api/agents/analytics/gsc-sites")
+        .then((r) => r.json())
+        .then((data) => {
+          setGscSites(data.sites ?? []);
+          setGscCurrentSite(data.current ?? null);
         })
-        .catch(() => {
-          setTrafficError("Failed to load Traffic data.");
-          logDone("⚠ Failed to load Traffic data.");
+        .catch(() => setGscSites([]));
+    }
+    if (tab === "Traffic" && ga4Properties === null) {
+      fetch("/api/agents/analytics/ga4-properties")
+        .then((r) => r.json())
+        .then((data) => {
+          setGa4Properties(data.properties ?? []);
+          setGa4CurrentProperty(data.current ?? null);
         })
-        .finally(() => setTrafficLoading(false));
+        .catch(() => setGa4Properties([]));
+    }
+    if (tab === "SEO") {
+      fetch("/api/settings")
+        .then((r) => r.json())
+        .then((data) => {
+          const patRow = data.settings?.find((s: { key: string; value: string }) => s.key === "github_pat");
+          setGithubConnected(!!patRow?.value);
+        })
+        .catch(() => {});
+      fetch("/api/agents/codefix")
+        .then((r) => r.json())
+        .then((data) => {
+          const map: Record<string, { status: string; pr_url: string | null }> = {};
+          for (const f of data.fixes ?? []) map[f.issue_id] = { status: f.status, pr_url: f.pr_url };
+          setCodeFixes(map);
+        })
+        .catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, project?.id, tab]);
@@ -318,6 +691,66 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
     } finally {
       setGeoChecking(false);
     }
+  };
+
+  const handleChangeGscSite = async (siteUrl: string) => {
+    if (!siteUrl) return;
+    setGscSiteSaving(true);
+    log(`Switching Search Console site to ${siteUrl}...`);
+    try {
+      const res = await fetch("/api/agents/analytics/gsc-sites", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ siteUrl }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        show(data.error ?? "Failed to switch site.");
+        logDone(`⚠ ${data.error ?? "Failed to switch site."}`);
+        return;
+      }
+      setGscCurrentSite(siteUrl);
+      logDone(`Now using ${siteUrl}.`);
+      fetchTraffic(trafficRange);
+    } catch {
+      show("Failed to switch site.");
+      logDone("⚠ Failed to switch site.");
+    } finally {
+      setGscSiteSaving(false);
+    }
+  };
+
+  const handleChangeGa4Property = async (propertyId: string) => {
+    if (!propertyId) return;
+    setGa4PropertySaving(true);
+    log(`Switching Analytics property...`);
+    try {
+      const res = await fetch("/api/agents/analytics/ga4-properties", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ propertyId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        show(data.error ?? "Failed to switch property.");
+        logDone(`⚠ ${data.error ?? "Failed to switch property."}`);
+        return;
+      }
+      setGa4CurrentProperty(propertyId);
+      logDone(`Now using ${ga4Properties?.find((p) => p.id === propertyId)?.name ?? propertyId}.`);
+      fetchTraffic(trafficRange);
+    } catch {
+      show("Failed to switch property.");
+      logDone("⚠ Failed to switch property.");
+    } finally {
+      setGa4PropertySaving(false);
+    }
+  };
+
+  const handleChangeTrafficRange = (range: 7 | 30) => {
+    if (range === trafficRange) return;
+    setTrafficRange(range);
+    fetchTraffic(range);
   };
 
   const loadAudit = async (url: string) => {
@@ -418,130 +851,21 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
 
       <div className="okara-scroll flex-1 overflow-y-auto p-4">
         {tab === "Traffic" ? (
-          <Section
-            title="Traffic"
-            subtitle={
-              trafficResult
-                ? `Real Search Console data, ${trafficResult.range.startDate} → ${trafficResult.range.endDate}${trafficResult.site ? ` — ${trafficResult.site}` : ""}`
-                : "Real search clicks, rankings and top queries from Search Console"
-            }
-          >
-            {trafficLoading ? (
-              <div className="flex flex-col items-center justify-center py-12 text-center text-gray-500">
-                <Loader2 className="animate-spin text-gray-400 mb-2" size={24} />
-                <p className="text-sm">Fetching real Search Console + Analytics data...</p>
-              </div>
-            ) : trafficError ? (
-              <div className="rounded-xl border border-dashed border-gray-200 p-6 text-center text-[13px] text-gray-500">
-                <TrendingUp className="mx-auto mb-2 text-gray-300" size={28} />
-                {trafficError}
-                <div className="mt-3">
-                  <a href="/settings/api-credentials" className="text-[12px] font-medium text-[#00846f] hover:underline">
-                    Go to Settings → API Credentials
-                  </a>
-                </div>
-              </div>
-            ) : trafficResult ? (
-              <>
-                {trafficResult.gscError && (
-                  <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] text-amber-800">
-                    <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-                    <span>Search Console: {trafficResult.gscError}</span>
-                  </div>
-                )}
-                {!trafficResult.site && !trafficResult.gscError && (
-                  <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] text-amber-800">
-                    <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-                    <span>No verified Search Console site found on this Google account.</span>
-                  </div>
-                )}
-
-                {trafficResult.byDate.length > 0 && (
-                  <div className="mb-5 rounded-xl border border-gray-200 bg-gray-50 p-4">
-                    <div className="mb-3 flex h-24 items-end gap-1">
-                      {trafficResult.byDate.map((d, i) => {
-                        const max = Math.max(...trafficResult.byDate.map((r) => r.clicks), 1);
-                        return (
-                          <div
-                            key={i}
-                            title={`${d.date}: ${d.clicks} clicks`}
-                            className="flex-1 rounded-t bg-[#00ab92]"
-                            style={{ height: `${Math.max(2, (d.clicks / max) * 100)}%` }}
-                          />
-                        );
-                      })}
-                    </div>
-                    <div className="flex justify-between text-[11px] text-gray-400">
-                      <span>{trafficResult.byDate[0]?.date}</span>
-                      <span>{trafficResult.byDate[trafficResult.byDate.length - 1]?.date}</span>
-                    </div>
-                  </div>
-                )}
-
-                <div className="mb-5 grid grid-cols-3 gap-3">
-                  <div className="rounded-lg border border-gray-200 bg-white p-3">
-                    <div className="mb-1 text-[11px] uppercase text-gray-500">Total Clicks</div>
-                    <div className="text-lg font-semibold text-gray-900">{trafficResult.totals.clicks.toLocaleString()}</div>
-                  </div>
-                  <div className="rounded-lg border border-gray-200 bg-white p-3">
-                    <div className="mb-1 text-[11px] uppercase text-gray-500">Click Rate</div>
-                    <div className="text-lg font-semibold text-gray-900">{(trafficResult.totals.ctr * 100).toFixed(1)}%</div>
-                  </div>
-                  <div className="rounded-lg border border-gray-200 bg-white p-3">
-                    <div className="mb-1 text-[11px] uppercase text-gray-500">Avg. Position</div>
-                    <div className="text-lg font-semibold text-gray-900">{trafficResult.totals.position.toFixed(1)}</div>
-                  </div>
-                </div>
-
-                {trafficResult.ga4 && (
-                  <div className="mb-5 grid grid-cols-3 gap-3">
-                    <div className="rounded-lg border border-gray-200 bg-white p-3">
-                      <div className="mb-1 text-[11px] uppercase text-gray-500">Sessions (GA4)</div>
-                      <div className="text-lg font-semibold text-gray-900">{trafficResult.ga4.sessions.toLocaleString()}</div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 bg-white p-3">
-                      <div className="mb-1 text-[11px] uppercase text-gray-500">Users</div>
-                      <div className="text-lg font-semibold text-gray-900">{trafficResult.ga4.activeUsers.toLocaleString()}</div>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 bg-white p-3">
-                      <div className="mb-1 text-[11px] uppercase text-gray-500">Pageviews</div>
-                      <div className="text-lg font-semibold text-gray-900">{trafficResult.ga4.screenPageViews.toLocaleString()}</div>
-                    </div>
-                  </div>
-                )}
-                {trafficResult.ga4Error && (
-                  <div className="mb-5 text-[11px] text-amber-600">⚠ Google Analytics: {trafficResult.ga4Error}</div>
-                )}
-
-                <h4 className="mb-2 text-[12px] font-semibold text-gray-700">Top Queries</h4>
-                {trafficResult.topQueries.length === 0 ? (
-                  <div className="rounded-xl border border-gray-200 p-3 text-sm text-gray-500">No query data for this range yet.</div>
-                ) : (
-                  <div className="overflow-hidden rounded-xl border border-gray-200">
-                    <div className="grid grid-cols-[1fr_60px_60px_50px] gap-2 border-b border-gray-100 bg-gray-50 px-3 py-2 text-[11px] font-semibold uppercase text-gray-500">
-                      <span>Query</span>
-                      <span className="text-right">Clicks</span>
-                      <span className="text-right">CTR</span>
-                      <span className="text-right">Pos.</span>
-                    </div>
-                    {trafficResult.topQueries.map((q, i) => (
-                      <div key={i} className="grid grid-cols-[1fr_60px_60px_50px] gap-2 border-t border-gray-100 px-3 py-2 text-[13px] first:border-t-0">
-                        <span className="truncate text-gray-800">{q.query}</span>
-                        <span className="text-right font-medium text-gray-900">{q.clicks}</span>
-                        <span className="text-right text-gray-500">{(q.ctr * 100).toFixed(1)}%</span>
-                        <span className="text-right text-gray-500">{q.position.toFixed(1)}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="rounded-xl border border-dashed border-gray-200 p-6 text-center text-[13px] text-gray-500">
-                <TrendingUp className="mx-auto mb-2 text-gray-300" size={28} />
-                Loading...
-              </div>
-            )}
-          </Section>
+          <TrafficTab
+            result={trafficResult}
+            loading={trafficLoading}
+            error={trafficError}
+            range={trafficRange}
+            onChangeRange={handleChangeTrafficRange}
+            gscSites={gscSites}
+            gscCurrentSite={gscCurrentSite}
+            gscSiteSaving={gscSiteSaving}
+            onChangeGscSite={handleChangeGscSite}
+            ga4Properties={ga4Properties}
+            ga4CurrentProperty={ga4CurrentProperty}
+            ga4PropertySaving={ga4PropertySaving}
+            onChangeGa4Property={handleChangeGa4Property}
+          />
         ) : !auditData ? (
           <div className="flex flex-col items-center justify-center h-full text-center text-gray-500">
              {loading ? <Loader2 className="animate-spin text-gray-400 mb-2" size={24} /> : <Search className="text-gray-300 mb-2" size={24} />}
@@ -667,18 +991,44 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
                   )}
                 </Section>
 
-                <Section title="Issues">
+                <Section
+                  title="Issues"
+                  subtitle={githubConnected ? undefined : "Connect GitHub in Settings → API Credentials to fix eligible issues in code."}
+                >
                   <div className="overflow-hidden rounded-xl border border-gray-200">
                      {auditData.issues.length === 0 ? (
                        <div className="p-3 text-sm text-gray-500">No issues found!</div>
                      ) : (
-                        auditData.issues.map((issue, i) => (
-                          <div key={i} className="flex items-center justify-between border-t border-gray-100 px-3 py-2.5 text-[13px] first:border-t-0">
-                            <span className="flex items-center gap-2 text-gray-700">
-                              <span className={issue.level === "Error" ? "text-red-500" : "text-amber-500"}>⚠</span> {issue.label}
-                            </span>
-                          </div>
-                        ))
+                        auditData.issues.map((issue, i) => {
+                          const finding = (auditData.findings ?? []).find((f) => f.label === issue.label);
+                          const fix = finding ? codeFixes[finding.issueId] : undefined;
+                          return (
+                            <div key={i} className="flex items-center justify-between gap-2 border-t border-gray-100 px-3 py-2.5 text-[13px] first:border-t-0">
+                              <span className="flex items-center gap-2 text-gray-700">
+                                <span className={issue.level === "Error" ? "text-red-500" : "text-amber-500"}>⚠</span> {issue.label}
+                              </span>
+                              {finding?.autoFixable && githubConnected && (
+                                fix?.status === "pr_open" || fix?.status === "merged" ? (
+                                  <a
+                                    href={fix.pr_url ?? "#"}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="flex shrink-0 items-center gap-1 text-[11px] font-medium text-[#00846f] hover:underline"
+                                  >
+                                    PR open <ExternalLink size={10} />
+                                  </a>
+                                ) : (
+                                  <button
+                                    onClick={() => setFixingFinding(finding)}
+                                    className="flex shrink-0 items-center gap-1 rounded-full border border-gray-200 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50"
+                                  >
+                                    <Code2 size={11} /> Fix in code
+                                  </button>
+                                )
+                              )}
+                            </div>
+                          );
+                        })
                      )}
                   </div>
                 </Section>
@@ -1002,6 +1352,14 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
           </>
         )}
       </div>
+
+      {fixingFinding && (
+        <CodeFixModal
+          finding={fixingFinding}
+          onClose={() => setFixingFinding(null)}
+          onApplied={(issueId, prUrl) => setCodeFixes((prev) => ({ ...prev, [issueId]: { status: "pr_open", pr_url: prUrl } }))}
+        />
+      )}
     </div>
   );
 }

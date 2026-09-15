@@ -21,7 +21,7 @@ export type CompetitorDiscoveryRequest = {
 
 export type DiscoveredCandidate = { domain: string; reason: string };
 
-const MAX_CANDIDATES = 5;
+const MAX_CANDIDATES = 12;
 
 function ownHost(url: string): string {
   try {

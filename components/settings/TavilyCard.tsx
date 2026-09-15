@@ -19,7 +19,7 @@ export default function TavilyCard() {
         const row = data.settings?.find((s) => s.key === "tavily_api_key");
         if (row?.value) {
           setConnected(true);
-          setKeyPreview(`${row.value.slice(0, 4)}••••${row.value.slice(-2)}`);
+          setKeyPreview(row.value); // already masked server-side — never send the real key to the browser
         }
       })
       .catch(() => {

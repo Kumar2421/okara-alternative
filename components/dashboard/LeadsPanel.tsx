@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Users, ChevronLeft, Loader2, RefreshCw, X, ExternalLink, Mail, Search, Phone, Building2 } from "lucide-react";
+import { Users, ChevronLeft, Loader2, RefreshCw, X, ExternalLink, Mail, Search, Phone, Building2, Reply } from "lucide-react";
 import CollapsedRail, { RailButton } from "./CollapsedRail";
 import { useToast } from "./Toast";
 import { useProject } from "@/lib/project-store";
@@ -25,6 +25,9 @@ type Lead = {
   lead_type?: "person" | "business";
   email_status?: "sent" | "failed" | null;
   emailed_at?: string | null;
+  gmail_thread_id?: string | null;
+  last_reply_at?: string | null;
+  last_reply_snippet?: string | null;
 };
 
 export default function LeadsPanel({ open, onToggle }: { open: boolean; onToggle: () => void }) {
@@ -39,7 +42,11 @@ export default function LeadsPanel({ open, onToggle }: { open: boolean; onToggle
   const [category, setCategory] = useState("");
   const [bizLocation, setBizLocation] = useState("");
   const [gmailConnected, setGmailConnected] = useState(false);
+  const [googleCloudConnected, setGoogleCloudConnected] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
+  const [checkingReplies, setCheckingReplies] = useState(false);
+  const [followUpDraft, setFollowUpDraft] = useState<{ leadId: string; subject: string; body: string } | null>(null);
+  const [draftingFollowUp, setDraftingFollowUp] = useState<string | null>(null);
   const { show } = useToast();
   const { project } = useProject();
   const { primaryModel } = useProviders();
@@ -68,9 +75,70 @@ export default function LeadsPanel({ open, onToggle }: { open: boolean; onToggle
       .then((r) => r.json())
       .then((data: { settings: { key: string; value: string }[] }) => {
         setGmailConnected(!!data.settings?.find((s) => s.key === "gmail_email")?.value);
+        setGoogleCloudConnected(!!data.settings?.find((s) => s.key === "google_cloud_api_key")?.value);
       })
       .catch(() => {});
   }, [open]);
+
+  async function handleCheckReplies() {
+    setCheckingReplies(true);
+    log("Checking Gmail threads for real replies...");
+    try {
+      const res = await fetch("/api/agents/leads/check-replies", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        show(data.error ?? "Failed to check replies.");
+        logDone(`⚠ ${data.error ?? "Failed to check replies."}`);
+        return;
+      }
+      if (data.error) {
+        show(data.error);
+        logDone(`⚠ ${data.error}`);
+      } else {
+        logDone(data.newReplies > 0 ? `Checked ${data.checked} thread(s) — ${data.newReplies} new repl${data.newReplies === 1 ? "y" : "ies"}.` : `Checked ${data.checked} thread(s) — no new replies.`);
+      }
+      if (data.newReplies > 0) await loadLeads();
+    } catch {
+      show("Failed to check replies.");
+      logDone("⚠ Failed to check replies.");
+    } finally {
+      setCheckingReplies(false);
+    }
+  }
+
+  async function handleDraftFollowUp(lead: Lead) {
+    if (!primaryModel) {
+      show("No primary model selected. Configure LLM Providers in Settings.");
+      return;
+    }
+    const providerId = findProviderForModel(primaryModel);
+    if (!providerId) {
+      show("Could not determine provider for the selected model.");
+      return;
+    }
+    setDraftingFollowUp(lead.id);
+    log(`Drafting a follow-up for ${lead.name}'s reply...`);
+    try {
+      const res = await fetch("/api/agents/leads/draft-followup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ leadId: lead.id, model: primaryModel, providerId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        show(data.error ?? "Failed to draft a follow-up.");
+        logDone(`⚠ ${data.error ?? "Failed to draft a follow-up."}`);
+        return;
+      }
+      logDone(`Reply classified as "${data.classification}" — draft ready for review.`);
+      setFollowUpDraft({ leadId: lead.id, subject: data.subject, body: data.body });
+    } catch {
+      show("Failed to draft a follow-up.");
+      logDone("⚠ Failed to draft a follow-up.");
+    } finally {
+      setDraftingFollowUp(null);
+    }
+  }
 
   async function handleSearch() {
     if (!role.trim() && !companyOrIndustry.trim()) {
@@ -265,13 +333,24 @@ export default function LeadsPanel({ open, onToggle }: { open: boolean; onToggle
             />
             <button
               onClick={handleBizSearch}
-              disabled={searching || !project}
+              disabled={searching || !project || !googleCloudConnected}
+              title={googleCloudConnected ? undefined : "Connect a Google Cloud API key in Settings → API Credentials first"}
               className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#111111] py-1.5 text-[13px] font-medium text-white hover:bg-black disabled:opacity-50"
             >
               {searching ? <Loader2 size={13} className="animate-spin" /> : <Building2 size={13} />}
               {searching ? "Searching..." : "Search Businesses"}
             </button>
-            <p className="text-[11px] text-gray-400">Real Places API data — needs a Google Cloud key in Settings.</p>
+            {googleCloudConnected ? (
+              <p className="text-[11px] text-gray-400">Real Places API data.</p>
+            ) : (
+              <p className="text-[11px] text-amber-600">
+                ⚠ No Google Cloud key connected —{" "}
+                <a href="/settings/api-credentials" className="underline hover:text-amber-700">
+                  connect one in Settings
+                </a>{" "}
+                (with Places API enabled) to search real businesses.
+              </p>
+            )}
           </>
         )}
       </div>
@@ -308,6 +387,20 @@ export default function LeadsPanel({ open, onToggle }: { open: boolean; onToggle
             const sentCount = results.filter((r) => r.status === "sent").length;
             show(`Sent ${sentCount} of ${results.length} email${results.length === 1 ? "" : "s"}.`);
             setSelected(new Set());
+          }}
+        />
+      )}
+
+      {followUpDraft && (
+        <ComposeEmailModal
+          leads={leads.filter((l) => l.id === followUpDraft.leadId)}
+          initialSubject={followUpDraft.subject}
+          initialBody={followUpDraft.body}
+          onClose={() => setFollowUpDraft(null)}
+          onSent={(results) => {
+            const sent = results.find((r) => r.status === "sent");
+            show(sent ? "Follow-up sent." : "Failed to send follow-up.");
+            setFollowUpDraft(null);
           }}
         />
       )}
@@ -392,7 +485,25 @@ export default function LeadsPanel({ open, onToggle }: { open: boolean; onToggle
                       </span>
                     )}
                     {lead.email_status === "failed" && <span className="text-red-600">⚠ Send failed</span>}
+                    {lead.last_reply_snippet && (
+                      <span className="flex items-center gap-0.5 rounded-full bg-blue-50 px-1.5 py-0.5 font-medium text-blue-700">
+                        <Reply size={10} /> Replied
+                      </span>
+                    )}
                   </div>
+                  {lead.last_reply_snippet && (
+                    <div className="mt-1 flex items-center justify-between gap-2">
+                      <p className="truncate text-[11px] text-blue-700">&ldquo;{lead.last_reply_snippet}&rdquo;</p>
+                      <button
+                        onClick={() => handleDraftFollowUp(lead)}
+                        disabled={draftingFollowUp === lead.id}
+                        className="shrink-0 flex items-center gap-1 rounded-full border border-gray-200 px-2 py-0.5 text-[10px] font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                      >
+                        {draftingFollowUp === lead.id ? <Loader2 size={9} className="animate-spin" /> : <Reply size={9} />}
+                        Draft follow-up
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
@@ -402,9 +513,22 @@ export default function LeadsPanel({ open, onToggle }: { open: boolean; onToggle
 
       <div className="flex shrink-0 items-center justify-between border-t border-gray-200 px-4 py-2.5 text-[11px] text-gray-400">
         <span>Emails are found in real search results or SMTP-verified — never shown unverified.</span>
-        <button onClick={loadLeads} className="flex items-center gap-1 hover:text-gray-700">
-          <RefreshCw size={11} /> Refresh
-        </button>
+        <div className="flex items-center gap-3">
+          {gmailConnected && (
+            <button
+              onClick={handleCheckReplies}
+              disabled={checkingReplies}
+              title="Poll Gmail for real replies on sent threads"
+              className="flex items-center gap-1 hover:text-gray-700 disabled:opacity-50"
+            >
+              {checkingReplies ? <Loader2 size={11} className="animate-spin" /> : <Reply size={11} />}
+              {checkingReplies ? "Checking..." : "Check replies"}
+            </button>
+          )}
+          <button onClick={loadLeads} className="flex items-center gap-1 hover:text-gray-700">
+            <RefreshCw size={11} /> Refresh
+          </button>
+        </div>
       </div>
     </div>
   );

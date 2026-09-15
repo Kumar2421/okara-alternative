@@ -4,9 +4,21 @@
  * process.env (static app config, not per-project DB data) — GMAIL_CLIENT_ID
  * / GMAIL_CLIENT_SECRET, set via Settings → API Credentials or hand-edited
  * into .env.local. Requires a server restart after either — Node only reads
- * .env.local at process startup. */
+ * .env.local at process startup.
+ *
+ * gmail.readonly was added for the reply-tracking phase (lib/domain/leads/
+ * gmailInbox.ts) — anyone who connected before this scope existed is still
+ * only authorized for gmail.send, so a reply-check call will get a real 403
+ * from Google until they click "Connect Gmail" again (prompt=consent below
+ * always re-grants both scopes fresh, no separate migration needed). */
 
-const SCOPES = ["https://www.googleapis.com/auth/gmail.send", "https://www.googleapis.com/auth/userinfo.email"];
+import { getDb } from "@/lib/db";
+
+const SCOPES = [
+  "https://www.googleapis.com/auth/gmail.send",
+  "https://www.googleapis.com/auth/gmail.readonly",
+  "https://www.googleapis.com/auth/userinfo.email",
+];
 
 export type GmailTokens = { accessToken: string; refreshToken?: string; expiresAt: number };
 
@@ -50,6 +62,37 @@ export async function exchangeCodeForTokens(code: string, redirectUri: string): 
 export async function refreshAccessToken(refreshToken: string): Promise<GmailTokens> {
   const data = await tokenRequest({ refresh_token: refreshToken, grant_type: "refresh_token" });
   return { accessToken: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 };
+}
+
+/** Shared by gmailSend.ts and gmailInbox.ts — refreshes the stored access
+ * token if it's within 60s of expiry, persists the refreshed token back to
+ * settings so the next call skips the refresh. Throws if not connected. */
+export async function getValidGmailAccessToken(): Promise<string> {
+  const db = getDb();
+  const rows = db
+    .prepare("SELECT key, value FROM settings WHERE key IN ('gmail_access_token', 'gmail_refresh_token', 'gmail_token_expiry')")
+    .all() as { key: string; value: string }[];
+  const map = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+
+  if (!map.gmail_refresh_token) {
+    throw new Error("Gmail isn't connected — connect it in Settings → API Credentials.");
+  }
+
+  const expiresAt = Number(map.gmail_token_expiry ?? 0);
+  if (map.gmail_access_token && Date.now() < expiresAt - 60_000) {
+    return map.gmail_access_token;
+  }
+
+  const refreshed = await refreshAccessToken(map.gmail_refresh_token);
+  db.prepare(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(
+    "gmail_access_token",
+    refreshed.accessToken
+  );
+  db.prepare(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(
+    "gmail_token_expiry",
+    String(refreshed.expiresAt)
+  );
+  return refreshed.accessToken;
 }
 
 export async function getConnectedEmail(accessToken: string): Promise<string | null> {

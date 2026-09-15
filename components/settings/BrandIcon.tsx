@@ -2,7 +2,7 @@
 
 import type { IconType } from "react-icons";
 import { SiAnthropic, SiGooglegemini, SiMistralai, SiOpenrouter, SiLmstudio, SiOllama } from "react-icons/si";
-import { SiGmail, SiGooglecloud, SiGoogleanalytics, SiGooglesearchconsole, SiLighthouse } from "react-icons/si";
+import { SiGmail, SiGooglecloud, SiGoogleanalytics, SiGooglesearchconsole, SiLighthouse, SiGithub } from "react-icons/si";
 
 /** Real Simple Icons brand SVGs, keyed by our own provider/service ids.
  * Not every brand has one available (OpenAI, Groq, xAI, Tavily aren't in
@@ -20,6 +20,7 @@ const ICONS: Record<string, IconType> = {
   "google-analytics": SiGoogleanalytics,
   "search-console": SiGooglesearchconsole,
   lighthouse: SiLighthouse,
+  github: SiGithub,
 };
 
 export default function BrandIcon({

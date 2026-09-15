@@ -6,11 +6,29 @@ import { fetchPageSpeed, type CwvSnapshot } from "@/lib/domain/seo/pageSpeedInsi
 
 export type { CwvStatus, CwvMetric, CwvSnapshot } from "@/lib/domain/seo/pageSpeedInsights";
 
+/** Structured findings, additive to `issues` (which stays as-is for the
+ * existing Issues list UI). Each carries a stable issueId (used as the
+ * code_fixes memory key — same finding on a re-audit maps to the same row,
+ * so the fix agent doesn't re-suggest something already PR'd) and an
+ * autoFixable flag — true only for single-tag/single-line edits a small LLM
+ * patch can make safely without touching rendered content structure. */
+export type Finding = {
+  issueId: string;
+  category: "meta-title" | "meta-description" | "canonical" | "og-tags" | "twitter-tags" | "robots-txt" | "heading-structure";
+  severity: "Warning" | "Error";
+  label: string;
+  evidence: Record<string, string | number | null>;
+  autoFixable: boolean;
+};
+
 export type SEOAuditPayload = {
   url: string;
   meta: {
     title: string;
     description: string;
+    /** From <link rel="canonical">, if present — empty string otherwise
+     * (never guessed; a missing canonical is a real, common issue). */
+    canonical: string;
   };
   headings: {
     h1: number;
@@ -20,6 +38,7 @@ export type SEOAuditPayload = {
   openGraph: { key: string; value: string; ok: boolean }[];
   twitter: { key: string; value: string; ok: boolean }[];
   issues: { label: string; level: "Warning" | "Error" }[];
+  findings: Finding[];
   /** Undefined (not a fake fallback) when no PageSpeed key is connected, or
    * the real PSI call failed — the frontend shows a real crawl-derived
    * substitute instead of ever presenting invented Lighthouse-shaped numbers. */
@@ -290,6 +309,7 @@ export class SEOAgent {
 
   async audit(url: string): Promise<SEOAuditPayload> {
     const issues: { label: string; level: "Warning" | "Error" }[] = [];
+    const findings: Finding[] = [];
 
     const validated = assertPublicHttpUrl(url);
 
@@ -320,6 +340,14 @@ export class SEOAgent {
     const robotsTxt = await checkRobotsTxt(validated.origin, validated.pathname);
     if (robotsTxt.disallowsThisPage) {
       issues.push({ label: "This page is disallowed by robots.txt for general crawlers", level: "Warning" });
+      findings.push({
+        issueId: "robots-txt-disallow",
+        category: "robots-txt",
+        severity: "Warning",
+        label: "This page is disallowed by robots.txt for general crawlers",
+        evidence: { path: validated.pathname },
+        autoFixable: true,
+      });
     }
 
     const $ = cheerio.load(html);
@@ -347,12 +375,63 @@ export class SEOAgent {
     // 2. Parse tags
     const title = $("title").text() || "";
     const description = $("meta[name='description']").attr("content") || "";
+    const canonical = $("link[rel='canonical']").attr("href") || "";
 
-    if (!title) issues.push({ label: "Missing Meta Title", level: "Error" });
-    else if (title.length > 60) issues.push({ label: "Meta title too long (> 60 chars)", level: "Warning" });
+    if (!title) {
+      issues.push({ label: "Missing Meta Title", level: "Error" });
+      findings.push({
+        issueId: "meta-title-missing",
+        category: "meta-title",
+        severity: "Error",
+        label: "Missing Meta Title",
+        evidence: { current: null },
+        autoFixable: true,
+      });
+    } else if (title.length > 60) {
+      issues.push({ label: "Meta title too long (> 60 chars)", level: "Warning" });
+      findings.push({
+        issueId: "meta-title-too-long",
+        category: "meta-title",
+        severity: "Warning",
+        label: "Meta title too long (> 60 chars)",
+        evidence: { current: title, length: title.length },
+        autoFixable: true,
+      });
+    }
 
-    if (!description) issues.push({ label: "Missing Meta Description", level: "Error" });
-    else if (description.length > 160) issues.push({ label: "Meta description too long (> 160 chars)", level: "Warning" });
+    if (!description) {
+      issues.push({ label: "Missing Meta Description", level: "Error" });
+      findings.push({
+        issueId: "meta-description-missing",
+        category: "meta-description",
+        severity: "Error",
+        label: "Missing Meta Description",
+        evidence: { current: null },
+        autoFixable: true,
+      });
+    } else if (description.length > 160) {
+      issues.push({ label: "Meta description too long (> 160 chars)", level: "Warning" });
+      findings.push({
+        issueId: "meta-description-too-long",
+        category: "meta-description",
+        severity: "Warning",
+        label: "Meta description too long (> 160 chars)",
+        evidence: { current: description, length: description.length },
+        autoFixable: true,
+      });
+    }
+
+    if (!canonical) {
+      issues.push({ label: "Missing canonical tag", level: "Warning" });
+      findings.push({
+        issueId: "canonical-missing",
+        category: "canonical",
+        severity: "Warning",
+        label: "Missing canonical tag",
+        evidence: { current: null, url: validated.toString() },
+        autoFixable: true,
+      });
+    }
 
     const headings = {
       h1: $("h1").length,
@@ -360,8 +439,31 @@ export class SEOAgent {
       h3: $("h3").length,
     };
 
-    if (headings.h1 === 0) issues.push({ label: "No H1 tag found", level: "Error" });
-    if (headings.h1 > 1) issues.push({ label: "Multiple H1 tags found", level: "Warning" });
+    // Heading findings are visibility-only (autoFixable: false) — fixing them
+    // means restructuring real rendered markup, not a single-tag edit, so out
+    // of the v1 auto-fix scope even though they're detected here.
+    if (headings.h1 === 0) {
+      issues.push({ label: "No H1 tag found", level: "Error" });
+      findings.push({
+        issueId: "heading-h1-missing",
+        category: "heading-structure",
+        severity: "Error",
+        label: "No H1 tag found",
+        evidence: { h1Count: 0 },
+        autoFixable: false,
+      });
+    }
+    if (headings.h1 > 1) {
+      issues.push({ label: "Multiple H1 tags found", level: "Warning" });
+      findings.push({
+        issueId: "heading-h1-multiple",
+        category: "heading-structure",
+        severity: "Warning",
+        label: "Multiple H1 tags found",
+        evidence: { h1Count: headings.h1 },
+        autoFixable: false,
+      });
+    }
 
     // Heading order — real DOM-order walk, flag the first level skip found
     // (e.g. h1 straight to h3 with no h2 between them). Cheerio returns
@@ -371,6 +473,14 @@ export class SEOAgent {
       const level = Number(el.tagName?.slice(1));
       if (lastLevel > 0 && level - lastLevel > 1) {
         issues.push({ label: `Heading order skips a level (h${lastLevel} → h${level})`, level: "Warning" });
+        findings.push({
+          issueId: "heading-order-skip",
+          category: "heading-structure",
+          severity: "Warning",
+          label: `Heading order skips a level (h${lastLevel} → h${level})`,
+          evidence: { fromLevel: lastLevel, toLevel: level },
+          autoFixable: false,
+        });
         lastLevel = level;
         return false; // stop after the first skip — one flag is enough signal
       }
@@ -386,8 +496,24 @@ export class SEOAgent {
     const missingOg = REQUIRED_OG_TAGS.filter((tag) => !openGraph.some((t) => t.key === tag));
     if (openGraph.length === 0) {
       issues.push({ label: "Missing Open Graph tags", level: "Warning" });
+      findings.push({
+        issueId: "og-tags-missing",
+        category: "og-tags",
+        severity: "Warning",
+        label: "Missing Open Graph tags",
+        evidence: { missing: REQUIRED_OG_TAGS.join(", ") },
+        autoFixable: true,
+      });
     } else if (missingOg.length > 0) {
       issues.push({ label: `Missing required OG tags: ${missingOg.join(", ")}`, level: "Warning" });
+      findings.push({
+        issueId: "og-tags-partial",
+        category: "og-tags",
+        severity: "Warning",
+        label: `Missing required OG tags: ${missingOg.join(", ")}`,
+        evidence: { missing: missingOg.join(", "), present: openGraph.map((t) => t.key).join(", ") },
+        autoFixable: true,
+      });
     }
 
     const twitter: { key: string; value: string; ok: boolean }[] = [];
@@ -399,6 +525,14 @@ export class SEOAgent {
     const missingTwitter = REQUIRED_TWITTER_TAGS.filter((tag) => !twitter.some((t) => t.key === tag));
     if (missingTwitter.length > 0) {
       issues.push({ label: `Missing required Twitter card tags: ${missingTwitter.join(", ")}`, level: "Warning" });
+      findings.push({
+        issueId: "twitter-tags-missing",
+        category: "twitter-tags",
+        severity: "Warning",
+        label: `Missing required Twitter card tags: ${missingTwitter.join(", ")}`,
+        evidence: { missing: missingTwitter.join(", "), present: twitter.map((t) => t.key).join(", ") },
+        autoFixable: true,
+      });
     }
 
     // 3. PageSpeed — real call only if a key is configured. No mock fallback:
@@ -557,11 +691,12 @@ export class SEOAgent {
 
     return {
       url,
-      meta: { title, description },
+      meta: { title, description, canonical },
       headings,
       openGraph,
       twitter,
       issues,
+      findings,
       pageSpeed: pageSpeedScores,
       coreWebVitals: vitals,
       bodyText,

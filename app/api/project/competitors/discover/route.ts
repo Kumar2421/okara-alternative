@@ -15,6 +15,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
   const providerId: string | undefined = body?.providerId;
   const model: string | undefined = body?.model;
+  const requestedProjectId: string | undefined = body?.projectId;
 
   if (!model || !providerId) {
     return NextResponse.json(
@@ -32,12 +33,18 @@ export async function POST(req: NextRequest) {
 
   const keyRow = db
     .prepare("SELECT api_key, base_url FROM provider_connections WHERE provider_id = ?")
-    .get(providerId) as { api_key: string; base_url: string | null } | undefined;
-  if (!keyRow) {
-    return NextResponse.json({ error: `${providerId} isn't connected yet.` }, { status: 422 });
+    .get(providerId) as { api_key: string | null; base_url: string | null } | undefined;
+  if (!keyRow || (!keyRow.api_key?.trim() && !keyRow.base_url?.trim())) {
+    return NextResponse.json({ error: `${providerId} isn't properly connected. Check Settings → LLM Providers.` }, { status: 422 });
   }
 
-  const activeId = getActiveProjectId();
+  // Explicit projectId (passed by the post-creation background discovery
+  // call) wins over "whatever's active right now" — pins this write to the
+  // project it was actually triggered for, even if the user has since
+  // switched to or created a different one. The manual "Find competitors"
+  // button in Context panel doesn't pass one, so it still targets whatever's
+  // currently active, which is the correct behavior for a direct click.
+  const activeId = requestedProjectId || getActiveProjectId();
   const project = activeId
     ? (db.prepare("SELECT name, url FROM projects WHERE id = ?").get(activeId) as
         | { name: string; url: string }
@@ -53,13 +60,9 @@ export async function POST(req: NextRequest) {
   const auditRow = db.prepare("SELECT payload FROM seo_audits WHERE url = ?").get(project.url) as
     | { payload: string }
     | undefined;
-  if (!auditRow) {
-    return NextResponse.json(
-      { error: "No crawl data for this site yet. Try refreshing the SEO audit in Analytics." },
-      { status: 422 }
-    );
-  }
-  const audit: SEOAuditPayload = JSON.parse(auditRow.payload);
+
+  // Audit is optional — we'll discover from URL + project metadata even without it
+  const audit: SEOAuditPayload | undefined = auditRow ? JSON.parse(auditRow.payload) : undefined;
 
   const groundingDocs = db
     .prepare(
@@ -78,13 +81,13 @@ export async function POST(req: NextRequest) {
   const tavilyApiKey = tavilyKeyRow?.value && providerSupportsTools(providerId) ? tavilyKeyRow.value : undefined;
 
   try {
-    const agent = new CompetitorDiscoveryAgent(driver, keyRow.api_key, keyRow.base_url ?? undefined);
+    const agent = new CompetitorDiscoveryAgent(driver, keyRow.api_key || "", keyRow.base_url ?? undefined);
     const { candidates, usedWebSearch } = await agent.discover({
       projectName: project.name,
       url: project.url,
-      bodyText: audit.bodyText ?? "",
-      metaTitle: audit.meta.title,
-      metaDescription: audit.meta.description,
+      bodyText: audit?.bodyText ?? "",
+      metaTitle: audit?.meta?.title ?? project.name,
+      metaDescription: audit?.meta?.description ?? `Visit ${project.url}`,
       productInfo,
       marketingStrategy,
       model,

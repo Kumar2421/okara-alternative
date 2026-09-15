@@ -9,13 +9,20 @@ export default function ComposeEmailModal({
   leads,
   onClose,
   onSent,
+  initialSubject,
+  initialBody,
 }: {
   leads: Lead[];
   onClose: () => void;
   onSent: (results: { id: string; status: "sent" | "failed"; error?: string }[]) => void;
+  /** Pre-fills from a real drafted follow-up (Leads → reply → "Draft
+   * follow-up") — still a draft the user must review/edit before sending,
+   * same as a blank compose. */
+  initialSubject?: string;
+  initialBody?: string;
 }) {
-  const [subject, setSubject] = useState("");
-  const [body, setBody] = useState("");
+  const [subject, setSubject] = useState(initialSubject ?? "");
+  const [body, setBody] = useState(initialBody ?? "");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

@@ -6,6 +6,7 @@ import TavilyCard from "@/components/settings/TavilyCard";
 import GoogleCloudCard from "@/components/settings/GoogleCloudCard";
 import GmailCard from "@/components/settings/GmailCard";
 import GoogleAnalyticsCard from "@/components/settings/GoogleAnalyticsCard";
+import GitHubCodeFixCard from "@/components/settings/GitHubCodeFixCard";
 import CompetitorDiscoveryToggle from "@/components/settings/CompetitorDiscoveryToggle";
 
 export default function ApiCredentialsPage() {
@@ -20,13 +21,16 @@ export default function ApiCredentialsPage() {
       <div className="space-y-3">
         <PageSpeedCard />
         <TavilyCard />
-        <GoogleCloudCard />
+        <Suspense fallback={null}>
+          <GoogleCloudCard />
+        </Suspense>
         <Suspense fallback={null}>
           <GmailCard />
         </Suspense>
         <Suspense fallback={null}>
           <GoogleAnalyticsCard />
         </Suspense>
+        <GitHubCodeFixCard />
         <CompetitorDiscoveryToggle />
       </div>
     </div>

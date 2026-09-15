@@ -164,6 +164,16 @@ function init(): Database.Database {
       checked_at TEXT NOT NULL
     );
 
+    -- Cached result of the real Traffic tab fetch (GSC + GA4) — written
+    -- every time a user opens the Traffic tab. Exists so the chat agent can
+    -- read real traffic context cheaply (no live Google API round-trip on
+    -- every chat message) — see lib/domain/shared/trafficContextPrompt.ts.
+    CREATE TABLE IF NOT EXISTS traffic_checks (
+      project_id TEXT PRIMARY KEY,
+      payload    TEXT NOT NULL,
+      checked_at TEXT NOT NULL
+    );
+
     -- Real leads (outreach prospects) — row-per-lead, not a JSON blob, since
     -- per-row state (email sent/not, notes) is coming in a later phase. Every
     -- row must carry a real source_url it was extracted from; email is
@@ -186,7 +196,31 @@ function init(): Database.Database {
       -- Gmail send phase — null until a real send is attempted.
       email_status TEXT,
       emailed_at   TEXT,
+      -- Gmail reply-tracking phase — null until a reply is detected via a
+      -- real inbox poll (gmail_thread_id set at send time, the rest filled
+      -- in the first time listReplies() finds something new).
+      gmail_thread_id     TEXT,
+      gmail_message_id    TEXT,
+      last_reply_at       TEXT,
+      last_reply_snippet  TEXT,
       created_at TEXT NOT NULL
+    );
+
+    -- Real memory for the code-fix agent — one row per (project, finding),
+    -- not a vector store (finding count per project is small, exact-match
+    -- lookup is all that's needed). Prevents re-suggesting a fix that's
+    -- already a real open/merged PR, and respects a human's "rejected" call
+    -- by never auto-retrying it. See lib/domain/codefix/.
+    CREATE TABLE IF NOT EXISTS code_fixes (
+      id         TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      issue_id   TEXT NOT NULL,
+      status     TEXT NOT NULL DEFAULT 'proposed',
+      pr_url     TEXT,
+      file_path  TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE (project_id, issue_id)
     );
   `);
 
@@ -224,6 +258,18 @@ function migrate(db: Database.Database) {
     }
     if (!leadsCols.some((c) => c.name === "emailed_at")) {
       db.exec(`ALTER TABLE leads ADD COLUMN emailed_at TEXT`);
+    }
+    if (!leadsCols.some((c) => c.name === "gmail_thread_id")) {
+      db.exec(`ALTER TABLE leads ADD COLUMN gmail_thread_id TEXT`);
+    }
+    if (!leadsCols.some((c) => c.name === "gmail_message_id")) {
+      db.exec(`ALTER TABLE leads ADD COLUMN gmail_message_id TEXT`);
+    }
+    if (!leadsCols.some((c) => c.name === "last_reply_at")) {
+      db.exec(`ALTER TABLE leads ADD COLUMN last_reply_at TEXT`);
+    }
+    if (!leadsCols.some((c) => c.name === "last_reply_snippet")) {
+      db.exec(`ALTER TABLE leads ADD COLUMN last_reply_snippet TEXT`);
     }
   }
 }

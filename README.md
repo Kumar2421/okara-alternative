@@ -89,6 +89,10 @@ in a local SQLite database (`data/okara.db`, gitignored) that never leaves your 
 | [Google PageSpeed Insights](https://developers.google.com/speed/docs/insights/v5/get-started) | Real Lighthouse scores & Core Web Vitals |
 | [Tavily](https://app.tavily.com) | Web-search-grounded competitor discovery, Competitor Analysis, Content Strategy, and the GEO citation check |
 
+Gmail outreach, GA4/Search Console (Traffic tab), and automatic Google Cloud API key creation all need
+a Google OAuth client first — see **[docs/google-cloud-setup.md](docs/google-cloud-setup.md)** for the
+exact Console setup (redirect URIs, APIs to enable, test users, troubleshooting).
+
 ---
 
 ## 🏗️ Architecture

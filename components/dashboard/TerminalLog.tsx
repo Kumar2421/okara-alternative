@@ -17,9 +17,10 @@ import {
   Loader2,
   X,
 } from "lucide-react";
-import { user } from "@/lib/mock-data";
+import { user as mockUser } from "@/lib/mock-data";
 import { useTerminalLog } from "@/lib/terminal-log-store";
 import { useProject } from "@/lib/project-store";
+import { useAuthUser } from "@/lib/useAuthUser";
 import { useToast } from "./Toast";
 
 function useClickOutside(onOutside: () => void) {
@@ -39,6 +40,18 @@ function UserMenu() {
   const ref = useClickOutside(() => setOpen(false));
   const router = useRouter();
   const { show } = useToast();
+  const { user: authUser } = useAuthUser();
+
+  // Falls back to mock data until Supabase credentials are wired — keeps the
+  // dashboard usable in local/self-host dev before a project exists.
+  const user = authUser ?? mockUser;
+
+  async function handleLogout() {
+    setOpen(false);
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.push("/login");
+    router.refresh();
+  }
 
   const items = [
     { icon: <Plug size={14} />, label: "Integrations", href: "/settings/integrations" },
@@ -59,7 +72,7 @@ function UserMenu() {
             {user.name}
             <ChevronDown size={12} className={`opacity-50 transition-transform ${open ? "rotate-180" : ""}`} />
           </div>
-          <div className="text-[11px] text-gray-400">{user.credits} Credits</div>
+          <div className="text-[11px] text-gray-400">{mockUser.credits} Credits</div>
         </div>
       </button>
 
@@ -77,7 +90,7 @@ function UserMenu() {
           </div>
           <div className="mb-2 flex items-center gap-2 px-2">
             <span className="rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-medium text-gray-700">
-              {user.credits} Credits
+              {mockUser.credits} Credits
             </span>
             <button className="rounded-full bg-[#111111] px-3 py-1 text-[11px] font-medium text-white hover:bg-black">
               Upgrade
@@ -111,10 +124,7 @@ function UserMenu() {
               Docs
             </button>
             <button
-              onClick={() => {
-                setOpen(false);
-                show("Logged out (UI preview only).");
-              }}
+              onClick={handleLogout}
               className="flex items-center gap-2 rounded-lg px-2 py-2 text-[13px] text-red-600 hover:bg-red-50"
             >
               <LogOut size={14} />

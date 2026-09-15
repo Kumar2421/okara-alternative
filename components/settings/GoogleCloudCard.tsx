@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, ExternalLink } from "lucide-react";
+import { useSearchParams } from "next/navigation";
+import { Check, ExternalLink, Sparkles } from "lucide-react";
 import { useToast } from "@/components/dashboard/Toast";
 import BrandIcon from "@/components/settings/BrandIcon";
 
@@ -13,6 +14,7 @@ import BrandIcon from "@/components/settings/BrandIcon";
  * at programmablesearchengine.google.com, not just an API key. */
 export default function GoogleCloudCard() {
   const { show } = useToast();
+  const searchParams = useSearchParams();
   const [connected, setConnected] = useState(false);
   const [keyPreview, setKeyPreview] = useState("");
   const [keyInput, setKeyInput] = useState("");
@@ -20,6 +22,14 @@ export default function GoogleCloudCard() {
   const [savedCx, setSavedCx] = useState("");
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [gcpConnectedEmail, setGcpConnectedEmail] = useState<string | null>(null);
+  const [gcpProjectId, setGcpProjectId] = useState("");
+  const [creatingKey, setCreatingKey] = useState(false);
+
+  useEffect(() => {
+    const error = searchParams.get("gcp_error");
+    if (error) show(`Google Cloud connect failed: ${error}`);
+  }, [searchParams, show]);
 
   useEffect(() => {
     fetch("/api/settings")
@@ -28,17 +38,61 @@ export default function GoogleCloudCard() {
         const keyRow = data.settings?.find((s) => s.key === "google_cloud_api_key");
         if (keyRow?.value) {
           setConnected(true);
-          setKeyPreview(`${keyRow.value.slice(0, 4)}••••${keyRow.value.slice(-2)}`);
+          setKeyPreview(keyRow.value); // already masked server-side — never send the real key to the browser
         }
         const cxRow = data.settings?.find((s) => s.key === "google_cse_id");
         if (cxRow?.value) {
           setSavedCx(cxRow.value);
           setCx(cxRow.value);
         }
+        const gcpEmailRow = data.settings?.find((s) => s.key === "gcp_email");
+        if (gcpEmailRow?.value) setGcpConnectedEmail(gcpEmailRow.value);
+        const gcpProjectRow = data.settings?.find((s) => s.key === "gcp_project_id");
+        if (gcpProjectRow?.value) setGcpProjectId(gcpProjectRow.value);
       })
       .catch(() => {})
       .finally(() => setLoaded(true));
   }, []);
+
+  async function handleCreateKey() {
+    if (!gcpProjectId.trim()) {
+      show("Enter your Google Cloud project id first.");
+      return;
+    }
+    setCreatingKey(true);
+    try {
+      const res = await fetch("/api/settings/google-cloud/create-key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gcpProjectId: gcpProjectId.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        show(data.error || "Failed to create API key.");
+        return;
+      }
+      setConnected(true);
+      setKeyPreview(data.keyPreview);
+      show("Created a real API key, restricted to Places, Custom Search, and Knowledge Graph — saved.");
+    } catch {
+      show("Failed to create API key.");
+    } finally {
+      setCreatingKey(false);
+    }
+  }
+
+  async function handleGcpDisconnect() {
+    setBusy(true);
+    try {
+      await fetch("/api/auth/google-cloud/disconnect", { method: "POST" });
+      setGcpConnectedEmail(null);
+      show("Google Cloud account disconnected.");
+    } catch {
+      show("Failed to disconnect.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function saveSetting(key: string, value: string) {
     const res = await fetch("/api/settings", {
@@ -150,6 +204,57 @@ export default function GoogleCloudCard() {
           >
             {busy ? "Connecting..." : "Connect"}
           </button>
+        </div>
+      )}
+
+      {!loaded ? null : !connected && (
+        <div className="mt-3 rounded-lg border border-dashed border-gray-200 p-3">
+          <div className="mb-1 flex items-center gap-1.5 text-[12px] font-medium text-gray-700">
+            <Sparkles size={12} className="text-gray-400" /> Or create one automatically
+          </div>
+          <p className="mb-2 text-[11px] text-gray-500">
+            Connects your Google account with the Cloud Platform scope (broad — full access to whatever
+            project you point it at, not narrower to just API keys; that&apos;s Google&apos;s API, not
+            ours), then creates a real key on your project, restricted to exactly Places, Custom Search,
+            and Knowledge Graph — nothing else.
+          </p>
+
+          {!gcpConnectedEmail ? (
+            <a
+              href="/api/auth/google-cloud/connect"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-[#111111] px-3 py-1.5 text-[12px] font-medium text-white hover:bg-black"
+            >
+              Connect Google account
+            </a>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-[12px] text-gray-600">
+                <span>{gcpConnectedEmail}</span>
+                <button onClick={handleGcpDisconnect} disabled={busy} className="font-medium text-red-600 hover:underline disabled:opacity-50">
+                  Disconnect
+                </button>
+              </div>
+              <div className="flex gap-2">
+                <input
+                  value={gcpProjectId}
+                  onChange={(e) => setGcpProjectId(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleCreateKey()}
+                  placeholder="your-gcp-project-id"
+                  className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-[13px] text-gray-800 placeholder:text-gray-400"
+                />
+                <button
+                  onClick={handleCreateKey}
+                  disabled={creatingKey}
+                  className="shrink-0 rounded-lg bg-[#111111] px-3 py-2 text-[13px] font-medium text-white hover:bg-black disabled:opacity-50"
+                >
+                  {creatingKey ? "Creating..." : "Create key"}
+                </button>
+              </div>
+              <p className="text-[11px] text-gray-400">
+                An existing Google Cloud project — this doesn&apos;t create the project itself, only the key on it.
+              </p>
+            </div>
+          )}
         </div>
       )}
 

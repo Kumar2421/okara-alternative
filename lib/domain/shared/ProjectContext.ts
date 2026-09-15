@@ -7,6 +7,9 @@ export type ProjectContext = {
   name: string;
   category: string;
   description: string;
+  /** Raw Markdown from the Product Information document, if generated —
+   * what the product actually does/offers, grounded in the real crawl. */
+  productInfo?: string;
   /** Raw Markdown from the Marketing Strategy document (ICP, positioning,
    * messaging framework), if it's been generated — undefined otherwise.
    * Content-writing agents (Articles, LinkedIn, Reddit, X) should prefer this

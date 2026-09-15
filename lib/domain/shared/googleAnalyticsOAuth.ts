@@ -69,35 +69,84 @@ export async function getConnectedEmail(accessToken: string): Promise<string | n
   }
 }
 
-/** First verified Search Console site for this account, or null if none. */
-export async function listFirstSearchConsoleSite(accessToken: string): Promise<string | null> {
+export type SearchConsoleSite = { siteUrl: string; permissionLevel: string };
+
+/** Every Search Console site this account can see — including ones it only
+ * has partial/no real access to (siteUnverifiedUser), since sites.list
+ * doesn't filter those out. */
+export async function listSearchConsoleSites(accessToken: string): Promise<SearchConsoleSite[]> {
   try {
     const res = await fetch("https://www.googleapis.com/webmasters/v3/sites", {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
-    if (!res.ok) return null;
+    if (!res.ok) return [];
     const data = await res.json();
-    const entries: { siteUrl: string }[] = data.siteEntry ?? [];
-    return entries[0]?.siteUrl ?? null;
+    return data.siteEntry ?? [];
   } catch {
-    return null;
+    return [];
   }
 }
 
-/** First GA4 property for this account, or null if none — { id: "properties/123", name } */
-export async function listFirstGA4Property(accessToken: string): Promise<{ id: string; name: string } | null> {
+/** Picks the real site to use for this project — matched by domain to the
+ * project's own URL when possible (an account can have many verified
+ * sites; picking blindly means Traffic data for the wrong domain, or a 403
+ * if that other site's permission level doesn't actually allow querying
+ * it). Falls back to the first site with real access (owner/full user,
+ * never a merely-listed-but-unverified one) if nothing matches the domain,
+ * and to the first site at all only as a last resort. */
+export function pickBestSearchConsoleSite(sites: SearchConsoleSite[], projectUrl: string): string | null {
+  if (sites.length === 0) return null;
+
+  const usable = sites.filter((s) => s.permissionLevel === "siteOwner" || s.permissionLevel === "siteFullUser");
+  const pool = usable.length > 0 ? usable : sites;
+
+  let host = "";
+  try {
+    host = new URL(projectUrl).hostname.replace(/^www\./, "").toLowerCase();
+  } catch {
+    // leave host empty — falls through to pool[0] below
+  }
+
+  const normalize = (siteUrl: string) => siteUrl.replace(/^sc-domain:/, "").replace(/^https?:\/\//, "").replace(/\/$/, "").replace(/^www\./, "").toLowerCase();
+
+  const matching = host
+    ? pool.find((s) => {
+        const siteHost = normalize(s.siteUrl);
+        return siteHost === host || siteHost.endsWith(`.${host}`) || host.endsWith(`.${siteHost}`);
+      })
+    : undefined;
+
+  return (matching ?? pool[0]).siteUrl;
+}
+
+export type GA4Property = { id: string; name: string; accountName: string };
+
+/** Every GA4 property this account can see, across every account — an
+ * account can have many properties, so (like Search Console sites) this
+ * shouldn't be auto-picked blindly; the Traffic tab shows the real list. */
+export async function listGA4Properties(accessToken: string): Promise<GA4Property[]> {
   try {
     const res = await fetch("https://analyticsadmin.googleapis.com/v1beta/accountSummaries", {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
-    if (!res.ok) return null;
+    if (!res.ok) return [];
     const data = await res.json();
+    const out: GA4Property[] = [];
     for (const account of data.accountSummaries ?? []) {
-      const first = account.propertySummaries?.[0];
-      if (first) return { id: first.property, name: first.displayName };
+      for (const prop of account.propertySummaries ?? []) {
+        out.push({ id: prop.property, name: prop.displayName, accountName: account.displayName ?? "" });
+      }
     }
-    return null;
+    return out;
   } catch {
-    return null;
+    return [];
   }
+}
+
+/** First GA4 property for this account, or null if none — used only as the
+ * initial pick right after OAuth connect; the Traffic tab's picker is the
+ * real source of truth after that. */
+export async function listFirstGA4Property(accessToken: string): Promise<{ id: string; name: string } | null> {
+  const properties = await listGA4Properties(accessToken);
+  return properties[0] ? { id: properties[0].id, name: properties[0].name } : null;
 }
