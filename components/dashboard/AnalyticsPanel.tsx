@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import { BarChart2, ChevronLeft, Link2, X, Lock, Search, Cpu, Globe2, Check, Loader2, RefreshCw, AlertTriangle, ExternalLink, TrendingUp } from "lucide-react";
 import CollapsedRail, { RailButton } from "./CollapsedRail";
@@ -16,12 +16,14 @@ type Tab = (typeof TABS)[number];
 
 type TrafficByDate = { date: string; clicks: number; impressions: number; ctr: number; position: number };
 type TrafficQuery = { query: string; clicks: number; impressions: number; ctr: number; position: number };
+type TrafficOpportunity = TrafficQuery & { score: number };
 type TrafficResult = {
   range: { startDate: string; endDate: string };
   site: string | null;
   propertyName: string | null;
   byDate: TrafficByDate[];
   topQueries: TrafficQuery[];
+  opportunities: TrafficOpportunity[];
   totals: { clicks: number; impressions: number; ctr: number; position: number };
   gscError: string | null;
   ga4: { sessions: number; activeUsers: number; screenPageViews: number } | null;
@@ -169,11 +171,24 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
   const { log, logDone } = useTerminalLog();
   const searchParams = useSearchParams();
 
+  const loadAudit = useCallback(async (url: string) => {
+    try {
+      const res = await fetch(`/api/agents/seo/audit?url=${encodeURIComponent(url)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.payload) setAuditData(JSON.parse(data.payload));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }, []);
+
   useEffect(() => {
     const error = searchParams.get("ga_error");
     const connected = searchParams.get("ga_connected");
     if (error) show(`Google Analytics connect failed: ${error}`);
     if (connected) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setTab("Traffic");
       show("Connected — loading real Traffic data.");
     }
@@ -182,9 +197,10 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
 
   useEffect(() => {
     if (open && project?.url) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       loadAudit(project.url);
     }
-  }, [open, project?.url]);
+  }, [open, project?.url, loadAudit]);
 
   useEffect(() => {
     if (!open || !project) return;
@@ -317,20 +333,6 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
       show("Failed to run GEO check.");
     } finally {
       setGeoChecking(false);
-    }
-  };
-
-  const loadAudit = async (url: string) => {
-    try {
-      const res = await fetch(`/api/agents/seo/audit?url=${encodeURIComponent(url)}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.payload) {
-          setAuditData(JSON.parse(data.payload));
-        }
-      }
-    } catch (e) {
-      console.error(e);
     }
   };
 
@@ -514,6 +516,33 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
                 )}
 
                 <h4 className="mb-2 text-[12px] font-semibold text-gray-700">Top Queries</h4>
+                <div className="mt-6">
+                  <h4 className="mb-0.5 text-[12px] font-semibold text-gray-700">Search Opportunities</h4>
+                  <p className="mb-2 text-[11px] text-gray-500">
+                    Queries ranking 4–15 with at least 100 impressions. Score is a prioritization heuristic, not a click forecast.
+                  </p>
+                  {trafficResult.opportunities.length === 0 ? (
+                    <div className="rounded-xl border border-gray-200 p-3 text-sm text-gray-500">
+                      No search opportunities matched the current criteria.
+                    </div>
+                  ) : (
+                    <div className="overflow-hidden rounded-xl border border-gray-200">
+                      <div className="grid grid-cols-[1fr_48px_64px_52px_68px] gap-2 border-b border-gray-100 bg-gray-50 px-3 py-2 text-[11px] font-semibold uppercase text-gray-500">
+                        <span>Query</span><span className="text-right">Pos.</span><span className="text-right">Impr.</span><span className="text-right">CTR</span><span className="text-right">Score</span>
+                      </div>
+                      {trafficResult.opportunities.map((q, i) => (
+                        <div key={i} className="grid grid-cols-[1fr_48px_64px_52px_68px] gap-2 border-t border-gray-100 px-3 py-2 text-[13px] first:border-t-0">
+                          <span className="truncate text-gray-800" title={q.query}>{q.query}</span>
+                          <span className="text-right text-gray-500">{q.position.toFixed(1)}</span>
+                          <span className="text-right text-gray-700">{q.impressions.toLocaleString()}</span>
+                          <span className="text-right text-gray-500">{(q.ctr * 100).toFixed(1)}%</span>
+                          <span className="text-right font-medium text-gray-900">{q.score.toFixed(0)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 {trafficResult.topQueries.length === 0 ? (
                   <div className="rounded-xl border border-gray-200 p-3 text-sm text-gray-500">No query data for this range yet.</div>
                 ) : (
