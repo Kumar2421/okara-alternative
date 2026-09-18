@@ -1,4 +1,5 @@
 import { getDb } from "@/lib/db";
+import crypto from "node:crypto";
 import type {
   IntegrationResource,
   IntegrationSecrets,
@@ -60,7 +61,7 @@ export function upsertProjectIntegration(input: {
   const db = getDb();
   const now = new Date().toISOString();
   const existing = getProjectIntegration(input.projectId, input.integrationType);
-  const id = existing?.id ?? `int_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  const id = existing?.id ?? `int_${crypto.randomUUID()}`;
 
   db.prepare(`
     INSERT INTO project_integrations
@@ -122,7 +123,7 @@ export function replaceIntegrationResources(
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
     resources.forEach((resource, index) => {
-      const id = `res_${Date.now().toString(36)}${index}_${Math.random().toString(36).slice(2, 7)}`;
+      const id = `res_${crypto.randomUUID()}`;
       insert.run(
         id,
         integrationId,
