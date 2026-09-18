@@ -70,7 +70,7 @@ export async function getConnectedEmail(accessToken: string): Promise<string | n
 }
 
 /** First verified Search Console site for this account, or null if none. */
-export async function listFirstSearchConsoleSite(accessToken: string): Promise<string | null> {
+export async function listSearchConsoleSites(accessToken: string): Promise<string[]> {
   try {
     const res = await fetch("https://www.googleapis.com/webmasters/v3/sites", {
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -85,7 +85,7 @@ export async function listFirstSearchConsoleSite(accessToken: string): Promise<s
 }
 
 /** First GA4 property for this account, or null if none — { id: "properties/123", name } */
-export async function listFirstGA4Property(accessToken: string): Promise<{ id: string; name: string } | null> {
+export async function listGA4Properties(accessToken: string): Promise<{ id: string; name: string }[]> {
   try {
     const res = await fetch("https://analyticsadmin.googleapis.com/v1beta/accountSummaries", {
       headers: { Authorization: `Bearer ${accessToken}` },
