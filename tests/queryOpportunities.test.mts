@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { findQueryOpportunities } from "../lib/domain/analytics/queryOpportunities.ts";
+import { findQueryOpportunities } from "../lib/domain/analytics/queryOpportunities";
 
 const row = (
   query: string,
