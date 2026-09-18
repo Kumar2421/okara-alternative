@@ -1,40 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { upsertFinding } from "@/lib/domain/findings/findingStore";
+import { listProjectFindings, upsertFinding } from "@/lib/domain/findings/findingStore";
+import { deriveSearchFinding } from "@/lib/domain/findings/findingRules";
 import { SEOAgent } from "@/lib/domain/seo/SEOAgent";
 import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
-
-function deriveFinding(evidence: {
-  meta: { title: string; canonical?: string; indexable: boolean };
-  contentRelevance: { keywordRelevance: number };
-  serverTiming: { ttfbMs?: number };
-}) {
-  const issues: string[] = [];
-  if (!evidence.meta.indexable) issues.push("Page is marked noindex.");
-  if (!evidence.meta.canonical) issues.push("Page is missing a canonical URL.");
-  if (evidence.contentRelevance.keywordRelevance < 50) issues.push("Page content has low keyword relevance.");
-  if (typeof evidence.serverTiming.ttfbMs === "number" && evidence.serverTiming.ttfbMs > 1500) {
-    issues.push("Page TTFB is above 1500 ms.");
-  }
-  if (issues.length === 0) return null;
-
-  const severity = !evidence.meta.indexable || evidence.contentRelevance.keywordRelevance < 30
-    ? "critical"
-    : "warning";
-
-  return {
-    severity: severity as "critical" | "warning",
-    recommendation: [
-      ...issues,
-      "Review the ranking page and address the listed technical or content issues before re-checking the query.",
-    ].join(" "),
-  };
-}
 
 export async function GET() {
   const projectId = getActiveProjectId();
   if (!projectId) return NextResponse.json({ error: "No active project." }, { status: 422 });
-  const findings = (await import("@/lib/domain/findings/findingStore")).listProjectFindings(projectId);
+  const findings = listProjectFindings(projectId);
   return NextResponse.json({ findings });
 }
 
@@ -68,7 +42,7 @@ export async function POST(req: NextRequest) {
     const stored = db.prepare("SELECT value FROM settings WHERE key = 'pagespeed_api_key'").get() as { value: string } | undefined;
     const pageSpeedApiKey = stored?.value || process.env.PAGESPEED_API_KEY || undefined;
     const audit = await new SEOAgent(pageSpeedApiKey).audit(target.toString());
-    const finding = deriveFinding(audit);
+    const finding = deriveSearchFinding(audit);
     if (!finding) {
       return NextResponse.json({ finding: null, message: "No actionable issue found on this ranking page." });
     }
