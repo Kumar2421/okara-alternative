@@ -243,6 +243,55 @@ function migrate(db: Database.Database) {
     db.exec(`ALTER TABLE provider_connections ADD COLUMN base_url TEXT`);
   }
 
+  // Migrate the legacy global Google connection only when ownership is unambiguous.
+  // Multiple projects must never receive credentials silently.
+  const legacy = db.prepare(
+    "SELECT key, value FROM settings WHERE key IN ('ga_access_token','ga_refresh_token','ga_token_expiry','ga_email','gsc_site_url','ga_property_id','ga_property_name')"
+  ).all() as { key: string; value: string }[];
+  const legacyMap = Object.fromEntries(legacy.map((row) => [row.key, row.value]));
+  const projectRows = db.prepare("SELECT id FROM projects ORDER BY updated_at DESC").all() as { id: string }[];
+  const hasIntegrations = db.prepare("SELECT 1 FROM project_integrations LIMIT 1").get();
+
+  if (!hasIntegrations && legacyMap.ga_refresh_token && projectRows.length === 1) {
+    const projectId = projectRows[0].id;
+    const now = new Date().toISOString();
+    const baseId = "int_legacy_google";
+    db.prepare(
+      `INSERT OR IGNORE INTO project_integrations
+        (id, project_id, provider, integration_type, status, account_identifier, connected_at, updated_at)
+       VALUES (?, ?, 'google', 'google-search-console', 'connected', ?, ?, ?)`
+    ).run(baseId + "_gsc", projectId, legacyMap.ga_email ?? null, now, now);
+    db.prepare(
+      `INSERT OR IGNORE INTO project_integrations
+        (id, project_id, provider, integration_type, status, account_identifier, connected_at, updated_at)
+       VALUES (?, ?, 'google', 'google-analytics', 'connected', ?, ?, ?)`
+    ).run(baseId + "_ga4", projectId, legacyMap.ga_email ?? null, now, now);
+
+    const gscId = baseId + "_gsc";
+    const ga4Id = baseId + "_ga4";
+    db.prepare(
+      "INSERT OR REPLACE INTO integration_secrets (integration_id, access_token, refresh_token, expires_at, updated_at) VALUES (?, ?, ?, ?, ?)"
+    ).run(gscId, legacyMap.ga_access_token ?? "", legacyMap.ga_refresh_token, Number(legacyMap.ga_token_expiry ?? 0), now);
+    db.prepare(
+      "INSERT OR REPLACE INTO integration_secrets (integration_id, access_token, refresh_token, expires_at, updated_at) VALUES (?, ?, ?, ?, ?)"
+    ).run(ga4Id, legacyMap.ga_access_token ?? "", legacyMap.ga_refresh_token, Number(legacyMap.ga_token_expiry ?? 0), now);
+
+    if (legacyMap.gsc_site_url) {
+      db.prepare(
+        "INSERT OR REPLACE INTO integration_resources (id, integration_id, resource_type, resource_id, resource_name, metadata, selected) VALUES (?, ?, 'search_console_property', ?, ?, '{}', 1)"
+      ).run("res_legacy_gsc", gscId, legacyMap.gsc_site_url, legacyMap.gsc_site_url);
+    }
+    if (legacyMap.ga_property_id) {
+      db.prepare(
+        "INSERT OR REPLACE INTO integration_resources (id, integration_id, resource_type, resource_id, resource_name, metadata, selected) VALUES (?, ?, 'ga4_property', ?, ?, '{}', 1)"
+      ).run("res_legacy_ga4", ga4Id, legacyMap.ga_property_id, legacyMap.ga_property_name ?? legacyMap.ga_property_id);
+    }
+
+    for (const key of Object.keys(legacyMap)) {
+      db.prepare("DELETE FROM settings WHERE key = ?").run(key);
+    }
+  }
+
   const leadsCols = db.prepare("PRAGMA table_info(leads)").all() as { name: string }[];
   if (leadsCols.length > 0) {
     if (!leadsCols.some((c) => c.name === "email_verified")) {
