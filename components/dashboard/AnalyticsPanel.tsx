@@ -225,7 +225,6 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
     if (tab === "Traffic" && !trafficResult) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setTrafficLoading(true);
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setTrafficError(null);
       log("Fetching real Search Console + Analytics data...");
       fetch("/api/agents/analytics/traffic")
