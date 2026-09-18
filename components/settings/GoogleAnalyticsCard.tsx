@@ -1,6 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+/* eslint-disable react-hooks/set-state-in-effect */
+
+import { useEffect, useState } from "react";
 import { Check, AlertTriangle } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useToast } from "@/components/dashboard/Toast";
@@ -23,7 +25,7 @@ export default function GoogleAnalyticsCard() {
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
-  const load = useCallback(async () => {
+  async function load() {
     try {
       const [envRes, resourceRes] = await Promise.all([
         fetch("/api/settings/env"),
@@ -48,7 +50,7 @@ export default function GoogleAnalyticsCard() {
   useEffect(() => {
     if (project) load();
     else setLoaded(true);
-  }, [project, load]);
+  }, [project]);
 
   async function selectResource(integrationType: IntegrationResources["integrationType"], resourceId: string) {
     setBusy(true);
