@@ -42,7 +42,11 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const audit = await new SEOAgent().audit(target.toString());
+    const stored = db.prepare("SELECT value FROM settings WHERE key = 'pagespeed_api_key'").get() as
+      | { value: string }
+      | undefined;
+    const pageSpeedApiKey = stored?.value || process.env.PAGESPEED_API_KEY || undefined;
+    const audit = await new SEOAgent(pageSpeedApiKey).audit(target.toString());
 
     return NextResponse.json({
       url: audit.url,
@@ -54,6 +58,8 @@ export async function POST(req: NextRequest) {
         redirectCount: audit.technical.redirectCount,
       },
       serverTiming: audit.serverTiming,
+      pageSpeed: audit.pageSpeed,
+      coreWebVitals: audit.coreWebVitals,
       links: {
         internal: audit.links.filter((link) => link.internal).length,
         external: audit.links.filter((link) => !link.internal).length,
