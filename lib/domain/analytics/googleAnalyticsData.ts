@@ -1,39 +1,43 @@
-import { getDb } from "@/lib/db";
 import { refreshAccessToken } from "@/lib/domain/shared/googleAnalyticsOAuth";
+import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
+import {
+  getIntegrationSecrets,
+  getProjectIntegration,
+  saveIntegrationSecrets,
+  getSelectedIntegrationResource,
+} from "@/lib/domain/integrations/integrationStore";
 
-/** Same refresh-on-demand pattern as leads/gmailSend.ts's getValidAccessToken —
- * persists the refreshed token back to settings so the next call skips it. */
 async function getValidAccessToken(): Promise<string> {
-  const db = getDb();
-  const rows = db
-    .prepare("SELECT key, value FROM settings WHERE key IN ('ga_access_token', 'ga_refresh_token', 'ga_token_expiry')")
-    .all() as { key: string; value: string }[];
-  const map = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+  const projectId = getActiveProjectId();
+  if (!projectId) throw new Error("No active project — select or create a project first.");
 
-  if (!map.ga_refresh_token) {
-    throw new Error("Google Analytics / Search Console isn't connected — connect it in Settings → API Credentials.");
+  const integration =
+    getProjectIntegration(projectId, "google-search-console") ??
+    getProjectIntegration(projectId, "google-analytics");
+  if (!integration) {
+    throw new Error("Google Analytics / Search Console isn't connected for this project — connect it in Settings → API Credentials.");
   }
 
-  const expiresAt = Number(map.ga_token_expiry ?? 0);
-  if (map.ga_access_token && Date.now() < expiresAt - 60_000) {
-    return map.ga_access_token;
+  const secrets = getIntegrationSecrets(integration.id);
+  if (!secrets?.refreshToken) {
+    throw new Error("Google Analytics / Search Console credentials are incomplete — reconnect this project.");
   }
 
-  const refreshed = await refreshAccessToken(map.ga_refresh_token);
-  db.prepare(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(
-    "ga_access_token",
-    refreshed.accessToken
-  );
-  db.prepare(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(
-    "ga_token_expiry",
-    String(refreshed.expiresAt)
-  );
+  if (secrets.accessToken && Date.now() < secrets.expiresAt - 60_000) {
+    return secrets.accessToken;
+  }
+
+  const refreshed = await refreshAccessToken(secrets.refreshToken);
+  saveIntegrationSecrets(integration.id, {
+    accessToken: refreshed.accessToken,
+    refreshToken: secrets.refreshToken,
+    expiresAt: refreshed.expiresAt,
+  });
   return refreshed.accessToken;
 }
 
 export type SearchAnalyticsRow = { keys: string[]; clicks: number; impressions: number; ctr: number; position: number };
 
-/** Real Search Console searchAnalytics.query call — https://developers.google.com/webmaster-tools/v1/searchanalytics/query */
 export async function fetchSearchAnalytics(
   siteUrl: string,
   startDate: string,
@@ -57,7 +61,6 @@ export async function fetchSearchAnalytics(
 
 export type GA4Summary = { sessions: number; activeUsers: number; screenPageViews: number };
 
-/** Real GA4 Data API runReport call — https://developers.google.com/analytics/devguides/reporting/data/v1/rest/v1beta/properties/runReport */
 export async function fetchGA4Summary(propertyId: string, startDate: string, endDate: string): Promise<GA4Summary> {
   const accessToken = await getValidAccessToken();
   const res = await fetch(`https://analyticsdata.googleapis.com/v1beta/${propertyId}:runReport`, {
@@ -75,4 +78,15 @@ export async function fetchGA4Summary(propertyId: string, startDate: string, end
   const data = await res.json();
   const values: string[] = data.rows?.[0]?.metricValues?.map((m: { value: string }) => m.value) ?? ["0", "0", "0"];
   return { sessions: Number(values[0] ?? 0), activeUsers: Number(values[1] ?? 0), screenPageViews: Number(values[2] ?? 0) };
+}
+
+export function getSelectedSearchConsoleSite(projectId: string): string | null {
+  const integration = getProjectIntegration(projectId, "google-search-console");
+  return integration ? getSelectedIntegrationResource(integration.id, "search_console_property")?.resourceId ?? null : null;
+}
+
+export function getSelectedGA4Property(projectId: string): { id: string; name: string } | null {
+  const integration = getProjectIntegration(projectId, "google-analytics");
+  const resource = integration ? getSelectedIntegrationResource(integration.id, "ga4_property") : null;
+  return resource ? { id: resource.resourceId, name: resource.resourceName } : null;
 }
