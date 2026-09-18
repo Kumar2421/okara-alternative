@@ -40,7 +40,12 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     db.prepare("DELETE FROM link_checks WHERE project_id = ?").run(id);
     db.prepare("DELETE FROM geo_checks WHERE project_id = ?").run(id);
     db.prepare("DELETE FROM site_crawls WHERE project_id = ?").run(id);
-    db.prepare("DELETE FROM leads WHERE project_id = ?").run(id);\n    const integrations = db.prepare("SELECT id FROM project_integrations WHERE project_id = ?").all(id) as { id: string }[];\n    for (const integration of integrations) {\n      db.prepare("DELETE FROM integration_secrets WHERE integration_id = ?").run(integration.id);\n      db.prepare("DELETE FROM integration_resources WHERE integration_id = ?").run(integration.id);\n    }\n    db.prepare("DELETE FROM project_integrations WHERE project_id = ?").run(id);
+    db.prepare("DELETE FROM leads WHERE project_id = ?").run(id);
+    const integrations = db.prepare("SELECT id FROM project_integrations WHERE project_id = ?").all(id) as { id: string }[];
+    for (const integration of integrations) {\n      db.prepare("DELETE FROM integration_secrets WHERE integration_id = ?").run(integration.id);
+      db.prepare("DELETE FROM integration_resources WHERE integration_id = ?").run(integration.id);
+    }
+    db.prepare("DELETE FROM project_integrations WHERE project_id = ?").run(id);
     db.prepare("DELETE FROM seo_audits WHERE url = ?").run(project.url);
     db.prepare("DELETE FROM projects WHERE id = ?").run(id);
   });
