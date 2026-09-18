@@ -16,7 +16,28 @@ type Tab = (typeof TABS)[number];
 
 type TrafficByDate = { date: string; clicks: number; impressions: number; ctr: number; position: number };
 type TrafficQuery = { query: string; clicks: number; impressions: number; ctr: number; position: number };
-type TrafficOpportunity = TrafficQuery & { score: number };
+type TrafficRankingPage = {
+  url: string;
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  position: number;
+};
+type TrafficOpportunity = TrafficQuery & { score: number; rankingPages: TrafficRankingPage[] };
+
+type PageEvidence = {
+  url: string;
+  meta: { title: string; description: string; canonical?: string; robots?: string; indexable: boolean };
+  headings: { h1: number; h2: number; h3: number };
+  contentRelevance: { titleRelevance: number; descriptionRelevance: number; keywordRelevance: number };
+  technical: { status: number; redirectCount: number };
+  serverTiming: { ttfbMs?: number };
+  links: { internal: number; external: number };
+  pageSpeed?: {
+    desktop: { performance: number; accessibility: number; bestPractices: number; seo: number };
+    mobile: { performance: number; accessibility: number; bestPractices: number; seo: number };
+  };
+};
 type TrafficResult = {
   range: { startDate: string; endDate: string };
   site: string | null;
@@ -166,6 +187,7 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
   const [trafficResult, setTrafficResult] = useState<TrafficResult | null>(null);
   const [trafficLoading, setTrafficLoading] = useState(false);
   const [trafficError, setTrafficError] = useState<string | null>(null);
+  const [pageEvidence, setPageEvidence] = useState<Record<string, PageEvidence | { error: string }>>({});
   const { show } = useToast();
   const { project } = useProject();
   const { log, logDone } = useTerminalLog();
@@ -246,6 +268,31 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, project?.id, tab]);
+
+  const handleInspectRankingPage = async (url: string) => {
+    if (pageEvidence[url]) return;
+
+    setPageEvidence((prev) => ({ ...prev, [url]: { error: "" } }));
+    log(`Inspecting ranking page: ${url}`);
+    try {
+      const res = await fetch("/api/agents/analytics/page-evidence", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setPageEvidence((prev) => ({ ...prev, [url]: { error: data.error ?? "Failed to inspect page." } }));
+        logDone(`⚠ Failed to inspect ranking page.`);
+        return;
+      }
+      setPageEvidence((prev) => ({ ...prev, [url]: data }));
+      logDone(`Ranking page inspected — ${url}`);
+    } catch {
+      setPageEvidence((prev) => ({ ...prev, [url]: { error: "Failed to inspect ranking page." } }));
+      logDone("⚠ Failed to inspect ranking page.");
+    }
+  };
 
   const handleCheckLinks = async () => {
     setLinksChecking(true);
@@ -531,15 +578,107 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
                       <div className="grid grid-cols-[1fr_48px_64px_52px_68px] gap-2 border-b border-gray-100 bg-gray-50 px-3 py-2 text-[11px] font-semibold uppercase text-gray-500">
                         <span>Query</span><span className="text-right">Pos.</span><span className="text-right">Impr.</span><span className="text-right">CTR</span><span className="text-right">Score</span>
                       </div>
-                      {trafficResult.opportunities.map((q, i) => (
-                        <div key={i} className="grid grid-cols-[1fr_48px_64px_52px_68px] gap-2 border-t border-gray-100 px-3 py-2 text-[13px] first:border-t-0">
-                          <span className="truncate text-gray-800" title={q.query}>{q.query}</span>
-                          <span className="text-right text-gray-500">{q.position.toFixed(1)}</span>
-                          <span className="text-right text-gray-700">{q.impressions.toLocaleString()}</span>
-                          <span className="text-right text-gray-500">{(q.ctr * 100).toFixed(1)}%</span>
-                          <span className="text-right font-medium text-gray-900">{q.score.toFixed(0)}</span>
-                        </div>
-                      ))}
+                      {trafficResult.opportunities.map((q, i) => {
+                        const rankingPage = q.rankingPages[0];
+                        const evidence = rankingPage ? pageEvidence[rankingPage.url] : undefined;
+                        const evidenceData = evidence && !("error" in evidence) ? evidence : null;
+                        const evidenceError = evidence && "error" in evidence && evidence.error ? evidence.error : null;
+
+                        return (
+                          <div key={i} className="border-t border-gray-100 px-3 py-2.5 first:border-t-0">
+                            <div className="grid grid-cols-[1fr_48px_64px_52px_68px] gap-2 text-[13px]">
+                              <div className="min-w-0">
+                                <div className="truncate text-gray-800" title={q.query}>{q.query}</div>
+                                {rankingPage ? (
+                                  <a
+                                    href={rankingPage.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="mt-0.5 flex min-w-0 items-center gap-1 truncate text-[11px] text-gray-400 hover:text-gray-600 hover:underline"
+                                    title={rankingPage.url}
+                                  >
+                                    <ExternalLink size={9} className="shrink-0" />
+                                    <span className="truncate">{rankingPage.url}</span>
+                                    {q.rankingPages.length > 1 && <span className="shrink-0">+{q.rankingPages.length - 1}</span>}
+                                  </a>
+                                ) : (
+                                  <span className="mt-0.5 block text-[11px] text-gray-400">No ranking page data</span>
+                                )}
+                              </div>
+                              <span className="text-right text-gray-500">{q.position.toFixed(1)}</span>
+                              <span className="text-right text-gray-700">{q.impressions.toLocaleString()}</span>
+                              <span className="text-right text-gray-500">{(q.ctr * 100).toFixed(1)}%</span>
+                              <span className="text-right font-medium text-gray-900">{q.score.toFixed(0)}</span>
+                            </div>
+
+                            {rankingPage && (
+                              <div className="mt-2 flex items-center gap-2">
+                                <button
+                                  onClick={() => handleInspectRankingPage(rankingPage.url)}
+                                  disabled={!!evidenceData || (!!evidence && !evidenceError)}
+                                  className="rounded-md border border-gray-200 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-60"
+                                >
+                                  {evidence && !evidenceData && !evidenceError ? (
+                                    <Loader2 size={11} className="inline animate-spin" />
+                                  ) : evidenceData ? "Inspected" : "Inspect page"}
+                                </button>
+                                {evidenceError && <span className="truncate text-[11px] text-amber-600">{evidenceError}</span>}
+                              </div>
+                            )}
+
+                            {evidenceData && (
+                              <div className="mt-2 grid grid-cols-2 gap-2 rounded-lg bg-gray-50 p-2.5 text-[11px] text-gray-600">
+                                <div>
+                                  <span className="text-gray-400">Title</span>
+                                  <div className="truncate font-medium text-gray-800" title={evidenceData.meta.title}>
+                                    {evidenceData.meta.title || "Missing"}
+                                  </div>
+                                </div>
+                                <div>
+                                  <span className="text-gray-400">H1</span>
+                                  <div className="font-medium text-gray-800">{evidenceData.headings.h1}</div>
+                                </div>
+                                <div>
+                                  <span className="text-gray-400">Canonical</span>
+                                  <div className="truncate font-medium text-gray-800" title={evidenceData.meta.canonical}>
+                                    {evidenceData.meta.canonical || "Missing"}
+                                  </div>
+                                </div>
+                                <div>
+                                  <span className="text-gray-400">Indexability</span>
+                                  <div className="font-medium text-gray-800">
+                                    {evidenceData.meta.indexable ? "Indexable" : "Noindex"}
+                                  </div>
+                                </div>
+                                <div>
+                                  <span className="text-gray-400">Content relevance</span>
+                                  <div className="font-medium text-gray-800">{evidenceData.contentRelevance.keywordRelevance}%</div>
+                                </div>
+                                <div>
+                                  <span className="text-gray-400">Internal links</span>
+                                  <div className="font-medium text-gray-800">{evidenceData.links.internal}</div>
+                                </div>
+                                <div>
+                                  <span className="text-gray-400">TTFB</span>
+                                  <div className="font-medium text-gray-800">
+                                    {typeof evidenceData.serverTiming.ttfbMs === "number" ? `${Math.round(evidenceData.serverTiming.ttfbMs)} ms` : "Unavailable"}
+                                  </div>
+                                </div>
+                                <div>
+                                  <span className="text-gray-400">HTTP</span>
+                                  <div className="font-medium text-gray-800">{evidenceData.technical.status}</div>
+                                </div>
+                                <div>
+                                  <span className="text-gray-400">PageSpeed</span>
+                                  <div className="font-medium text-gray-800">
+                                    {evidenceData.pageSpeed ? `${evidenceData.pageSpeed.desktop.performance} desktop` : "Not connected"}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
