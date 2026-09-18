@@ -223,7 +223,9 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
         .catch(() => {});
     }
     if (tab === "Traffic" && !trafficResult) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setTrafficLoading(true);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setTrafficError(null);
       log("Fetching real Search Console + Analytics data...");
       fetch("/api/agents/analytics/traffic")
@@ -357,7 +359,7 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
         const err = await res.json();
         show(`Error: ${err.error}`);
       }
-    } catch (e) {
+    } catch {
       show("Failed to run SEO audit.");
     } finally {
       setLoading(false);
@@ -785,7 +787,7 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
                     </div>
                   ) : (
                     <div className="rounded-xl border border-dashed border-gray-200 p-4 text-[13px] text-gray-500">
-                      Follows the internal links found above, fetching each page's real content — no key required.
+                      Follows the internal links found above, fetching each page&apos;s real content — no key required.
                     </div>
                   )
                 ) : siteCrawlResult.pages.length === 0 ? (
