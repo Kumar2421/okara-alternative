@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Check, AlertTriangle } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useToast } from "@/components/dashboard/Toast";
@@ -23,7 +23,7 @@ export default function GoogleAnalyticsCard() {
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
-  async function load() {
+  const load = useCallback(async () => {
     try {
       const [envRes, resourceRes] = await Promise.all([
         fetch("/api/settings/env"),
