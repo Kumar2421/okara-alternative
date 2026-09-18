@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { deriveSearchFinding } from "../lib/domain/findings/findingRules";
+import { deriveSearchFinding } from "../lib/domain/findings/findingRules.ts";
 
 const base = {
   meta: { title: "Example", canonical: "https://example.com/page", indexable: true },
