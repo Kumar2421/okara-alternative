@@ -45,10 +45,11 @@ export default function GoogleAnalyticsCard() {
     if (error) show(`Google Analytics connect failed: ${error}`);
   }, [searchParams, show]);
 
+  // This effect synchronizes project changes with remote integration state.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
     if (project) load();
     else setLoaded(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project]);
 
   async function selectResource(integrationType: IntegrationResources["integrationType"], resourceId: string) {
