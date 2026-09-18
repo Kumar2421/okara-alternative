@@ -1,25 +1,44 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Check, AlertTriangle } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useToast } from "@/components/dashboard/Toast";
 import BrandIcon from "@/components/settings/BrandIcon";
+import { useProject } from "@/lib/project-store";
 
-/** Real GA4 + Search Console OAuth — reuses the same GMAIL_CLIENT_ID/SECRET
- * app config as the Gmail card (one Google Cloud OAuth client, separate
- * consent flow/scopes/token set). Mirrors GmailCard.tsx's honesty pattern:
- * never implies "connected" until settings actually confirm it. */
+type Resource = { resourceId: string; resourceName: string; selected: boolean };
+type IntegrationResources = {
+  integrationType: "google-search-console" | "google-analytics";
+  integrationId: string | null;
+  resources: Resource[];
+};
+
 export default function GoogleAnalyticsCard() {
   const { show } = useToast();
   const searchParams = useSearchParams();
-
+  const { project } = useProject();
   const [envActive, setEnvActive] = useState({ GMAIL_CLIENT_ID: false, GMAIL_CLIENT_SECRET: false });
-  const [connectedEmail, setConnectedEmail] = useState<string | null>(null);
-  const [siteUrl, setSiteUrl] = useState<string | null>(null);
-  const [propertyName, setPropertyName] = useState<string | null>(null);
+  const [resources, setResources] = useState<IntegrationResources[]>([]);
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const [envRes, resourceRes] = await Promise.all([
+        fetch("/api/settings/env"),
+        fetch("/api/project/integrations/google/resources"),
+      ]);
+      const envData = await envRes.json();
+      const resourceData = await resourceRes.json();
+      setEnvActive(envData.active ?? { GMAIL_CLIENT_ID: false, GMAIL_CLIENT_SECRET: false });
+      setResources(resourceData.integrations ?? []);
+    } catch {
+      // Keep the card usable if the backend is temporarily unavailable.
+    } finally {
+      setLoaded(true);
+    }
+  }
 
   useEffect(() => {
     const error = searchParams.get("ga_error");
@@ -27,34 +46,46 @@ export default function GoogleAnalyticsCard() {
   }, [searchParams, show]);
 
   useEffect(() => {
-    Promise.all([fetch("/api/settings/env").then((r) => r.json()), fetch("/api/settings").then((r) => r.json())])
-      .then(([envData, settingsData]) => {
-        setEnvActive(envData.active ?? { GMAIL_CLIENT_ID: false, GMAIL_CLIENT_SECRET: false });
-        const find = (key: string) => settingsData.settings?.find((s: { key: string; value: string }) => s.key === key)?.value || null;
-        setConnectedEmail(find("ga_email"));
-        setSiteUrl(find("gsc_site_url"));
-        setPropertyName(find("ga_property_name"));
-      })
-      .catch(() => {})
-      .finally(() => setLoaded(true));
-  }, []);
+    if (project) load();
+    else setLoaded(true);
+  }, [project, load]);
+
+  async function selectResource(integrationType: IntegrationResources["integrationType"], resourceId: string) {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/project/integrations/google/resources", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ integrationType, resourceId }),
+      });
+      if (!res.ok) throw new Error();
+      await load();
+      show("Google resource selected for this project.");
+    } catch {
+      show("Failed to select Google resource.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function handleDisconnect() {
     setBusy(true);
     try {
-      await fetch("/api/auth/google-analytics/disconnect", { method: "POST" });
-      setConnectedEmail(null);
-      setSiteUrl(null);
-      setPropertyName(null);
-      show("Google Analytics / Search Console disconnected.");
+      const res = await fetch("/api/auth/google-analytics/disconnect", { method: "POST" });
+      if (!res.ok) throw new Error();
+      await load();
+      show("Google Analytics / Search Console disconnected from this project.");
     } catch {
-      show("Failed to disconnect.");
+      show("Failed to disconnect Google.");
     } finally {
       setBusy(false);
     }
   }
 
   const clientCredsActive = envActive.GMAIL_CLIENT_ID && envActive.GMAIL_CLIENT_SECRET;
+  const gsc = resources.find((r) => r.integrationType === "google-search-console");
+  const ga4 = resources.find((r) => r.integrationType === "google-analytics");
+  const connected = Boolean(gsc?.integrationId || ga4?.integrationId);
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-4">
@@ -67,38 +98,43 @@ export default function GoogleAnalyticsCard() {
           <div>
             <div className="flex items-center gap-2 text-[13px] font-semibold text-gray-900">
               Google Analytics &amp; Search Console
-              {connectedEmail && (
+              {connected && (
                 <span className="flex items-center gap-1 rounded-full bg-[#e6f7f4] px-2 py-0.5 text-[10px] font-medium text-[#00846f]">
                   <Check size={10} /> Connected
                 </span>
               )}
             </div>
             <div className="text-[12px] text-gray-500">
-              Powers the Traffic tab — real search clicks, rankings and top queries. Uses the same
-              OAuth client as Gmail, above.
+              Powers the Traffic tab for the currently selected project.
             </div>
           </div>
         </div>
       </div>
 
-      {!loaded ? null : !clientCredsActive ? (
+      {!project ? (
+        <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-[11px] text-gray-600">
+          Select or create a project before connecting Google.
+        </div>
+      ) : !loaded ? null : !clientCredsActive ? (
         <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-800">
           <AlertTriangle size={12} className="mt-0.5 shrink-0" />
           Set up the Gmail OAuth Client ID/Secret above first — this reuses the same client.
         </div>
-      ) : connectedEmail ? (
-        <div className="space-y-2">
-          <div className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2 text-[12px] text-gray-600">
-            <span>{connectedEmail}</span>
-            <button onClick={handleDisconnect} disabled={busy} className="font-medium text-red-600 hover:underline disabled:opacity-50">
-              Disconnect
-            </button>
-          </div>
-          <div className="text-[11px] text-gray-500">
-            Search Console site: {siteUrl ? <span className="font-medium text-gray-700">{siteUrl}</span> : <span className="text-amber-600">none found on this account</span>}
-            {" · "}
-            GA4 property: {propertyName ? <span className="font-medium text-gray-700">{propertyName}</span> : <span className="text-amber-600">none found on this account</span>}
-          </div>
+      ) : connected ? (
+        <div className="space-y-3">
+          {gsc?.resources.length ? (
+            <ResourcePicker title="Search Console site" integrationType="google-search-console" resources={gsc.resources} disabled={busy} onSelect={selectResource} />
+          ) : (
+            <div className="text-[11px] text-amber-600">No Search Console properties were found on this Google account.</div>
+          )}
+          {ga4?.resources.length ? (
+            <ResourcePicker title="GA4 property" integrationType="google-analytics" resources={ga4.resources} disabled={busy} onSelect={selectResource} />
+          ) : (
+            <div className="text-[11px] text-amber-600">No GA4 properties were found on this Google account.</div>
+          )}
+          <button onClick={handleDisconnect} disabled={busy} className="text-[11px] font-medium text-red-600 hover:underline disabled:opacity-50">
+            Disconnect Google from this project
+          </button>
         </div>
       ) : (
         <a
@@ -109,5 +145,37 @@ export default function GoogleAnalyticsCard() {
         </a>
       )}
     </div>
+  );
+}
+
+function ResourcePicker({
+  title,
+  integrationType,
+  resources,
+  disabled,
+  onSelect,
+}: {
+  title: string;
+  integrationType: IntegrationResources["integrationType"];
+  resources: Resource[];
+  disabled: boolean;
+  onSelect: (type: IntegrationResources["integrationType"], resourceId: string) => Promise<void>;
+}) {
+  return (
+    <label className="block text-[11px] text-gray-500">
+      <span className="mb-1 block">{title}</span>
+      <select
+        value={resources.find((resource) => resource.selected)?.resourceId ?? ""}
+        disabled={disabled}
+        onChange={(e) => onSelect(integrationType, e.target.value)}
+        className="w-full rounded-lg border border-gray-200 bg-white px-2.5 py-2 text-[12px] text-gray-700 disabled:opacity-50"
+      >
+        {resources.map((resource) => (
+          <option key={resource.resourceId} value={resource.resourceId}>
+            {resource.resourceName}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }

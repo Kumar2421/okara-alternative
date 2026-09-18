@@ -1,22 +1,30 @@
 import { NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
-import { fetchSearchAnalytics, fetchGA4Summary } from "@/lib/domain/analytics/googleAnalyticsData";
+import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
+import {
+  fetchSearchAnalytics,
+  fetchGA4Summary,
+  getSelectedGA4Property,
+  getSelectedSearchConsoleSite,
+} from "@/lib/domain/analytics/googleAnalyticsData";
+import { findQueryOpportunities } from "@/lib/domain/analytics/queryOpportunities";
+import { attachRankingPages } from "@/lib/domain/analytics/queryPageCorrelation";
 
 function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Real Search Console + GA4 data for the Traffic tab. GSC data lags ~2-3
- * days behind real-time, so the window ends 3 days ago, not today. */
 export async function GET() {
-  const db = getDb();
-  const rows = db
-    .prepare("SELECT key, value FROM settings WHERE key IN ('gsc_site_url', 'ga_property_id', 'ga_property_name', 'ga_email')")
-    .all() as { key: string; value: string }[];
-  const map = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+  const projectId = getActiveProjectId();
+  if (!projectId) {
+    return NextResponse.json({ error: "No active project — select or create a project first." }, { status: 422 });
+  }
 
-  if (!map.ga_email) {
-    return NextResponse.json({ error: "Not connected — connect Google Analytics / Search Console in Settings → API Credentials." }, { status: 422 });
+  const siteUrl = getSelectedSearchConsoleSite(projectId);
+  const ga4Property = getSelectedGA4Property(projectId);
+  if (!siteUrl && !ga4Property) {
+    return NextResponse.json({
+      error: "Google Analytics / Search Console isn't connected for this project — connect it in Settings → API Credentials.",
+    }, { status: 422 });
   }
 
   const end = new Date();
@@ -28,20 +36,33 @@ export async function GET() {
 
   let byDate: { date: string; clicks: number; impressions: number; ctr: number; position: number }[] = [];
   let topQueries: { query: string; clicks: number; impressions: number; ctr: number; position: number }[] = [];
+  let opportunities: ReturnType<typeof findQueryOpportunities> = [];
   let totals = { clicks: 0, impressions: 0, ctr: 0, position: 0 };
   let gscError: string | null = null;
 
-  if (map.gsc_site_url) {
+  if (siteUrl) {
     try {
-      const [dateRows, queryRows] = await Promise.all([
-        fetchSearchAnalytics(map.gsc_site_url, startDate, endDate, ["date"]),
-        fetchSearchAnalytics(map.gsc_site_url, startDate, endDate, ["query"], 10),
+      const [dateRows, queryRows, queryPageRows] = await Promise.all([
+        fetchSearchAnalytics(siteUrl, startDate, endDate, ["date"]),
+        fetchSearchAnalytics(siteUrl, startDate, endDate, ["query"], 25000),
+        fetchSearchAnalytics(siteUrl, startDate, endDate, ["query", "page"]),
       ]);
 
       byDate = dateRows.map((r) => ({ date: r.keys[0], clicks: r.clicks, impressions: r.impressions, ctr: r.ctr, position: r.position }));
       topQueries = queryRows
         .sort((a, b) => b.clicks - a.clicks)
+        .slice(0, 10)
         .map((r) => ({ query: r.keys[0], clicks: r.clicks, impressions: r.impressions, ctr: r.ctr, position: r.position }));
+
+      const ranked = findQueryOpportunities(queryRows).map((row) => ({
+        query: row.query,
+        clicks: row.clicks,
+        impressions: row.impressions,
+        ctr: row.ctr,
+        position: row.position,
+        score: Number(row.score.toFixed(2)),
+      }));
+      opportunities = attachRankingPages(ranked, queryPageRows) as typeof opportunities;
 
       const totalClicks = byDate.reduce((sum, r) => sum + r.clicks, 0);
       const totalImpressions = byDate.reduce((sum, r) => sum + r.impressions, 0);
@@ -59,9 +80,9 @@ export async function GET() {
 
   let ga4: { sessions: number; activeUsers: number; screenPageViews: number } | null = null;
   let ga4Error: string | null = null;
-  if (map.ga_property_id) {
+  if (ga4Property) {
     try {
-      ga4 = await fetchGA4Summary(map.ga_property_id, startDate, endDate);
+      ga4 = await fetchGA4Summary(ga4Property.id, startDate, endDate);
     } catch (err) {
       ga4Error = err instanceof Error ? err.message : String(err);
     }
@@ -69,10 +90,11 @@ export async function GET() {
 
   return NextResponse.json({
     range: { startDate, endDate },
-    site: map.gsc_site_url || null,
-    propertyName: map.ga_property_name || null,
+    site: siteUrl,
+    propertyName: ga4Property?.name ?? null,
     byDate,
     topQueries,
+    opportunities,
     totals,
     gscError,
     ga4,

@@ -69,35 +69,42 @@ export async function getConnectedEmail(accessToken: string): Promise<string | n
   }
 }
 
-/** First verified Search Console site for this account, or null if none. */
-export async function listFirstSearchConsoleSite(accessToken: string): Promise<string | null> {
+/** All Search Console properties visible to this Google account. */
+export async function listSearchConsoleSites(accessToken: string): Promise<string[]> {
   try {
     const res = await fetch("https://www.googleapis.com/webmasters/v3/sites", {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
-    if (!res.ok) return null;
+    if (!res.ok) return [];
     const data = await res.json();
     const entries: { siteUrl: string }[] = data.siteEntry ?? [];
-    return entries[0]?.siteUrl ?? null;
+    return entries.map((entry) => entry.siteUrl).filter(Boolean);
   } catch {
-    return null;
+    return [];
   }
 }
 
-/** First GA4 property for this account, or null if none — { id: "properties/123", name } */
-export async function listFirstGA4Property(accessToken: string): Promise<{ id: string; name: string } | null> {
+/** All GA4 properties visible to this Google account. */
+export async function listGA4Properties(accessToken: string): Promise<{ id: string; name: string }[]> {
   try {
     const res = await fetch("https://analyticsadmin.googleapis.com/v1beta/accountSummaries", {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
-    if (!res.ok) return null;
+    if (!res.ok) return [];
     const data = await res.json();
+    const properties: { id: string; name: string }[] = [];
     for (const account of data.accountSummaries ?? []) {
-      const first = account.propertySummaries?.[0];
-      if (first) return { id: first.property, name: first.displayName };
+      for (const property of account.propertySummaries ?? []) {
+        if (property.property) {
+          properties.push({
+            id: property.property,
+            name: property.displayName ?? property.property,
+          });
+        }
+      }
     }
-    return null;
+    return properties;
   } catch {
-    return null;
+    return [];
   }
 }

@@ -1,18 +1,13 @@
 import { NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
+import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
+import { deleteProjectIntegration } from "@/lib/domain/integrations/integrationStore";
 
 export async function POST() {
-  const db = getDb();
-  for (const key of [
-    "ga_access_token",
-    "ga_refresh_token",
-    "ga_token_expiry",
-    "ga_email",
-    "gsc_site_url",
-    "ga_property_id",
-    "ga_property_name",
-  ]) {
-    db.prepare("DELETE FROM settings WHERE key = ?").run(key);
-  }
-  return NextResponse.json({ success: true });
+  const projectId = getActiveProjectId();
+  if (!projectId) return NextResponse.json({ error: "No active project" }, { status: 422 });
+
+  deleteProjectIntegration(projectId, "google-search-console");
+  deleteProjectIntegration(projectId, "google-analytics");
+
+  return NextResponse.json({ success: true, projectId });
 }
