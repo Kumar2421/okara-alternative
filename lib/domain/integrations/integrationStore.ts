@@ -216,7 +216,16 @@ export function getSelectedIntegrationResource(
 }
 
 export function deleteProjectIntegration(projectId: string, integrationType: IntegrationType): void {
-  getDb()
-    .prepare("DELETE FROM project_integrations WHERE project_id = ? AND integration_type = ?")
-    .run(projectId, integrationType);
+  const db = getDb();
+  const transaction = db.transaction(() => {
+    const rows = db
+      .prepare("SELECT id FROM project_integrations WHERE project_id = ? AND integration_type = ?")
+      .all(projectId, integrationType) as { id: string }[];
+    for (const row of rows) {
+      db.prepare("DELETE FROM integration_secrets WHERE integration_id = ?").run(row.id);
+      db.prepare("DELETE FROM integration_resources WHERE integration_id = ?").run(row.id);
+      db.prepare("DELETE FROM project_integrations WHERE id = ?").run(row.id);
+    }
+  });
+  transaction();
 }
