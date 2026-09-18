@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable react-hooks/set-state-in-effect */
+
 import { useEffect, useState } from "react";
 import { Check, AlertTriangle } from "lucide-react";
 import { useSearchParams } from "next/navigation";
@@ -45,8 +47,6 @@ export default function GoogleAnalyticsCard() {
     if (error) show(`Google Analytics connect failed: ${error}`);
   }, [searchParams, show]);
 
-  // This effect synchronizes project changes with remote integration state.
-  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
     if (project) load();
     else setLoaded(true);
