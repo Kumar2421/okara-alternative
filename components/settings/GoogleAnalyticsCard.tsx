@@ -48,7 +48,7 @@ export default function GoogleAnalyticsCard() {
   useEffect(() => {
     if (project) load();
     else setLoaded(true);
-  }, [project?.id]);
+  }, [project, load]);
 
   async function selectResource(integrationType: IntegrationResources["integrationType"], resourceId: string) {
     setBusy(true);
