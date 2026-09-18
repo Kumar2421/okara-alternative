@@ -11,6 +11,9 @@ export type SEOAuditPayload = {
   meta: {
     title: string;
     description: string;
+    canonical?: string;
+    robots?: string;
+    indexable: boolean;
   };
   headings: {
     h1: number;
@@ -347,6 +350,12 @@ export class SEOAgent {
     // 2. Parse tags
     const title = $("title").text() || "";
     const description = $("meta[name='description']").attr("content") || "";
+    const canonical = $("link[rel='canonical']").attr("href")?.trim() || undefined;
+    const robots = $("meta[name='robots']").attr("content")?.trim() || undefined;
+    const indexable = !robots?.split(",").some((directive) => directive.trim().toLowerCase() === "noindex");
+
+    if (!canonical) issues.push({ label: "Missing canonical URL", level: "Warning" });
+    if (!indexable) issues.push({ label: "Page is marked noindex", level: "Warning" });
 
     if (!title) issues.push({ label: "Missing Meta Title", level: "Error" });
     else if (title.length > 60) issues.push({ label: "Meta title too long (> 60 chars)", level: "Warning" });
@@ -557,7 +566,7 @@ export class SEOAgent {
 
     return {
       url,
-      meta: { title, description },
+      meta: { title, description, canonical, robots, indexable },
       headings,
       openGraph,
       twitter,
