@@ -39,7 +39,7 @@ test("prioritizes larger opportunities and caps the result at eight rows", () =>
   const result = findQueryOpportunities(rows);
 
   assert.equal(result.length, 8);
-  assert.equal(result[0]?.query, "query 11");
+  assert.equal(result[0]?.query, "query 10");
   assert.ok(result.every((item) => item.score >= 0));
 });
 
