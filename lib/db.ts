@@ -168,6 +168,44 @@ function init(): Database.Database {
     -- per-row state (email sent/not, notes) is coming in a later phase. Every
     -- row must carry a real source_url it was extracted from; email is
     -- nullable and stays null rather than ever being invented.
+    CREATE TABLE IF NOT EXISTS project_integrations (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      integration_type TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'connected',
+      account_identifier TEXT,
+      connected_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(project_id, integration_type)
+    );
+
+    CREATE TABLE IF NOT EXISTS integration_secrets (
+      integration_id TEXT PRIMARY KEY,
+      access_token TEXT NOT NULL,
+      refresh_token TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS integration_resources (
+      id TEXT PRIMARY KEY,
+      integration_id TEXT NOT NULL,
+      resource_type TEXT NOT NULL,
+      resource_id TEXT NOT NULL,
+      resource_name TEXT NOT NULL DEFAULT '',
+      metadata TEXT NOT NULL DEFAULT '{}',
+      selected INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(integration_id, resource_type, resource_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS oauth_states (
+      state TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      return_to TEXT NOT NULL,
+      expires_at INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS leads (
       id         TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,
