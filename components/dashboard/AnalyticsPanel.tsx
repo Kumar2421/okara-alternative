@@ -33,6 +33,10 @@ type PageEvidence = {
   technical: { status: number; redirectCount: number };
   serverTiming: { ttfbMs?: number };
   links: { internal: number; external: number };
+  pageSpeed?: {
+    desktop: { performance: number; accessibility: number; bestPractices: number; seo: number };
+    mobile: { performance: number; accessibility: number; bestPractices: number; seo: number };
+  };
 };
 type TrafficResult = {
   range: { startDate: string; endDate: string };
@@ -611,7 +615,7 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
                               <div className="mt-2 flex items-center gap-2">
                                 <button
                                   onClick={() => handleInspectRankingPage(rankingPage.url)}
-                                  disabled={!!evidence}
+                                  disabled={!!evidenceData || (!!evidence && !evidenceError)}
                                   className="rounded-md border border-gray-200 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-60"
                                 >
                                   {evidence && !evidenceData && !evidenceError ? (
@@ -663,6 +667,12 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
                                 <div>
                                   <span className="text-gray-400">HTTP</span>
                                   <div className="font-medium text-gray-800">{evidenceData.technical.status}</div>
+                                </div>
+                                <div>
+                                  <span className="text-gray-400">PageSpeed</span>
+                                  <div className="font-medium text-gray-800">
+                                    {evidenceData.pageSpeed ? `${evidenceData.pageSpeed.desktop.performance} desktop` : "Not connected"}
+                                  </div>
                                 </div>
                               </div>
                             )}
