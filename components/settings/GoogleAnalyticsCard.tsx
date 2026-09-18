@@ -38,7 +38,7 @@ export default function GoogleAnalyticsCard() {
     } finally {
       setLoaded(true);
     }
-  }
+  };
 
   useEffect(() => {
     const error = searchParams.get("ga_error");
