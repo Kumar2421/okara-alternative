@@ -80,7 +80,25 @@ export default function FindingsWorkspace() {
     }
   };
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    let active = true;
+    fetch("/api/agents/analytics/findings")
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Failed to load findings.");
+        if (!active) return;
+        const next = Array.isArray(data.findings) ? data.findings : [];
+        setFindings(next);
+        setSelectedId((current) => current && next.some((f: Finding) => f.id === current) ? current : next[0]?.id ?? null);
+      })
+      .catch((err) => {
+        if (active) setError(err instanceof Error ? err.message : "Failed to load findings.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => { active = false; };
+  }, []);
 
   const mutate = async (body: Record<string, string>) => {
     if (!selected) return;
