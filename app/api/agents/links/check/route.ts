@@ -3,6 +3,9 @@ import { getDb } from "@/lib/db";
 import type { SEOAuditPayload } from "@/lib/domain/seo/SEOAgent";
 import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
 import { checkUrlReachable } from "@/lib/domain/shared/checkUrlReachable";
+import { FEATURES } from "@/lib/features";
+import { createClient } from "@/utils/supabase/server";
+import { createServiceClient } from "@/utils/supabase/serviceClient";
 
 const CHECK_TIMEOUT_MS = 5000;
 const MAX_LINKS_CHECKED = 20;
@@ -10,6 +13,32 @@ const MAX_LINKS_CHECKED = 20;
 type CheckedLink = { href: string; text: string; internal: boolean; reachable: boolean; status?: number };
 
 export async function GET() {
+  if (FEATURES.PLATFORM_MODE) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
+    const db = createServiceClient();
+    const { data: projectSetting } = await db
+      .from("user_settings")
+      .select("value")
+      .eq("user_id", user.id)
+      .eq("key", "active_project_id")
+      .maybeSingle();
+    const projectId = projectSetting?.value ?? null;
+    if (!projectId) return NextResponse.json({ result: null });
+
+    const { data: row } = await db
+      .from("link_checks")
+      .select("payload, checked_at")
+      .eq("user_id", user.id)
+      .eq("project_id", projectId)
+      .maybeSingle();
+
+    if (!row) return NextResponse.json({ result: null });
+    return NextResponse.json({ result: { links: row.payload, checkedAt: row.checked_at } });
+  }
+
   const activeId = getActiveProjectId();
   if (!activeId) return NextResponse.json({ result: null });
 
@@ -23,6 +52,73 @@ export async function GET() {
 }
 
 export async function POST() {
+  if (FEATURES.PLATFORM_MODE) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
+    const db = createServiceClient();
+    const { data: projectSetting } = await db
+      .from("user_settings")
+      .select("value")
+      .eq("user_id", user.id)
+      .eq("key", "active_project_id")
+      .maybeSingle();
+    const projectId = projectSetting?.value ?? null;
+
+    const { data: project } = projectId
+      ? await db.from("projects").select("url").eq("id", projectId).eq("owner_id", user.id).maybeSingle()
+      : { data: null };
+
+    if (!projectId || !project || !project.url) {
+      return NextResponse.json(
+        { error: "No project website linked yet. Add one in the project switcher first." },
+        { status: 422 }
+      );
+    }
+
+    const { data: auditRow } = await db
+      .from("seo_audits")
+      .select("payload")
+      .eq("user_id", user.id)
+      .eq("project_id", projectId)
+      .eq("url", project.url)
+      .maybeSingle();
+    if (!auditRow) {
+      return NextResponse.json(
+        { error: "No crawl data for this site yet. Try refreshing the SEO audit first." },
+        { status: 422 }
+      );
+    }
+    const audit = auditRow.payload as SEOAuditPayload;
+    const candidateLinks = (audit.links ?? []).slice(0, MAX_LINKS_CHECKED);
+
+    if (candidateLinks.length === 0) {
+      return NextResponse.json({ result: { links: [], checkedAt: new Date().toISOString() } });
+    }
+
+    try {
+      const checked: CheckedLink[] = await Promise.all(
+        candidateLinks.map(async (link) => {
+          const { reachable, status } = await checkUrlReachable(link.href, CHECK_TIMEOUT_MS);
+          return { ...link, reachable, status };
+        })
+      );
+
+      const now = new Date().toISOString();
+      const { error } = await db.from("link_checks").upsert(
+        { user_id: user.id, project_id: projectId, payload: checked, checked_at: now },
+        { onConflict: "project_id" }
+      );
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+      return NextResponse.json({ result: { links: checked, checkedAt: now } });
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : String(err);
+      return NextResponse.json({ error: raw }, { status: 502 });
+    }
+  }
+
   const db = getDb();
 
   const activeId = getActiveProjectId();

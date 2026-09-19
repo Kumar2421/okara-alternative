@@ -1,8 +1,37 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
+import { FEATURES } from "@/lib/features";
+import { createClient } from "@/utils/supabase/server";
+import { createServiceClient } from "@/utils/supabase/serviceClient";
 
 export async function GET() {
+  if (FEATURES.PLATFORM_MODE) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
+    const db = createServiceClient();
+    const { data: setting } = await db
+      .from("user_settings")
+      .select("value")
+      .eq("user_id", user.id)
+      .eq("key", "active_project_id")
+      .maybeSingle();
+    const activeId = setting?.value;
+    if (!activeId) return NextResponse.json({ competitors: [] });
+
+    const { data: rows, error } = await db
+      .from("project_competitors")
+      .select("id, url, created_at")
+      .eq("project_id", activeId)
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: true });
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    return NextResponse.json({ competitors: rows ?? [] });
+  }
+
   const activeId = getActiveProjectId();
   if (!activeId) return NextResponse.json({ competitors: [] });
 
@@ -15,11 +44,6 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const activeId = getActiveProjectId();
-  if (!activeId) {
-    return NextResponse.json({ error: "No active project. Link a website first." }, { status: 422 });
-  }
-
   const body = await req.json().catch(() => null);
   let url: string | undefined = body?.url;
   if (!url || !url.trim()) {
@@ -27,6 +51,38 @@ export async function POST(req: NextRequest) {
   }
   url = url.trim();
   if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+
+  if (FEATURES.PLATFORM_MODE) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
+    const db = createServiceClient();
+    const { data: setting } = await db
+      .from("user_settings")
+      .select("value")
+      .eq("user_id", user.id)
+      .eq("key", "active_project_id")
+      .maybeSingle();
+    const activeId = setting?.value;
+    if (!activeId) {
+      return NextResponse.json({ error: "No active project. Link a website first." }, { status: 422 });
+    }
+
+    const { data: inserted, error } = await db
+      .from("project_competitors")
+      .insert({ user_id: user.id, project_id: activeId, url, created_at: new Date().toISOString() })
+      .select("id, url")
+      .single();
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    return NextResponse.json({ competitor: inserted });
+  }
+
+  const activeId = getActiveProjectId();
+  if (!activeId) {
+    return NextResponse.json({ error: "No active project. Link a website first." }, { status: 422 });
+  }
 
   const db = getDb();
   const id = `comp_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
@@ -42,6 +98,18 @@ export async function DELETE(req: NextRequest) {
   const id = searchParams.get("id");
   if (!id) {
     return NextResponse.json({ error: "id query param is required" }, { status: 400 });
+  }
+
+  if (FEATURES.PLATFORM_MODE) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
+    const db = createServiceClient();
+    const { error } = await db.from("project_competitors").delete().eq("id", id).eq("user_id", user.id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    return NextResponse.json({ success: true });
   }
 
   const db = getDb();

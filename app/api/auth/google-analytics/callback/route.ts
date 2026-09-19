@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
+import { FEATURES } from "@/lib/features";
+import { createClient } from "@/utils/supabase/server";
+import { createServiceClient } from "@/utils/supabase/serviceClient";
 import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
 import {
   exchangeCodeForTokens,
@@ -20,7 +23,7 @@ export async function GET(req: NextRequest) {
   const state = req.nextUrl.searchParams.get("state");
   const redirectUri = `${req.nextUrl.origin}/api/auth/google-analytics/callback`;
   const settingsUrl = `${req.nextUrl.origin}/settings/api-credentials`;
-  const returnUrl = state === "dashboard" ? `${req.nextUrl.origin}/` : settingsUrl;
+  const returnUrl = state === "dashboard" ? `${req.nextUrl.origin}/dashboard` : settingsUrl;
 
   if (!code) {
     return NextResponse.redirect(`${returnUrl}?ga_error=${encodeURIComponent("No authorization code returned")}`);
@@ -32,6 +35,54 @@ export async function GET(req: NextRequest) {
       return NextResponse.redirect(
         `${returnUrl}?ga_error=${encodeURIComponent("No refresh token returned — disconnect any prior grant for this app in your Google Account's Security settings, then reconnect.")}`
       );
+    }
+
+    if (FEATURES.PLATFORM_MODE) {
+      const supabase = await createClient();
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) return NextResponse.redirect(`${returnUrl}?ga_error=${encodeURIComponent("Not authenticated")}`);
+      const user = authUser;
+
+      const db = createServiceClient();
+
+      const [email, gscSites, ga4Property] = await Promise.all([
+        getConnectedEmail(tokens.accessToken),
+        listSearchConsoleSites(tokens.accessToken),
+        listFirstGA4Property(tokens.accessToken),
+      ]);
+      // No SQLite `projects` table in platform mode to domain-match against
+      // here — account-level connection, pick the best-access site instead.
+      const gscSite = pickBestSearchConsoleSite(gscSites, "");
+      const ga4External = ga4Property ? `${ga4Property.id}::${ga4Property.name}` : null;
+
+      async function storeConnection(provider: "ga4" | "gsc", externalProperty: string | null) {
+        const [{ data: accessSecretId, error: accessErr }, { data: refreshSecretId, error: refreshErr }] =
+          await Promise.all([
+            db.rpc("vault_set_secret", { p_secret: tokens.accessToken, p_name: `${provider}_token:${user.id}:access` }),
+            db.rpc("vault_set_secret", { p_secret: tokens.refreshToken!, p_name: `${provider}_token:${user.id}:refresh` }),
+          ]);
+        if (accessErr || refreshErr) throw new Error(accessErr?.message ?? refreshErr?.message);
+
+        const { error } = await db.from("integration_connections").upsert(
+          {
+            user_id: user.id,
+            project_id: null,
+            provider,
+            access_token_secret_id: accessSecretId as string,
+            refresh_token_secret_id: refreshSecretId as string,
+            token_expiry: new Date(tokens.expiresAt).toISOString(),
+            external_email: email ?? null,
+            external_property: externalProperty,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "user_id,project_id,provider" }
+        );
+        if (error) throw new Error(error.message);
+      }
+
+      await Promise.all([storeConnection("ga4", ga4External), storeConnection("gsc", gscSite ?? null)]);
+
+      return NextResponse.redirect(state === "dashboard" ? `${returnUrl}?ga_connected=1` : returnUrl);
     }
 
     const db = getDb();

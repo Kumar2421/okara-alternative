@@ -241,7 +241,6 @@ export default function AgentsChatPanel() {
         return;
       }
 
-      const providerId = findProviderForModel(primaryModel);
       const res = await fetch("/api/agents/leads/send-email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -335,7 +334,7 @@ export default function AgentsChatPanel() {
         // Draft email from context or input
         // Check if previous message had leads data
         const prevMsg = messages.filter((m) => m.role === "assistant").pop();
-        const leads = prevMsg?.data?.leads || [];
+        const leads = (prevMsg?.data?.leads as Array<{ id: string }>) || [];
 
         if (leads.length === 0) {
           response = `I'll help you draft an email. First, search for leads using the Lead Finder agent, then ask me to draft an email for them.`;

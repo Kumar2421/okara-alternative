@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { writeEnvVar } from "@/lib/domain/shared/envFile";
+import { FEATURES } from "@/lib/features";
 
 export async function GET() {
   // Reports whether the CURRENT running process has these set — honest
@@ -14,6 +15,19 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  // Writing to .env.local only makes sense on a self-host machine with a
+  // real, restartable process and a writable filesystem. On Vercel/Netlify
+  // the filesystem is read-only at runtime and there's no "restart" — the
+  // platform operator sets GMAIL_CLIENT_ID/SECRET once as a real env var
+  // instead (one shared app-level OAuth client for every user), so this
+  // write path must never run there.
+  if (FEATURES.PLATFORM_MODE) {
+    return NextResponse.json(
+      { error: "Not available in platform mode — the OAuth client is configured by the platform operator." },
+      { status: 403 }
+    );
+  }
+
   const body = await req.json().catch(() => null);
   const key: string | undefined = body?.key;
   const value: string | undefined = body?.value;

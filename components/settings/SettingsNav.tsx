@@ -73,7 +73,7 @@ export default function SettingsNav() {
   return (
     <div className="w-64 shrink-0 border-r border-gray-100 px-3 py-6">
       <button
-        onClick={() => router.push("/")}
+        onClick={() => router.push("/dashboard")}
         className="mb-6 flex items-center gap-2 px-1 text-2xl font-bold text-gray-900 hover:opacity-70"
       >
         <ChevronLeft size={20} />

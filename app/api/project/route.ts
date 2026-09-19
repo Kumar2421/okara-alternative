@@ -3,6 +3,9 @@ import { getDb } from "@/lib/db";
 import { getActiveProjectId, setActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
 import { assertPublicHttpUrl } from "@/lib/domain/seo/SEOAgent";
 import { checkUrlReachable } from "@/lib/domain/shared/checkUrlReachable";
+import { FEATURES } from "@/lib/features";
+import { createClient } from "@/utils/supabase/server";
+import { createServiceClient } from "@/utils/supabase/serviceClient";
 
 /**
  * Real multi-project support: `projects` can hold many rows, `active_project_id`
@@ -22,6 +25,32 @@ type ProjectRow = {
 };
 
 export async function GET() {
+  if (FEATURES.PLATFORM_MODE) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
+    const db = createServiceClient();
+
+    const { data: projects, error } = await db
+      .from("projects")
+      .select("id, name, category, description, url, created_at, updated_at")
+      .eq("owner_id", user.id)
+      .order("updated_at", { ascending: false });
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    const { data: setting } = await db
+      .from("user_settings")
+      .select("value")
+      .eq("user_id", user.id)
+      .eq("key", "active_project_id")
+      .maybeSingle();
+    const activeId = setting?.value;
+    const active = activeId ? (projects ?? []).find((p) => p.id === activeId) ?? null : null;
+
+    return NextResponse.json({ project: active, projects: projects ?? [] });
+  }
+
   const db = getDb();
   const activeId = getActiveProjectId();
 
@@ -68,6 +97,34 @@ export async function POST(req: NextRequest) {
   const name = body.name.trim();
   const category = typeof body.category === "string" ? body.category.trim() : "";
   const description = typeof body.description === "string" ? body.description.trim() : "";
+
+  if (FEATURES.PLATFORM_MODE) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
+    const db = createServiceClient();
+    const now = new Date().toISOString();
+
+    const { data: inserted, error } = await db
+      .from("projects")
+      .insert({ owner_id: user.id, name, category, description, url, created_at: now, updated_at: now })
+      .select("id, name, category, description, url, created_at, updated_at")
+      .single();
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    const { error: settingError } = await db.from("user_settings").upsert(
+      { user_id: user.id, key: "active_project_id", value: inserted.id, updated_at: now },
+      { onConflict: "user_id,key" }
+    );
+    if (settingError) return NextResponse.json({ error: settingError.message }, { status: 500 });
+
+    // Self-host also mirrors the active project's url into a shared
+    // `project_url` setting so every agent route can do one cheap lookup.
+    // In platform mode, agent routes resolve the active project through
+    // getActiveProjectContextSupabase instead — no equivalent setting needed.
+    return NextResponse.json({ project: inserted });
+  }
 
   const db = getDb();
   const now = new Date().toISOString();

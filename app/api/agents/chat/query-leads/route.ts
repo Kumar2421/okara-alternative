@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getDriver } from "@/lib/llm";
 import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
+import { FEATURES } from "@/lib/features";
+import { createClient } from "@/utils/supabase/server";
+import { createServiceClient } from "@/utils/supabase/serviceClient";
+
+// Vercel: LLM/crawl calls can run past the 10s default — allow up to the
+// platform max for this route (Hobby plan caps at 60s; Pro allows more).
+export const maxDuration = 60;
 
 /**
  * Agent query leads endpoint.
@@ -26,6 +33,105 @@ export async function POST(req: NextRequest) {
       { error: "Model and provider required" },
       { status: 422 }
     );
+  }
+
+  if (FEATURES.PLATFORM_MODE) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
+    const db = createServiceClient();
+    const { data: setting } = await db
+      .from("user_settings")
+      .select("value")
+      .eq("user_id", user.id)
+      .eq("key", "active_project_id")
+      .maybeSingle();
+    const projectId = setting?.value ?? null;
+    if (!projectId) return NextResponse.json({ error: "No active project" }, { status: 400 });
+
+    try {
+      const driver = getDriver(providerId);
+      if (!driver) return NextResponse.json({ error: `${providerId} not configured` }, { status: 422 });
+
+      const { data: conn } = await db
+        .from("provider_connections")
+        .select("api_key_secret_id, base_url")
+        .eq("user_id", user.id)
+        .eq("provider_id", providerId)
+        .maybeSingle();
+      if (!conn?.api_key_secret_id) {
+        return NextResponse.json({ error: "LLM provider not connected" }, { status: 422 });
+      }
+      const { data: secret } = await db.rpc("vault_get_secret", { p_id: conn.api_key_secret_id });
+      const apiKey = (secret as string) ?? "";
+
+      // free in platform mode for now — no credit_costs entry yet
+      const filterPrompt = `Parse this lead search query and suggest search keywords.
+Query: "${query}"
+
+Respond with JSON:
+{
+  "title": "what user searched for",
+  "keywords": ["cto", "new york"],
+  "limit": 20,
+  "explanation": "brief explanation of filters"
+}
+
+Return short plain keywords/phrases only (no SQL) — they'll be matched with a
+case-insensitive "contains" search across name/title/company/location. If
+unclear, return an empty keywords array.`;
+
+      const filterRes = await driver({
+        apiKey,
+        model,
+        baseUrl: conn.base_url || undefined,
+        messages: [{ role: "user", content: filterPrompt }],
+      });
+
+      let keywords: string[] = [];
+      let limit = 20;
+      try {
+        const jsonMatch = filterRes.text?.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          keywords = Array.isArray(parsed.keywords) ? parsed.keywords.slice(0, 5).filter((k: unknown) => typeof k === "string") : [];
+          limit = Math.min(Number(parsed.limit) || 20, 50);
+        }
+      } catch {
+        // use defaults
+      }
+
+      // Data-layer migration only: the SQLite version builds a raw SQL
+      // WHERE clause from LLM output and executes it directly. Postgrest
+      // has no raw-SQL escape hatch here, so LLM-extracted keywords are
+      // translated to an .or() of ilike "contains" filters across the same
+      // columns instead — same intent (OR-matched free-text filters), safe
+      // against injection by construction.
+      let queryBuilder = db.from("leads").select("id, name, title, company, email, location").eq("user_id", user.id).eq("project_id", projectId);
+      if (keywords.length > 0) {
+        const orFilter = keywords
+          .map((k) => k.replace(/[%,]/g, ""))
+          .filter(Boolean)
+          .map((k) => `name.ilike.%${k}%,title.ilike.%${k}%,company.ilike.%${k}%,location.ilike.%${k}%`)
+          .join(",");
+        if (orFilter) queryBuilder = queryBuilder.or(orFilter);
+      }
+      const { data: leads, error } = await queryBuilder.limit(limit);
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+      return NextResponse.json({
+        query,
+        filters: keywords,
+        count: leads?.length ?? 0,
+        leads: leads ?? [],
+      });
+    } catch (err) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : "Failed to query leads" },
+        { status: 500 }
+      );
+    }
   }
 
   const projectId = getActiveProjectId();

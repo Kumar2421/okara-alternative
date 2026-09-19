@@ -5,13 +5,19 @@ import { Check, ExternalLink, AlertTriangle } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useToast } from "@/components/dashboard/Toast";
 import BrandIcon from "@/components/settings/BrandIcon";
+import { FEATURES } from "@/lib/features";
 
-/** Two real steps, not one: (1) app-level OAuth Client ID/Secret — static
- * config, written to .env.local, only takes effect after a real server
- * restart (Node reads env at process startup, not per-request); (2) the
- * actual OAuth consent flow, only possible once step 1 is live. This card
- * is honest about which state it's in at every point, never implies "saved"
- * means "active". */
+/** Self-host: two real steps, not one — (1) app-level OAuth Client ID/Secret,
+ * written to .env.local, only takes effect after a real server restart
+ * (Node reads env at process startup, not per-request); (2) the actual OAuth
+ * consent flow, only possible once step 1 is live. This card is honest about
+ * which state it's in at every point, never implies "saved" means "active".
+ *
+ * Platform mode: there is no per-user client ID/secret to enter — the
+ * platform operator registers ONE Google Cloud OAuth client and sets
+ * GMAIL_CLIENT_ID/SECRET once as a real server env var (not user-editable,
+ * and never written to a file — see /api/settings/env's platform-mode
+ * guard). Every user just clicks "Connect Gmail" directly. */
 export default function GmailCard() {
   const { show } = useToast();
   const searchParams = useSearchParams();
@@ -30,13 +36,19 @@ export default function GmailCard() {
   }, [searchParams, show]);
 
   useEffect(() => {
-    Promise.all([
-      fetch("/api/settings/env").then((r) => r.json()),
-      fetch("/api/settings").then((r) => r.json()),
-    ])
-      .then(([envData, settingsData]) => {
-        setEnvActive(envData.active ?? { GMAIL_CLIENT_ID: false, GMAIL_CLIENT_SECRET: false });
-        const emailRow = settingsData.settings?.find((s: { key: string; value: string }) => s.key === "gmail_email");
+    const requests: Promise<unknown>[] = [fetch("/api/settings").then((r) => r.json())];
+    if (!FEATURES.PLATFORM_MODE) requests.unshift(fetch("/api/settings/env").then((r) => r.json()));
+
+    Promise.all(requests)
+      .then((results) => {
+        const settingsData = (FEATURES.PLATFORM_MODE ? results[0] : results[1]) as {
+          settings?: { key: string; value: string }[];
+        };
+        if (!FEATURES.PLATFORM_MODE) {
+          const envData = results[0] as { active?: typeof envActive };
+          setEnvActive(envData.active ?? { GMAIL_CLIENT_ID: false, GMAIL_CLIENT_SECRET: false });
+        }
+        const emailRow = settingsData.settings?.find((s) => s.key === "gmail_email");
         if (emailRow?.value) setConnectedEmail(emailRow.value);
       })
       .catch(() => {})
@@ -84,7 +96,10 @@ export default function GmailCard() {
     }
   }
 
-  const clientCredsActive = envActive.GMAIL_CLIENT_ID && envActive.GMAIL_CLIENT_SECRET;
+  // Platform mode always has the shared app-level client configured by the
+  // operator — no per-user entry, so treat it as active unconditionally and
+  // let a real Connect attempt surface a clear error if it somehow isn't.
+  const clientCredsActive = FEATURES.PLATFORM_MODE || (envActive.GMAIL_CLIENT_ID && envActive.GMAIL_CLIENT_SECRET);
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-4">

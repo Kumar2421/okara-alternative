@@ -30,10 +30,14 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
+  // "/" is the public landing page — only the actual app (dashboard,
+  // settings) requires a session. Everything else (marketing, login,
+  // auth callbacks, API routes called by already-authenticated pages)
+  // is left alone here.
   const path = request.nextUrl.pathname;
-  const isPublic = path.startsWith("/login") || path.startsWith("/api/auth");
+  const isProtected = path.startsWith("/dashboard") || path.startsWith("/settings");
 
-  if (!user && !isPublic) {
+  if (!user && isProtected) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);

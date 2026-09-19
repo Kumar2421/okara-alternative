@@ -3,6 +3,22 @@ import { getDb } from "@/lib/db";
 import { getDriver } from "@/lib/llm";
 import { LinkedInAgent } from "@/lib/domain/linkedin/LinkedInAgent";
 import { getActiveProjectContext } from "@/lib/domain/shared/getActiveProject";
+import { getActiveProjectContextSupabase } from "@/lib/domain/shared/getActiveProjectSupabase";
+import { FEATURES } from "@/lib/features";
+import { createClient } from "@/utils/supabase/server";
+import { createServiceClient } from "@/utils/supabase/serviceClient";
+import { chargeCredits, InsufficientCreditsError } from "@/lib/credits";
+
+// Vercel: LLM/crawl calls can run past the 10s default — allow up to the
+// platform max for this route (Hobby plan caps at 60s; Pro allows more).
+export const maxDuration = 60;
+
+/** Server-only, closed-source: platform-provided free-tier keys. Never
+ * present in .env.opensource — self-host users always BYOK. */
+const PLATFORM_PROVIDER_KEYS: Record<string, string | undefined> = {
+  groq: process.env.GROQ_API_KEY,
+  mistral: process.env.MISTRAL_API_KEY,
+};
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
@@ -32,6 +48,70 @@ export async function POST(req: NextRequest) {
   const driver = getDriver(providerId);
   if (!driver) {
     return NextResponse.json({ error: `${providerId} isn't wired to a real model yet.` }, { status: 501 });
+  }
+
+  if (FEATURES.PLATFORM_MODE) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
+    const db = createServiceClient();
+
+    // BYOK first — user's own key, no credit charge.
+    const { data: conn } = await db
+      .from("provider_connections")
+      .select("api_key_secret_id, base_url")
+      .eq("user_id", user.id)
+      .eq("provider_id", providerId)
+      .maybeSingle();
+
+    let apiKey = "";
+    let baseUrl: string | undefined;
+    let chargedCredits = false;
+
+    if (conn?.api_key_secret_id) {
+      const { data: secret } = await db.rpc("vault_get_secret", { p_id: conn.api_key_secret_id });
+      apiKey = (secret as string) ?? "";
+      baseUrl = conn.base_url ?? undefined;
+    } else if (PLATFORM_PROVIDER_KEYS[providerId]) {
+      // Closed-source: platform-provided key, metered via credits. Never
+      // available in self-host builds (GROQ_API_KEY/MISTRAL_API_KEY unset there).
+      try {
+        await chargeCredits(user.id, "social_draft", { model });
+        chargedCredits = true;
+      } catch (err) {
+        if (err instanceof InsufficientCreditsError) {
+          return NextResponse.json({ error: "Out of credits. Upgrade or connect your own key." }, { status: 402 });
+        }
+        throw err;
+      }
+      apiKey = PLATFORM_PROVIDER_KEYS[providerId]!;
+    } else {
+      return NextResponse.json({ error: `${providerId} isn't connected yet.` }, { status: 422 });
+    }
+
+    try {
+      const agent = new LinkedInAgent(driver, apiKey, baseUrl);
+      const result = await agent.generate({
+        topic,
+        brandVoice,
+        model,
+        project: await getActiveProjectContextSupabase(db, user.id),
+      });
+
+      if (result.stream) {
+        return new NextResponse(result.stream, {
+          headers: { "Content-Type": "text/plain; charset=utf-8" },
+        });
+      }
+
+      return NextResponse.json({ text: result.text });
+    } catch (err) {
+      // Note: credits already charged if platform key was used — no refund
+      // path yet on generation failure.
+      const raw = err instanceof Error ? err.message : String(err);
+      return NextResponse.json({ error: raw, chargedCredits }, { status: 502 });
+    }
   }
 
   const db = getDb();

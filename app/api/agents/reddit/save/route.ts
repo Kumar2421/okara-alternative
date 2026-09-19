@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
+import { FEATURES } from "@/lib/features";
+import { createClient } from "@/utils/supabase/server";
+import { createServiceClient } from "@/utils/supabase/serviceClient";
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
@@ -7,6 +10,46 @@ export async function POST(req: NextRequest) {
 
   if (!opportunities || !Array.isArray(opportunities)) {
     return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
+  }
+
+  if (FEATURES.PLATFORM_MODE) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
+    const db = createServiceClient();
+
+    const { data: projSetting } = await db
+      .from("user_settings")
+      .select("value")
+      .eq("user_id", user.id)
+      .eq("key", "active_project_id")
+      .maybeSingle();
+    const projectId = projSetting?.value;
+    if (!projectId) {
+      return NextResponse.json({ error: "No active project to save these opportunities against." }, { status: 422 });
+    }
+
+    const rows = (opportunities as Record<string, string>[]).map((op) => {
+      if (!op.subreddit || !op.title || !op.body || !op.reply_draft) {
+        throw new Error("Each opportunity requires subreddit, title, body, and reply_draft");
+      }
+      return {
+        user_id: user.id,
+        project_id: projectId,
+        subreddit: op.subreddit,
+        title: op.title,
+        body: op.body,
+        reply_draft: op.reply_draft,
+        status: op.status || "draft",
+        created_at: new Date().toISOString(),
+      };
+    });
+
+    const { data, error } = await db.from("reddit_opportunities").insert(rows).select("id");
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    return NextResponse.json({ success: true, count: data?.length ?? 0 });
   }
 
   try {
@@ -47,6 +90,22 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET() {
+  if (FEATURES.PLATFORM_MODE) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
+    const db = createServiceClient();
+    const { data: opportunities, error } = await db
+      .from("reddit_opportunities")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false });
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    return NextResponse.json({ opportunities: opportunities ?? [] });
+  }
+
   try {
     const db = getDb();
     const opportunities = db.prepare("SELECT * FROM reddit_opportunities ORDER BY created_at DESC").all();

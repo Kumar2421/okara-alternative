@@ -5,11 +5,18 @@ import { Check, AlertTriangle } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useToast } from "@/components/dashboard/Toast";
 import BrandIcon from "@/components/settings/BrandIcon";
+import { FEATURES } from "@/lib/features";
 
-/** Real GA4 + Search Console OAuth — reuses the same GMAIL_CLIENT_ID/SECRET
- * app config as the Gmail card (one Google Cloud OAuth client, separate
- * consent flow/scopes/token set). Mirrors GmailCard.tsx's honesty pattern:
- * never implies "connected" until settings actually confirm it. */
+/** Self-host: real GA4 + Search Console OAuth, reusing the same
+ * GMAIL_CLIENT_ID/SECRET app config as the Gmail card (one Google Cloud
+ * OAuth client, separate consent flow/scopes/token set). Mirrors
+ * GmailCard.tsx's honesty pattern: never implies "connected" until settings
+ * actually confirm it.
+ *
+ * Platform mode: same platform-owned client as Gmail (see GmailCard.tsx's
+ * doc comment) — no per-user entry, go straight to Connect. Most platform
+ * users are already connected via "Sign in with Google" at login (which
+ * grants these same scopes up front); this card is the manual fallback. */
 export default function GoogleAnalyticsCard() {
   const { show } = useToast();
   const searchParams = useSearchParams();
@@ -27,10 +34,19 @@ export default function GoogleAnalyticsCard() {
   }, [searchParams, show]);
 
   useEffect(() => {
-    Promise.all([fetch("/api/settings/env").then((r) => r.json()), fetch("/api/settings").then((r) => r.json())])
-      .then(([envData, settingsData]) => {
-        setEnvActive(envData.active ?? { GMAIL_CLIENT_ID: false, GMAIL_CLIENT_SECRET: false });
-        const find = (key: string) => settingsData.settings?.find((s: { key: string; value: string }) => s.key === key)?.value || null;
+    const requests: Promise<unknown>[] = [fetch("/api/settings").then((r) => r.json())];
+    if (!FEATURES.PLATFORM_MODE) requests.unshift(fetch("/api/settings/env").then((r) => r.json()));
+
+    Promise.all(requests)
+      .then((results) => {
+        const settingsData = (FEATURES.PLATFORM_MODE ? results[0] : results[1]) as {
+          settings?: { key: string; value: string }[];
+        };
+        if (!FEATURES.PLATFORM_MODE) {
+          const envData = results[0] as { active?: typeof envActive };
+          setEnvActive(envData.active ?? { GMAIL_CLIENT_ID: false, GMAIL_CLIENT_SECRET: false });
+        }
+        const find = (key: string) => settingsData.settings?.find((s) => s.key === key)?.value || null;
         setConnectedEmail(find("ga_email"));
         setSiteUrl(find("gsc_site_url"));
         setPropertyName(find("ga_property_name"));
@@ -54,7 +70,7 @@ export default function GoogleAnalyticsCard() {
     }
   }
 
-  const clientCredsActive = envActive.GMAIL_CLIENT_ID && envActive.GMAIL_CLIENT_SECRET;
+  const clientCredsActive = FEATURES.PLATFORM_MODE || (envActive.GMAIL_CLIENT_ID && envActive.GMAIL_CLIENT_SECRET);
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-4">

@@ -5,10 +5,52 @@ import { ContentStrategyGenerator } from "@/lib/domain/documents/ContentStrategy
 import type { SEOAuditPayload } from "@/lib/domain/seo/SEOAgent";
 import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
 import { appendFooterToStream, NO_TAVILY_FOOTER } from "@/lib/domain/shared/appendFooterToStream";
+import { FEATURES } from "@/lib/features";
+import { createClient } from "@/utils/supabase/server";
+import { createServiceClient } from "@/utils/supabase/serviceClient";
+import { chargeCredits, InsufficientCreditsError } from "@/lib/credits";
+
+// Vercel: LLM/crawl calls can run past the 10s default — allow up to the
+// platform max for this route (Hobby plan caps at 60s; Pro allows more).
+export const maxDuration = 60;
 
 const DOC_TYPE = "content_strategy";
 
+/** Server-only, closed-source: platform-provided free-tier keys. Never
+ * present in .env.opensource — self-host users always BYOK. */
+const PLATFORM_PROVIDER_KEYS: Record<string, string | undefined> = {
+  groq: process.env.GROQ_API_KEY,
+  mistral: process.env.MISTRAL_API_KEY,
+};
+
 export async function GET() {
+  if (FEATURES.PLATFORM_MODE) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
+    const db = createServiceClient();
+    const { data: setting } = await db
+      .from("user_settings")
+      .select("value")
+      .eq("user_id", user.id)
+      .eq("key", "active_project_id")
+      .maybeSingle();
+    const activeId = setting?.value;
+    if (!activeId) return NextResponse.json({ document: null });
+
+    const { data: row, error } = await db
+      .from("project_documents")
+      .select("status, content, updated_at")
+      .eq("user_id", user.id)
+      .eq("project_id", activeId)
+      .eq("doc_type", DOC_TYPE)
+      .maybeSingle();
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    return NextResponse.json({ document: row ?? null });
+  }
+
   const activeId = getActiveProjectId();
   if (!activeId) return NextResponse.json({ document: null });
 
@@ -35,6 +77,145 @@ export async function POST(req: NextRequest) {
   const driver = getDriver(providerId);
   if (!driver) {
     return NextResponse.json({ error: `${providerId} isn't wired to a real model yet.` }, { status: 501 });
+  }
+
+  if (FEATURES.PLATFORM_MODE) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
+    const db = createServiceClient();
+
+    const { data: setting } = await db
+      .from("user_settings")
+      .select("value")
+      .eq("user_id", user.id)
+      .eq("key", "active_project_id")
+      .maybeSingle();
+    const activeId = setting?.value;
+
+    const { data: project } = activeId
+      ? await db.from("projects").select("name, url").eq("id", activeId).eq("owner_id", user.id).maybeSingle()
+      : { data: null };
+    if (!activeId || !project || !project.url) {
+      return NextResponse.json(
+        { error: "No project website linked yet. Add one in the project switcher first." },
+        { status: 422 }
+      );
+    }
+
+    const { data: auditRow } = await db
+      .from("seo_audits")
+      .select("payload")
+      .eq("project_id", activeId)
+      .eq("url", project.url)
+      .maybeSingle();
+    if (!auditRow) {
+      return NextResponse.json(
+        { error: "No crawl data for this site yet. Try refreshing the SEO audit in Analytics." },
+        { status: 422 }
+      );
+    }
+    const audit = auditRow.payload as SEOAuditPayload;
+
+    const { data: groundingDocs } = await db
+      .from("project_documents")
+      .select("doc_type, content")
+      .eq("user_id", user.id)
+      .eq("project_id", activeId)
+      .in("doc_type", ["product_info", "marketing_strategy", "competitor_analysis"]);
+    const productInfo = groundingDocs?.find((d) => d.doc_type === "product_info")?.content;
+    const marketingStrategy = groundingDocs?.find((d) => d.doc_type === "marketing_strategy")?.content;
+    const competitorAnalysis = groundingDocs?.find((d) => d.doc_type === "competitor_analysis")?.content;
+
+    const { data: tavilySetting } = await db
+      .from("user_settings")
+      .select("value")
+      .eq("user_id", user.id)
+      .eq("key", "tavily_api_key")
+      .maybeSingle();
+    const tavilyApiKey = tavilySetting?.value && providerSupportsTools(providerId) ? tavilySetting.value : undefined;
+
+    const { data: conn } = await db
+      .from("provider_connections")
+      .select("api_key_secret_id, base_url")
+      .eq("user_id", user.id)
+      .eq("provider_id", providerId)
+      .maybeSingle();
+
+    let apiKey = "";
+    let baseUrl: string | undefined;
+    let chargedCredits = false;
+
+    if (conn?.api_key_secret_id) {
+      const { data: secret } = await db.rpc("vault_get_secret", { p_id: conn.api_key_secret_id });
+      apiKey = (secret as string) ?? "";
+      baseUrl = conn.base_url ?? undefined;
+    } else if (PLATFORM_PROVIDER_KEYS[providerId]) {
+      try {
+        await chargeCredits(user.id, "content_strategy", { projectId: activeId, model });
+        chargedCredits = true;
+      } catch (err) {
+        if (err instanceof InsufficientCreditsError) {
+          return NextResponse.json({ error: "Out of credits. Upgrade or connect your own key." }, { status: 402 });
+        }
+        throw err;
+      }
+      apiKey = PLATFORM_PROVIDER_KEYS[providerId]!;
+    } else {
+      return NextResponse.json({ error: `${providerId} isn't connected yet.` }, { status: 422 });
+    }
+
+    try {
+      const generator = new ContentStrategyGenerator(driver, apiKey, baseUrl);
+      const result = await generator.generate({
+        projectName: project.name,
+        url: project.url,
+        bodyText: audit.bodyText ?? "",
+        metaTitle: audit.meta.title,
+        metaDescription: audit.meta.description,
+        productInfo,
+        marketingStrategy,
+        competitorAnalysis,
+        model,
+        tavilyApiKey,
+      });
+
+      if (!result.stream) {
+        const text = (result.text ?? "") + (tavilyApiKey ? "" : NO_TAVILY_FOOTER);
+        const now = new Date().toISOString();
+        const { data: existing } = await db
+          .from("project_documents")
+          .select("created_at")
+          .eq("user_id", user.id)
+          .eq("project_id", activeId)
+          .eq("doc_type", DOC_TYPE)
+          .maybeSingle();
+
+        const { error } = await db.from("project_documents").upsert(
+          {
+            user_id: user.id,
+            project_id: activeId,
+            doc_type: DOC_TYPE,
+            status: "ready",
+            content: text,
+            created_at: existing?.created_at ?? now,
+            updated_at: now,
+          },
+          { onConflict: "project_id,doc_type" }
+        );
+        if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+        return NextResponse.json({ text });
+      }
+
+      const outStream = tavilyApiKey ? result.stream : appendFooterToStream(result.stream, NO_TAVILY_FOOTER);
+      return new NextResponse(outStream, {
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+      });
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : String(err);
+      return NextResponse.json({ error: raw, chargedCredits }, { status: 502 });
+    }
   }
 
   const db = getDb();

@@ -5,6 +5,13 @@ import { CompetitorDiscoveryAgent } from "@/lib/domain/documents/CompetitorDisco
 import { fetchCompetitorSnippet } from "@/lib/domain/documents/CompetitorAnalysisGenerator";
 import type { SEOAuditPayload } from "@/lib/domain/seo/SEOAgent";
 import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
+import { FEATURES } from "@/lib/features";
+import { createClient } from "@/utils/supabase/server";
+import { createServiceClient } from "@/utils/supabase/serviceClient";
+
+// Vercel: LLM/crawl calls can run past the 10s default — allow up to the
+// platform max for this route (Hobby plan caps at 60s; Pro allows more).
+export const maxDuration = 60;
 
 /** Real automatic competitor discovery — an LLM proposes candidates (web-search-
  * grounded when Tavily is connected, context-only otherwise), then every
@@ -27,6 +34,131 @@ export async function POST(req: NextRequest) {
   const driver = getDriver(providerId);
   if (!driver) {
     return NextResponse.json({ error: `${providerId} isn't wired to a real model yet.` }, { status: 501 });
+  }
+
+  if (FEATURES.PLATFORM_MODE) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
+    const db = createServiceClient();
+
+    // free in platform mode for now — no credit_costs entry yet
+    const { data: conn } = await db
+      .from("provider_connections")
+      .select("api_key_secret_id, base_url")
+      .eq("user_id", user.id)
+      .eq("provider_id", providerId)
+      .maybeSingle();
+    if (!conn?.api_key_secret_id) {
+      return NextResponse.json(
+        { error: `${providerId} isn't properly connected. Check Settings → LLM Providers.` },
+        { status: 422 }
+      );
+    }
+    const { data: secret } = await db.rpc("vault_get_secret", { p_id: conn.api_key_secret_id });
+    const apiKey = (secret as string) ?? "";
+    const baseUrl = conn.base_url ?? undefined;
+
+    let activeId = requestedProjectId;
+    if (!activeId) {
+      const { data: setting } = await db
+        .from("user_settings")
+        .select("value")
+        .eq("user_id", user.id)
+        .eq("key", "active_project_id")
+        .maybeSingle();
+      activeId = setting?.value ?? undefined;
+    }
+
+    const { data: project } = activeId
+      ? await db.from("projects").select("name, url").eq("id", activeId).eq("owner_id", user.id).maybeSingle()
+      : { data: null };
+    if (!activeId || !project || !project.url) {
+      return NextResponse.json(
+        { error: "No project website linked yet. Add one in the project switcher first." },
+        { status: 422 }
+      );
+    }
+
+    const { data: auditRow } = await db
+      .from("seo_audits")
+      .select("payload")
+      .eq("project_id", activeId)
+      .eq("url", project.url)
+      .maybeSingle();
+    // payload is jsonb — Supabase returns it already parsed, unlike SQLite's TEXT column.
+    // Audit is optional here — we'll discover from URL + project metadata even without it.
+    const audit: SEOAuditPayload | undefined = auditRow?.payload;
+
+    const { data: groundingDocs } = await db
+      .from("project_documents")
+      .select("doc_type, content")
+      .eq("project_id", activeId)
+      .in("doc_type", ["product_info", "marketing_strategy"]);
+    const productInfo = groundingDocs?.find((d) => d.doc_type === "product_info")?.content;
+    const marketingStrategy = groundingDocs?.find((d) => d.doc_type === "marketing_strategy")?.content;
+
+    const { data: tavilySetting } = await db
+      .from("user_settings")
+      .select("value")
+      .eq("user_id", user.id)
+      .eq("key", "tavily_api_key")
+      .maybeSingle();
+    const tavilyApiKey =
+      tavilySetting?.value && providerSupportsTools(providerId) ? tavilySetting.value : undefined;
+
+    try {
+      const agent = new CompetitorDiscoveryAgent(driver, apiKey, baseUrl);
+      const { candidates, usedWebSearch } = await agent.discover({
+        projectName: project.name,
+        url: project.url,
+        bodyText: audit?.bodyText ?? "",
+        metaTitle: audit?.meta?.title ?? project.name,
+        metaDescription: audit?.meta?.description ?? `Visit ${project.url}`,
+        productInfo,
+        marketingStrategy,
+        model,
+        tavilyApiKey,
+      });
+
+      if (candidates.length === 0) {
+        return NextResponse.json({ added: [], usedWebSearch, note: "No confident competitor candidates found." });
+      }
+
+      const verified = await Promise.all(
+        candidates.map(async (c) => ({ ...c, snippet: await fetchCompetitorSnippet(`https://${c.domain}`) }))
+      );
+      const reachable = verified.filter((v) => v.snippet.title !== "(couldn't fetch)");
+
+      const { data: existingRows } = await db
+        .from("project_competitors")
+        .select("url")
+        .eq("project_id", activeId)
+        .eq("user_id", user.id);
+      const existingHosts = new Set(
+        (existingRows ?? []).map((r) => r.url.replace(/^https?:\/\//, "").replace(/^www\./, "").toLowerCase())
+      );
+
+      const now = new Date().toISOString();
+      const added: { id: string; url: string; reason: string }[] = [];
+      for (const c of reachable) {
+        if (existingHosts.has(c.domain)) continue;
+        const url = `https://${c.domain}`;
+        const { data: inserted, error } = await db
+          .from("project_competitors")
+          .insert({ user_id: user.id, project_id: activeId, url, created_at: now })
+          .select("id")
+          .single();
+        if (error) continue;
+        added.push({ id: inserted.id, url, reason: c.reason });
+      }
+
+      return NextResponse.json({ added, usedWebSearch, proposed: candidates.length, verified: reachable.length });
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : String(err);
+      return NextResponse.json({ error: raw }, { status: 502 });
+    }
   }
 
   const db = getDb();
