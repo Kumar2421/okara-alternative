@@ -70,7 +70,8 @@ export function upsertFinding(input: {
   ).get(input.projectId, input.source, input.category, input.entityType, input.entityId, input.url ?? null) as FindingRow | undefined;
 
   const id = existing?.id ?? ("finding_" + crypto.randomUUID());
-  // A verified finding reappearing in fresh analytics starts a new remediation cycle.\n  const nextStatus = existing?.status === "verified" ? "fixing" : (existing?.status ?? "new");
+  // A verified finding reappearing in fresh analytics starts a new remediation cycle.
+  const nextStatus = existing?.status === "verified" ? "fixing" : (existing?.status ?? "new");
   db.prepare(
     `INSERT INTO findings
       (id, project_id, source, category, severity, entity_type, entity_id, url, evidence, recommendation, status, first_seen, last_seen, resolved_at)
