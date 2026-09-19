@@ -31,10 +31,24 @@ async function integrationSettingsAsLegacyRows(
   db: ReturnType<typeof createServiceClient>,
   userId: string
 ): Promise<{ key: string; value: string }[]> {
-  const { data: rows } = await db
+  const { data: allRows } = await db
     .from("integration_connections")
-    .select("id, provider, external_email, external_property, access_token_secret_id, refresh_token_secret_id")
+    .select("id, provider, project_id, external_email, external_property, access_token_secret_id, refresh_token_secret_id")
     .eq("user_id", userId);
+
+  // ga4/gsc connections are project-scoped (a user can have Google connected
+  // on more than one project) — scope those two to the active project so
+  // this doesn't surface another project's connection state, or duplicate
+  // ga_* keys once per connected project. gmail/gcp stay account-level
+  // (project_id is always null for them), so they're unaffected.
+  const { data: activeSetting } = await db
+    .from("user_settings")
+    .select("value")
+    .eq("user_id", userId)
+    .eq("key", "active_project_id")
+    .maybeSingle();
+  const activeProjectId = activeSetting?.value ?? null;
+  const rows = allRows?.filter((r) => (r.provider === "ga4" || r.provider === "gsc" ? r.project_id === activeProjectId : true));
 
   const out: { key: string; value: string }[] = [];
   const placeholder = "••••••";
