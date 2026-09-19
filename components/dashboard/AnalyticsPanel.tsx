@@ -7,13 +7,14 @@ import CollapsedRail, { RailButton } from "./CollapsedRail";
 import { useToast } from "./Toast";
 import ScoreCircle from "./ScoreCircle";
 import CodeFixModal from "./CodeFixModal";
+import FindingsWorkspace from "./FindingsWorkspace";
 import type { SEOAuditPayload, Finding } from "@/lib/domain/seo/SEOAgent";
 import type { Finding as AnalyticsFinding } from "@/lib/domain/findings/findingTypes";
 import type { GeoCitationRow } from "@/lib/domain/geo/GEOAgent";
 import { useProject } from "@/lib/project-store";
 import { useTerminalLog } from "@/lib/terminal-log-store";
 
-const TABS = ["SEO", "Links", "Technical", "GEO", "Traffic"] as const;
+const TABS = ["SEO", "Links", "Technical", "GEO", "Traffic", "Findings"] as const;
 type Tab = (typeof TABS)[number];
 
 type TrafficByDate = { date: string; clicks: number; impressions: number; ctr: number; position: number };
@@ -534,6 +535,7 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
         <RailButton icon={<Cpu size={15} />} label="Technical" active={tab === "Technical"} onClick={() => { setTab("Technical"); onToggle(); }} />
         <RailButton icon={<Globe2 size={15} />} label="GEO" active={tab === "GEO"} onClick={() => { setTab("GEO"); onToggle(); }} />
         <RailButton icon={<TrendingUp size={15} />} label="Traffic" active={tab === "Traffic"} onClick={() => { setTab("Traffic"); onToggle(); }} />
+        <RailButton icon={<Check size={15} />} label="Findings" active={tab === "Findings"} onClick={() => { setTab("Findings"); onToggle(); }} />
       </CollapsedRail>
     );
   }
