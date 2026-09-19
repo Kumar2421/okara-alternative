@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Mail, Lock, Loader2, CheckCircle2 } from "lucide-react";
+import { Mail, Lock, CheckCircle2 } from "lucide-react";
+import { DotLottieReact } from "@lottiefiles/dotlottie-react";
 import { createClient } from "@/utils/supabase/client";
 import { FEATURES } from "@/lib/features";
 
@@ -231,7 +232,7 @@ export default function LoginPage() {
                 disabled={isLoading}
                 className="mt-1 flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[#111111] text-sm font-medium text-white hover:bg-black disabled:opacity-50"
               >
-                {isLoading ? <Loader2 size={14} className="animate-spin" /> : null}
+                {isLoading ? <DotLottieReact src="/ghost-loader.lottie" autoplay loop className="h-4 w-4" /> : null}
                 {isLoading ? "Loading..." : isSignUp ? "Create Account" : "Sign In"}
               </button>
             </form>

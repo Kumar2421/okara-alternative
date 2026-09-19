@@ -35,16 +35,45 @@ function useClickOutside(onOutside: () => void) {
   return ref;
 }
 
+function useCredits() {
+  const [balance, setBalance] = useState<number | null>(null);
+  const [billingEnabled, setBillingEnabled] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/credits")
+      .then((r) => r.json())
+      .then((data) => {
+        setBalance(typeof data.balance === "number" ? data.balance : null);
+        setBillingEnabled(!!data.billingEnabled);
+      })
+      .catch(() => {})
+      .finally(() => setLoaded(true));
+  }, []);
+
+  return { balance, billingEnabled, loaded };
+}
+
 function UserMenu() {
   const [open, setOpen] = useState(false);
   const ref = useClickOutside(() => setOpen(false));
   const router = useRouter();
   const { show } = useToast();
   const { user: authUser } = useAuthUser();
+  const credits = useCredits();
 
   // Falls back to mock data until Supabase credentials are wired — keeps the
   // dashboard usable in local/self-host dev before a project exists.
   const user = authUser ?? mockUser;
+
+  // null balance = self-host (no metering at all, bring-your-own-key model)
+  // — hide the credits pill entirely rather than show a meaningless number.
+  // Platform mode always has a real balance; while billing isn't enabled yet
+  // (beta), every action is still metered for real behind the scenes (see
+  // spend_credits()), just never blocks — so show that honestly instead of
+  // a number that means nothing yet.
+  const creditsLabel =
+    credits.balance === null ? null : credits.billingEnabled ? `${credits.balance} Credits` : "Unlimited (beta)";
 
   async function handleLogout() {
     setOpen(false);
@@ -72,7 +101,7 @@ function UserMenu() {
             {user.name}
             <ChevronDown size={12} className={`opacity-50 transition-transform ${open ? "rotate-180" : ""}`} />
           </div>
-          <div className="text-[11px] text-gray-400">{mockUser.credits} Credits</div>
+          {creditsLabel && <div className="text-[11px] text-gray-400">{creditsLabel}</div>}
         </div>
       </button>
 
@@ -88,14 +117,18 @@ function UserMenu() {
             </div>
             <Moon size={15} className="shrink-0 text-gray-400" />
           </div>
-          <div className="mb-2 flex items-center gap-2 px-2">
-            <span className="rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-medium text-gray-700">
-              {mockUser.credits} Credits
-            </span>
-            <button className="rounded-full bg-[#111111] px-3 py-1 text-[11px] font-medium text-white hover:bg-black">
-              Upgrade
-            </button>
-          </div>
+          {creditsLabel && (
+            <div className="mb-2 flex items-center gap-2 px-2">
+              <span className="rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-medium text-gray-700">
+                {creditsLabel}
+              </span>
+              {credits.billingEnabled && (
+                <button className="rounded-full bg-[#111111] px-3 py-1 text-[11px] font-medium text-white hover:bg-black">
+                  Upgrade
+                </button>
+              )}
+            </div>
+          )}
           <div className="border-t border-gray-100 pt-2">
             {items.map((item) => (
               <button
