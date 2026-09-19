@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Check, ChevronRight, CircleDot, Loader2, RefreshCw } from "lucide-react";
 import type { Finding, FindingStatus } from "@/lib/domain/findings/findingTypes";
+import type { Recommendation } from "@/lib/domain/recommendations/recommendationTypes";
 
 const STATUS_ORDER: FindingStatus[] = ["new", "acknowledged", "fixing", "fixed", "verified"];
 
@@ -54,8 +55,32 @@ export default function FindingsWorkspace() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [verification, setVerification] = useState<"verified" | "failed" | null>(null);
+  const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
+  const [recommendationsLoading, setRecommendationsLoading] = useState(false);
 
   const selected = findings.find((finding) => finding.id === selectedId) ?? null;
+
+  useEffect(() => {
+    if (!selectedId) {
+      setRecommendations([]);
+      return;
+    }
+    let active = true;
+    setRecommendationsLoading(true);
+    fetch(`/api/agents/analytics/findings/recommendations?id=${encodeURIComponent(selectedId)}`)
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Failed to load recommendations.");
+        if (active) setRecommendations(Array.isArray(data.recommendations) ? data.recommendations : []);
+      })
+      .catch(() => {
+        if (active) setRecommendations([]);
+      })
+      .finally(() => {
+        if (active) setRecommendationsLoading(false);
+      });
+    return () => { active = false; };
+  }, [selectedId]);
 
   const counts = useMemo(() => ({
     active: findings.filter((f) => !["verified"].includes(f.status)).length,
@@ -233,6 +258,32 @@ export default function FindingsWorkspace() {
                 <section>
                   <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Recommendation</div>
                   <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-[12px] leading-5 text-gray-700">{selected.recommendation}</div>
+                </section>
+
+                <section>
+                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Recommendations</div>
+                  {recommendationsLoading ? (
+                    <div className="flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 p-3 text-[12px] text-gray-500">
+                      <Loader2 size={13} className="animate-spin" /> Generating recommendations...
+                    </div>
+                  ) : recommendations.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 p-3 text-[12px] text-gray-500">No structured recommendations for the current evidence.</div>
+                  ) : (
+                    <div className="space-y-2">
+                      {recommendations.map((item) => (
+                        <div key={item.id} className="rounded-xl border border-gray-200 p-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="text-[12px] font-semibold text-gray-900">{item.title}</div>
+                              <div className="mt-1 text-[11px] leading-4 text-gray-600">{item.summary}</div>
+                            </div>
+                            <span className="shrink-0 rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[9px] font-semibold uppercase text-gray-500">{item.priority}</span>
+                          </div>
+                          <div className="mt-2 text-[10px] text-gray-500"><span className="font-medium text-gray-700">{item.implementation.kind}</span> · {item.implementation.description}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </section>
 
                 <section>
