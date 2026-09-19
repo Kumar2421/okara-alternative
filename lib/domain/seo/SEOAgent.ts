@@ -26,9 +26,9 @@ export type SEOAuditPayload = {
   meta: {
     title: string;
     description: string;
-    /** From <link rel="canonical">, if present — empty string otherwise
-     * (never guessed; a missing canonical is a real, common issue). */
-    canonical: string;
+    canonical?: string;
+    robots?: string;
+    indexable: boolean;
   };
   headings: {
     h1: number;
@@ -375,7 +375,12 @@ export class SEOAgent {
     // 2. Parse tags
     const title = $("title").text() || "";
     const description = $("meta[name='description']").attr("content") || "";
-    const canonical = $("link[rel='canonical']").attr("href") || "";
+    const canonical = $("link[rel='canonical']").attr("href")?.trim() || undefined;
+    const robots = $("meta[name='robots']").attr("content")?.trim() || undefined;
+    const indexable = !robots?.split(",").some((directive) => directive.trim().toLowerCase() === "noindex");
+
+    if (!canonical) issues.push({ label: "Missing canonical URL", level: "Warning" });
+    if (!indexable) issues.push({ label: "Page is marked noindex", level: "Warning" });
 
     if (!title) {
       issues.push({ label: "Missing Meta Title", level: "Error" });
@@ -691,7 +696,7 @@ export class SEOAgent {
 
     return {
       url,
-      meta: { title, description, canonical },
+      meta: { title, description, canonical, robots, indexable },
       headings,
       openGraph,
       twitter,

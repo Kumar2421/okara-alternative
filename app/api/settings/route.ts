@@ -33,11 +33,26 @@ async function integrationSettingsAsLegacyRows(
 ): Promise<{ key: string; value: string }[]> {
   const { data: rows } = await db
     .from("integration_connections")
-    .select("provider, external_email, external_property, access_token_secret_id, refresh_token_secret_id")
+    .select("id, provider, external_email, external_property, access_token_secret_id, refresh_token_secret_id")
     .eq("user_id", userId);
 
   const out: { key: string; value: string }[] = [];
   const placeholder = "••••••";
+
+  // GA4/GSC selection now lives in integration_resources (selected=true row
+  // per connection — see integrationStoreSupabase.ts), not the connection's
+  // own external_property column, which the resource-picker redesign left
+  // unused for these two providers.
+  const gaConnId = rows?.find((r) => r.provider === "ga4")?.id;
+  const gscConnId = rows?.find((r) => r.provider === "gsc")?.id;
+  const [gaResource, gscResource] = await Promise.all([
+    gaConnId
+      ? db.from("integration_resources").select("resource_id, resource_name").eq("connection_id", gaConnId).eq("selected", true).maybeSingle()
+      : Promise.resolve({ data: null }),
+    gscConnId
+      ? db.from("integration_resources").select("resource_id").eq("connection_id", gscConnId).eq("selected", true).maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
 
   for (const row of rows ?? []) {
     if (row.provider === "gmail") {
@@ -48,13 +63,10 @@ async function integrationSettingsAsLegacyRows(
       if (row.access_token_secret_id) out.push({ key: "ga_access_token", value: placeholder });
       if (row.refresh_token_secret_id) out.push({ key: "ga_refresh_token", value: placeholder });
       if (row.external_email) out.push({ key: "ga_email", value: row.external_email });
-      // external_property is packed as "id::name" — see auth/callback and
-      // auth/google-analytics/callback for the writer side.
-      const [propId, propName] = (row.external_property ?? "").split("::");
-      if (propId) out.push({ key: "ga_property_id", value: propId });
-      if (propName) out.push({ key: "ga_property_name", value: propName });
+      if (gaResource.data?.resource_id) out.push({ key: "ga_property_id", value: gaResource.data.resource_id });
+      if (gaResource.data?.resource_name) out.push({ key: "ga_property_name", value: gaResource.data.resource_name });
     } else if (row.provider === "gsc") {
-      if (row.external_property) out.push({ key: "gsc_site_url", value: row.external_property });
+      if (gscResource.data?.resource_id) out.push({ key: "gsc_site_url", value: gscResource.data.resource_id });
     } else if (row.provider === "gcp") {
       if (row.access_token_secret_id) out.push({ key: "gcp_access_token", value: placeholder });
       if (row.refresh_token_secret_id) out.push({ key: "gcp_refresh_token", value: placeholder });
@@ -100,7 +112,9 @@ export async function GET(req: NextRequest) {
 
   try {
     const db = getDb();
-    const settings = db.prepare("SELECT * FROM settings").all() as { key: string; value: string }[];
+    const settings = db
+      .prepare("SELECT key, value FROM settings WHERE key NOT IN ('ga_access_token', 'ga_refresh_token', 'ga_token_expiry')")
+      .all() as { key: string; value: string }[];
     return NextResponse.json({ settings: redactSettingsForClient(settings) });
   } catch (err) {
     const raw = err instanceof Error ? err.message : String(err);
@@ -114,6 +128,17 @@ export async function POST(req: NextRequest) {
 
   const { key, value } = body;
   if (!key) return NextResponse.json({ error: "Missing key" }, { status: 400 });
+  if ([
+    "ga_access_token",
+    "ga_refresh_token",
+    "ga_token_expiry",
+    "ga_email",
+    "gsc_site_url",
+    "ga_property_id",
+    "ga_property_name",
+  ].includes(key)) {
+    return NextResponse.json({ error: "Google connection data is project-scoped and cannot be stored in generic settings." }, { status: 400 });
+  }
 
   if (FEATURES.PLATFORM_MODE) {
     if (OAUTH_TOKEN_KEYS.has(key)) {

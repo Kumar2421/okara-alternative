@@ -69,75 +69,41 @@ export async function getConnectedEmail(accessToken: string): Promise<string | n
   }
 }
 
-export type SearchConsoleSite = { siteUrl: string; permissionLevel: string };
-
-/** Every Search Console site this account can see — including ones it only
- * has partial/no real access to (siteUnverifiedUser), since sites.list
- * doesn't filter those out. */
-export async function listSearchConsoleSites(accessToken: string): Promise<SearchConsoleSite[]> {
+/** All Search Console properties visible to this Google account. */
+export async function listSearchConsoleSites(accessToken: string): Promise<string[]> {
   try {
     const res = await fetch("https://www.googleapis.com/webmasters/v3/sites", {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (!res.ok) return [];
     const data = await res.json();
-    return data.siteEntry ?? [];
+    const entries: { siteUrl: string }[] = data.siteEntry ?? [];
+    return entries.map((entry) => entry.siteUrl).filter(Boolean);
   } catch {
     return [];
   }
 }
 
-/** Picks the real site to use for this project — matched by domain to the
- * project's own URL when possible (an account can have many verified
- * sites; picking blindly means Traffic data for the wrong domain, or a 403
- * if that other site's permission level doesn't actually allow querying
- * it). Falls back to the first site with real access (owner/full user,
- * never a merely-listed-but-unverified one) if nothing matches the domain,
- * and to the first site at all only as a last resort. */
-export function pickBestSearchConsoleSite(sites: SearchConsoleSite[], projectUrl: string): string | null {
-  if (sites.length === 0) return null;
-
-  const usable = sites.filter((s) => s.permissionLevel === "siteOwner" || s.permissionLevel === "siteFullUser");
-  const pool = usable.length > 0 ? usable : sites;
-
-  let host = "";
-  try {
-    host = new URL(projectUrl).hostname.replace(/^www\./, "").toLowerCase();
-  } catch {
-    // leave host empty — falls through to pool[0] below
-  }
-
-  const normalize = (siteUrl: string) => siteUrl.replace(/^sc-domain:/, "").replace(/^https?:\/\//, "").replace(/\/$/, "").replace(/^www\./, "").toLowerCase();
-
-  const matching = host
-    ? pool.find((s) => {
-        const siteHost = normalize(s.siteUrl);
-        return siteHost === host || siteHost.endsWith(`.${host}`) || host.endsWith(`.${siteHost}`);
-      })
-    : undefined;
-
-  return (matching ?? pool[0]).siteUrl;
-}
-
-export type GA4Property = { id: string; name: string; accountName: string };
-
-/** Every GA4 property this account can see, across every account — an
- * account can have many properties, so (like Search Console sites) this
- * shouldn't be auto-picked blindly; the Traffic tab shows the real list. */
-export async function listGA4Properties(accessToken: string): Promise<GA4Property[]> {
+/** All GA4 properties visible to this Google account. */
+export async function listGA4Properties(accessToken: string): Promise<{ id: string; name: string }[]> {
   try {
     const res = await fetch("https://analyticsadmin.googleapis.com/v1beta/accountSummaries", {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (!res.ok) return [];
     const data = await res.json();
-    const out: GA4Property[] = [];
+    const properties: { id: string; name: string }[] = [];
     for (const account of data.accountSummaries ?? []) {
-      for (const prop of account.propertySummaries ?? []) {
-        out.push({ id: prop.property, name: prop.displayName, accountName: account.displayName ?? "" });
+      for (const property of account.propertySummaries ?? []) {
+        if (property.property) {
+          properties.push({
+            id: property.property,
+            name: property.displayName ?? property.property,
+          });
+        }
       }
     }
-    return out;
+    return properties;
   } catch {
     return [];
   }

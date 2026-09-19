@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
 import { FEATURES } from "@/lib/features";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
+import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
+import { deleteProjectIntegration } from "@/lib/domain/integrations/integrationStore";
+import { deleteProjectIntegration as deleteProjectIntegrationSupabase } from "@/lib/domain/integrations/integrationStoreSupabase";
 
 export async function POST() {
   if (FEATURES.PLATFORM_MODE) {
@@ -11,30 +13,28 @@ export async function POST() {
     if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
     const db = createServiceClient();
-    // Vault secret rows for the disconnected tokens are left orphaned —
-    // acceptable for this pass, not a live credential once the connection
-    // row referencing it is gone.
-    const { error } = await db
-      .from("integration_connections")
-      .delete()
+    const { data: setting } = await db
+      .from("user_settings")
+      .select("value")
       .eq("user_id", user.id)
-      .in("provider", ["ga4", "gsc"]);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      .eq("key", "active_project_id")
+      .maybeSingle();
+    const projectId = setting?.value;
+    if (!projectId) return NextResponse.json({ error: "No active project" }, { status: 422 });
 
-    return NextResponse.json({ success: true });
+    await Promise.all([
+      deleteProjectIntegrationSupabase(db, user.id, projectId, "google-search-console"),
+      deleteProjectIntegrationSupabase(db, user.id, projectId, "google-analytics"),
+    ]);
+
+    return NextResponse.json({ success: true, projectId });
   }
 
-  const db = getDb();
-  for (const key of [
-    "ga_access_token",
-    "ga_refresh_token",
-    "ga_token_expiry",
-    "ga_email",
-    "gsc_site_url",
-    "ga_property_id",
-    "ga_property_name",
-  ]) {
-    db.prepare("DELETE FROM settings WHERE key = ?").run(key);
-  }
-  return NextResponse.json({ success: true });
+  const projectId = getActiveProjectId();
+  if (!projectId) return NextResponse.json({ error: "No active project" }, { status: 422 });
+
+  deleteProjectIntegration(projectId, "google-search-console");
+  deleteProjectIntegration(projectId, "google-analytics");
+
+  return NextResponse.json({ success: true, projectId });
 }
