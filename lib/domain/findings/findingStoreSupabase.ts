@@ -103,7 +103,7 @@ export async function upsertFinding(
         status: existing?.status ?? "new",
         first_seen: existing?.first_seen ?? now,
         last_seen: now,
-        resolved_at: existing?.resolved_at ?? null,
+        resolved_at: nextStatus === "verified" ? existing?.resolved_at ?? now : null,
       },
       { onConflict: "project_id,source,category,entity_type,entity_id,url" }
     )
