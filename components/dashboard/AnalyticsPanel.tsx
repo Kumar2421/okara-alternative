@@ -8,6 +8,7 @@ import { useToast } from "./Toast";
 import ScoreCircle from "./ScoreCircle";
 import CodeFixModal from "./CodeFixModal";
 import type { SEOAuditPayload, Finding } from "@/lib/domain/seo/SEOAgent";
+import type { Finding as AnalyticsFinding } from "@/lib/domain/findings/findingTypes";
 import type { GeoCitationRow } from "@/lib/domain/geo/GEOAgent";
 import { useProject } from "@/lib/project-store";
 import { useTerminalLog } from "@/lib/terminal-log-store";
@@ -206,6 +207,8 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
   const [codeFixes, setCodeFixes] = useState<Record<string, { status: string; pr_url: string | null }>>({});
   const [fixingFinding, setFixingFinding] = useState<Finding | null>(null);
   const [pageEvidence, setPageEvidence] = useState<Record<string, PageEvidence | { error: string }>>({});
+  const [findings, setFindings] = useState<AnalyticsFinding[]>([]);
+  const [findingCreating, setFindingCreating] = useState<Record<string, boolean>>({});
   const { show } = useToast();
   const { project } = useProject();
   const { log, logDone } = useTerminalLog();
@@ -292,8 +295,14 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
       setTrafficLoading(true);
       setTrafficError(null);
       log("Fetching real Search Console + Analytics data...");
-      fetch("/api/agents/analytics/traffic")
-        .then(async (r) => {
+      Promise.all([
+        fetch("/api/agents/analytics/traffic"),
+        fetch("/api/agents/analytics/findings"),
+      ])
+        .then(async ([trafficResponse, findingsResponse]) => {
+          const findingsData = await findingsResponse.json().catch(() => null);
+          if (findingsResponse.ok && Array.isArray(findingsData?.findings)) setFindings(findingsData.findings);
+          const r = trafficResponse;
           const data = await r.json();
           if (!r.ok) {
             setTrafficError(data.error ?? "Failed to load Traffic data.");
@@ -352,6 +361,50 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
     } catch {
       setPageEvidence((prev) => ({ ...prev, [url]: { error: "Failed to inspect ranking page." } }));
       logDone("⚠ Failed to inspect ranking page.");
+    }
+  };
+
+  const handleCreateFinding = async (q: TrafficOpportunity, url: string) => {
+    const key = `${q.query}|${url}`;
+    if (findingCreating[key]) return;
+    setFindingCreating((prev) => ({ ...prev, [key]: true }));
+    log(`Creating finding for query: ${q.query}`);
+    try {
+      const res = await fetch("/api/agents/analytics/findings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: q.query,
+          url,
+          clicks: q.clicks,
+          impressions: q.impressions,
+          ctr: q.ctr,
+          position: q.position,
+          score: q.score,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        show(data.error || "Failed to create finding.");
+        log(`⚠ ${data.error || "Failed to create finding."}`);
+        return;
+      }
+      if (!data.finding) {
+        show(data.message || "No actionable issue found on this page.");
+        logDone(data.message || "No actionable issue found on this page.");
+        return;
+      }
+      setFindings((prev) => [data.finding, ...prev.filter((f) => f.id !== data.finding.id)]);
+      logDone(`Finding created — ${data.finding.severity} ${data.finding.category}`);
+    } catch {
+      show("Failed to create finding.");
+      log("⚠ Failed to create finding.");
+    } finally {
+      setFindingCreating((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
     }
   };
 

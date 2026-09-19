@@ -216,6 +216,24 @@ function init(): Database.Database {
       expires_at INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS findings (
+      id           TEXT PRIMARY KEY,
+      project_id   TEXT NOT NULL,
+      source       TEXT NOT NULL,
+      category     TEXT NOT NULL,
+      severity     TEXT NOT NULL,
+      entity_type  TEXT NOT NULL,
+      entity_id    TEXT NOT NULL,
+      url          TEXT,
+      evidence     TEXT NOT NULL DEFAULT '{}',
+      recommendation TEXT NOT NULL DEFAULT '',
+      status       TEXT NOT NULL DEFAULT 'new',
+      first_seen   TEXT NOT NULL,
+      last_seen    TEXT NOT NULL,
+      resolved_at  TEXT,
+      UNIQUE(project_id, source, category, entity_type, entity_id, url)
+    );
+
     CREATE TABLE IF NOT EXISTS leads (
       id         TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,
