@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { canTransitionFinding } from "./findingTypes";
 import type { Finding, FindingSeverity } from "./findingTypes";
 
 /** Supabase mirror of findingStore.ts (self-host, SQLite) — same function
