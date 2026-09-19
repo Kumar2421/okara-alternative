@@ -1,5 +1,17 @@
-import type { Finding, FindingSeverity, FindingStatus } from "./findingTypes.ts";
-import { canTransitionFinding } from "./findingTypes.ts";
+import type { Finding, FindingSeverity, FindingStatus } from "./findingTypes";
+
+const FINDING_TRANSITIONS: Record<FindingStatus, FindingStatus[]> = {
+  new: ["acknowledged"],
+  acknowledged: ["fixing"],
+  fixing: ["fixed", "failed"],
+  fixed: ["verified", "failed"],
+  verified: ["fixing"],
+  failed: ["fixing"],
+};
+
+function canTransitionFinding(from: FindingStatus, to: FindingStatus): boolean {
+  return FINDING_TRANSITIONS[from].includes(to);
+}
 
 export type FindingRepository = {
   get(projectId: string, id: string): Promise<Finding | null> | Finding | null;
