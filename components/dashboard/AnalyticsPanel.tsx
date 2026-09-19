@@ -583,7 +583,7 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
       </div>
 
       <div className="okara-scroll flex-1 overflow-y-auto p-4">
-        {tab === "Findings" ? (\n          <FindingsWorkspace />\n        ) : {tab === "Traffic" ? (
+        {tab === "Findings" ? (\n          <FindingsWorkspace />\n        ) : tab === "Traffic" ? (
           <Section
             title="Traffic"
             subtitle={
