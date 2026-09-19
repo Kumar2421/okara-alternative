@@ -184,11 +184,16 @@ export async function PUT(req: NextRequest) {
       if (action === "recheck") {
         const result = await runRecheck(finding);
         const nextStatus = result.rule ? "failed" : "verified";
-        const updated = await refreshFindingSupabase(db, user.id, projectId, id, {
+        const updated = await applyRecheck({
+          get: (p, findingId) => getProjectFindingSupabase(db, user.id, p, findingId),
+          list: (p) => listProjectFindingsSupabase(db, user.id, p),
+          transition: (p, findingId, nextStatus) => updateFindingStatusSupabase(db, user.id, p, findingId, nextStatus),
+          refresh: (p, findingId, input) => refreshFindingSupabase(db, user.id, p, findingId, input),
+        }, projectId, id, {
           severity: result.rule?.severity ?? finding.severity,
           evidence: result.evidence,
           recommendation: result.rule?.recommendation ?? "Issue no longer detected. Keep the page under observation and re-check if it changes.",
-          status: nextStatus,
+          issueDetected: Boolean(result.rule),
         });
         return NextResponse.json({ finding: updated, verification: { status: nextStatus, changed: nextStatus === "verified" } });
       }
@@ -208,11 +213,16 @@ export async function PUT(req: NextRequest) {
     if (action === "recheck") {
       const result = await runRecheck(finding);
       const nextStatus = result.rule ? "failed" : "verified";
-      const updated = refreshFinding(projectId, id, {
+      const updated = await applyRecheck({
+        get: (p, findingId) => getProjectFinding(p, findingId),
+        list: (p) => listProjectFindings(p),
+        transition: (p, findingId, nextStatus) => updateFindingStatus(p, findingId, nextStatus),
+        refresh: (p, findingId, input) => refreshFinding(p, findingId, input),
+      }, projectId, id, {
         severity: result.rule?.severity ?? finding.severity,
         evidence: result.evidence,
         recommendation: result.rule?.recommendation ?? "Issue no longer detected. Keep the page under observation and re-check if it changes.",
-        status: nextStatus,
+        issueDetected: Boolean(result.rule),
       });
       return NextResponse.json({ finding: updated, verification: { status: nextStatus, changed: nextStatus === "verified" } });
     }
