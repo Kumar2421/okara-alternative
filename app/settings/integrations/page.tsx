@@ -1,8 +1,15 @@
 import { Info } from "lucide-react";
-import IntegrationCard from "@/components/settings/IntegrationCard";
-import ApiIntegrationCard from "@/components/settings/ApiIntegrationCard";
+import ComingSoonCard from "@/components/settings/ComingSoonCard";
+import GitHubCodeFixCard from "@/components/settings/GitHubCodeFixCard";
+import WordPressCard from "@/components/settings/WordPressCard";
+import XConnectCard from "@/components/settings/XConnectCard";
 import { cmsIntegrations, socialIntegrations, codeRepoIntegrations } from "@/lib/mock-integrations";
 
+// Real, secure connections exist for WordPress (self-hosted), GitHub, and X
+// — everything else on this page is an honest "coming soon" rather than a
+// fake toggle that stores nothing and resets on reload. GitHub is one real
+// connection shared between the CMS "publish to repo" slot and the
+// code-repo "SEO agent PRs" slot below, not two separate fake cards.
 export default function IntegrationsPage() {
   return (
     <div className="max-w-4xl">
@@ -15,37 +22,28 @@ export default function IntegrationsPage() {
       </div>
 
       <div className="mb-8 grid grid-cols-2 gap-3">
-        {cmsIntegrations.map((i) => (
-          <IntegrationCard key={i.id} name={i.name} desc={i.desc} icon={i.icon} color={i.color} />
-        ))}
+        {cmsIntegrations.map((i) => {
+          if (i.id === "wordpress-self") return <WordPressCard key={i.id} />;
+          if (i.id === "github-articles") return <GitHubCodeFixCard key={i.id} />;
+          return <ComingSoonCard key={i.id} name={i.name} desc={i.desc} icon={i.icon} color={i.color} />;
+        })}
       </div>
 
       <h2 className="text-[15px] font-semibold text-gray-900">Socials</h2>
       <p className="mb-4 text-[13px] text-gray-500">Connect your social accounts to post and share content</p>
       <div className="mb-8 grid grid-cols-2 gap-3">
         {socialIntegrations.map((i) => {
-          if (i.name === "Reddit" || i.name === "X (Twitter)") {
-            return (
-              <ApiIntegrationCard 
-                key={i.id} 
-                name={i.name} 
-                desc={i.desc} 
-                icon={i.icon} 
-                color={i.color} 
-                settingKey={i.name === "Reddit" ? "reddit_api_key" : "x_api_key"}
-              />
-            );
-          }
-          return <IntegrationCard key={i.id} name={i.name} desc={i.desc} icon={i.icon} color={i.color} />;
+          if (i.name === "X (Twitter)") return <XConnectCard key={i.id} />;
+          return <ComingSoonCard key={i.id} name={i.name} desc={i.desc} icon={i.icon} color={i.color} />;
         })}
       </div>
 
       <h2 className="text-[15px] font-semibold text-gray-900">Code Repository</h2>
       <p className="mb-4 text-[13px] text-gray-500">Connect a GitHub repo so the SEO agent can open pull requests against it</p>
       <div className="grid grid-cols-2 gap-3">
-        {codeRepoIntegrations.map((i) => (
-          <IntegrationCard key={i.id} name={i.name} desc={i.desc} icon={i.icon} color={i.color} />
-        ))}
+        {codeRepoIntegrations.map((i) =>
+          i.id === "github-seo" ? <GitHubCodeFixCard key={i.id} /> : <ComingSoonCard key={i.id} name={i.name} desc={i.desc} icon={i.icon} color={i.color} />
+        )}
       </div>
     </div>
   );

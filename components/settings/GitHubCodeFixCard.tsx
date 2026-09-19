@@ -4,11 +4,21 @@ import { useEffect, useState } from "react";
 import { Check, ExternalLink } from "lucide-react";
 import { useToast } from "@/components/dashboard/Toast";
 import BrandIcon from "@/components/settings/BrandIcon";
+import { FEATURES } from "@/lib/features";
 
 /** Real GitHub PAT + repo, validated live against the GitHub API before
  * either is saved (same honesty pattern as every other credential card
  * here — never store something that doesn't actually work). Powers the
- * code-fix agent: SEO findings → real file read → LLM patch → real PR. */
+ * code-fix agent (SEO findings → real file read → LLM patch → real PR) and
+ * the Integrations page's "publish to repo" slot — one real connection,
+ * not two separate fake cards.
+ *
+ * Self-host: plaintext settings.github_pat/github_repo (resolveContext.ts
+ * reads these directly). Platform mode: PAT through /api/providers
+ * (provider_id "github", Vault-encrypted) same as any BYOK key; repo name
+ * isn't a secret so it stays in user_settings.github_repo — this is exactly
+ * what codefix/propose+apply already read, this card was the one place
+ * still writing to the old insecure self-host-only path regardless of mode. */
 export default function GitHubCodeFixCard() {
   const { show } = useToast();
   const [connected, setConnected] = useState(false);
@@ -19,6 +29,21 @@ export default function GitHubCodeFixCard() {
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
+    if (FEATURES.PLATFORM_MODE) {
+      Promise.all([fetch("/api/providers").then((r) => r.json()), fetch("/api/settings").then((r) => r.json())])
+        .then(([providersData, settingsData]) => {
+          const githubConn = providersData.connections?.find((c: { providerId: string }) => c.providerId === "github");
+          const repoRow = settingsData.settings?.find((s: { key: string; value: string }) => s.key === "github_repo");
+          if (githubConn && repoRow?.value) {
+            setConnected(true);
+            setRepoSaved(repoRow.value);
+          }
+        })
+        .catch(() => {})
+        .finally(() => setLoaded(true));
+      return;
+    }
+
     fetch("/api/settings")
       .then((r) => r.json())
       .then((data: { settings: { key: string; value: string }[] }) => {
@@ -42,6 +67,15 @@ export default function GitHubCodeFixCard() {
     if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? "Failed to save");
   }
 
+  async function saveGithubProvider(pat: string) {
+    const res = await fetch("/api/providers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ providerId: "github", apiKey: pat }),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? "Failed to save");
+  }
+
   async function handleConnect() {
     if (!patInput.trim() || !repoInput.trim()) {
       show("Enter both a token and a repository (owner/repo).");
@@ -59,7 +93,11 @@ export default function GitHubCodeFixCard() {
         show(data.error || "Couldn't verify token/repo.");
         return;
       }
-      await saveSetting("github_pat", patInput.trim());
+      if (FEATURES.PLATFORM_MODE) {
+        await saveGithubProvider(patInput.trim());
+      } else {
+        await saveSetting("github_pat", patInput.trim());
+      }
       await saveSetting("github_repo", data.fullName);
       setConnected(true);
       setRepoSaved(data.fullName);
@@ -76,7 +114,11 @@ export default function GitHubCodeFixCard() {
   async function handleDisconnect() {
     setBusy(true);
     try {
-      await saveSetting("github_pat", "");
+      if (FEATURES.PLATFORM_MODE) {
+        await fetch("/api/providers?providerId=github", { method: "DELETE" });
+      } else {
+        await saveSetting("github_pat", "");
+      }
       await saveSetting("github_repo", "");
       setConnected(false);
       setRepoSaved("");

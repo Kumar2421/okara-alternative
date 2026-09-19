@@ -90,10 +90,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `${providerId} isn't connected yet.` }, { status: 422 });
     }
 
+    // X/Twitter posting credentials (separate from the LLM key, provider_id
+    // "x") — same BYOK-style provider_connections slot as GitHub's PAT.
+    // Optional: draft generation still works without it, only real posting needs it.
+    const { data: xConn } = await db
+      .from("provider_connections")
+      .select("api_key_secret_id")
+      .eq("user_id", user.id)
+      .eq("provider_id", "x")
+      .maybeSingle();
+    let xCreds: string | undefined;
+    if (xConn?.api_key_secret_id) {
+      const { data: secret } = await db.rpc("vault_get_secret", { p_id: xConn.api_key_secret_id });
+      xCreds = (secret as string) || undefined;
+    }
+
     try {
-      // X/Twitter posting credentials (separate from the LLM key) aren't in
-      // the platform schema yet — draft generation doesn't need them.
-      const agent = new XAgent(driver, apiKey, undefined, baseUrl);
+      const agent = new XAgent(driver, apiKey, xCreds, baseUrl);
       const result = await agent.generateThread({
         topic,
         brandVoice,
