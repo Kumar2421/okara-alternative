@@ -24,7 +24,7 @@ test("keeps healthy pages recommendation-free", () => {
 });
 
 test("uses finding identity as the stable recommendation target", () => {
-  const recommendations = deriveRecommendations(makeFinding({ page: { meta: { indexable: true }, contentRelevance: { keywordRelevance: 45 } } }));
+  const recommendations = deriveRecommendations(makeFinding({ page: { meta: { indexable: true, canonical: "https://example.com/page" }, contentRelevance: { keywordRelevance: 45 } } }));
   assert.equal(recommendations[0]?.id, "finding_1:low_keyword_relevance");
   assert.equal(recommendations[0]?.target.query, "example query");
   assert.equal(recommendations[0]?.target.url, "https://example.com/page");
