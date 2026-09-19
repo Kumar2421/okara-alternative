@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { getDb } from "@/lib/db";
+import { canTransitionFinding } from "./findingTypes";
 import type { Finding, FindingSeverity } from "./findingTypes";
 
 type FindingRow = {
@@ -16,19 +17,6 @@ function mapFinding(row: FindingRow): Finding {
     recommendation: row.recommendation, status: row.status, firstSeen: row.first_seen,
     lastSeen: row.last_seen, resolvedAt: row.resolved_at,
   };
-}
-
-export const FINDING_TRANSITIONS: Record<Finding["status"], Finding["status"][]> = {
-  new: ["acknowledged"],
-  acknowledged: ["fixing"],
-  fixing: ["fixed", "failed"],
-  fixed: ["verified", "failed"],
-  verified: ["fixing"],
-  failed: ["fixing"],
-};
-
-export function canTransitionFinding(from: Finding["status"], to: Finding["status"]): boolean {
-  return FINDING_TRANSITIONS[from].includes(to);
 }
 
 export function getProjectFinding(projectId: string, id: string): Finding | null {
