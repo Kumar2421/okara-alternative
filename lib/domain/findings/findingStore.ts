@@ -70,6 +70,7 @@ export function upsertFinding(input: {
   ).get(input.projectId, input.source, input.category, input.entityType, input.entityId, input.url ?? null) as FindingRow | undefined;
 
   const id = existing?.id ?? ("finding_" + crypto.randomUUID());
+  // A verified finding reappearing in fresh analytics starts a new remediation cycle.\n  const nextStatus = existing?.status === "verified" ? "fixing" : (existing?.status ?? "new");
   db.prepare(
     `INSERT INTO findings
       (id, project_id, source, category, severity, entity_type, entity_id, url, evidence, recommendation, status, first_seen, last_seen, resolved_at)
@@ -80,7 +81,7 @@ export function upsertFinding(input: {
   ).run(
     id, input.projectId, input.source, input.category, input.severity, input.entityType,
     input.entityId, input.url ?? null, JSON.stringify(input.evidence), input.recommendation,
-    existing?.status ?? "new", existing?.first_seen ?? now, now, existing?.resolved_at ?? null
+    nextStatus, existing?.first_seen ?? now, now, nextStatus === "verified" ? existing?.resolved_at ?? now : null
   );
 
   return mapFinding(db.prepare("SELECT * FROM findings WHERE id = ?").get(id) as FindingRow);
