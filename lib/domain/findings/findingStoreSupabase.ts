@@ -114,19 +114,6 @@ export async function upsertFinding(
   return mapFinding(data as FindingRow);
 }
 
-export const FINDING_TRANSITIONS: Record<Finding["status"], Finding["status"][]> = {
-  new: ["acknowledged"],
-  acknowledged: ["fixing"],
-  fixing: ["fixed", "failed"],
-  fixed: ["verified", "failed"],
-  verified: ["fixing"],
-  failed: ["fixing"],
-};
-
-export function canTransitionFinding(from: Finding["status"], to: Finding["status"]): boolean {
-  return FINDING_TRANSITIONS[from].includes(to);
-}
-
 export async function getProjectFinding(db: SupabaseClient, userId: string, projectId: string, id: string): Promise<Finding | null> {
   const { data } = await db.from("findings").select("*").eq("user_id", userId).eq("project_id", projectId).eq("id", id).maybeSingle();
   return data ? mapFinding(data as FindingRow) : null;
