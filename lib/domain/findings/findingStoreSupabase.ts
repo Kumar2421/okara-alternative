@@ -112,3 +112,56 @@ export async function upsertFinding(
 
   return mapFinding(data as FindingRow);
 }
+
+export const FINDING_TRANSITIONS: Record<Finding["status"], Finding["status"][]> = {
+  new: ["acknowledged"],
+  acknowledged: ["fixing"],
+  fixing: ["fixed", "failed"],
+  fixed: ["verified", "failed"],
+  verified: ["fixing"],
+  failed: ["fixing"],
+};
+
+export function canTransitionFinding(from: Finding["status"], to: Finding["status"]): boolean {
+  return FINDING_TRANSITIONS[from].includes(to);
+}
+
+export async function getProjectFinding(db: SupabaseClient, userId: string, projectId: string, id: string): Promise<Finding | null> {
+  const { data } = await db.from("findings").select("*").eq("user_id", userId).eq("project_id", projectId).eq("id", id).maybeSingle();
+  return data ? mapFinding(data as FindingRow) : null;
+}
+
+export async function updateFindingStatus(db: SupabaseClient, userId: string, projectId: string, id: string, status: Finding["status"]): Promise<Finding | null> {
+  const existing = await getProjectFinding(db, userId, projectId, id);
+  if (!existing) return null;
+  if (!canTransitionFinding(existing.status, status)) {
+    throw new Error(`Invalid finding status transition: ${existing.status} -> ${status}`);
+  }
+  const now = new Date().toISOString();
+  const { data, error } = await db.from("findings").update({
+    status,
+    last_seen: now,
+    resolved_at: status === "verified" ? now : null,
+  }).eq("user_id", userId).eq("project_id", projectId).eq("id", id).select("*").single();
+  if (error) throw new Error(error.message);
+  return mapFinding(data as FindingRow);
+}
+
+export async function refreshFinding(db: SupabaseClient, userId: string, projectId: string, id: string, input: {
+  severity: FindingSeverity;
+  evidence: Record<string, unknown>;
+  recommendation: string;
+  status: Finding["status"];
+}): Promise<Finding | null> {
+  const now = new Date().toISOString();
+  const { data, error } = await db.from("findings").update({
+    severity: input.severity,
+    evidence: input.evidence,
+    recommendation: input.recommendation,
+    status: input.status,
+    last_seen: now,
+    resolved_at: input.status === "verified" ? now : null,
+  }).eq("user_id", userId).eq("project_id", projectId).eq("id", id).select("*").maybeSingle();
+  if (error) throw new Error(error.message);
+  return data ? mapFinding(data as FindingRow) : null;
+}
