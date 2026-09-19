@@ -1,4 +1,4 @@
-/** Real config of the 5 strategy documents Okara's Context panel generates
+/** Real config of the 5 strategy documents Marlo's Context panel generates
  * (see refimages). `available: true` means a real generator + route exists.
  * Design Guide / Content Strategy are listed honestly as not-yet-built, not
  * faked as a locked paywall feature. */

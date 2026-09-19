@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { CheckCircle2 } from "lucide-react";
 
-function OkaraMark({ className }: { className?: string }) {
+function MarloMark({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 28 28" className={className} aria-hidden="true">
       <circle cx="14" cy="14" r="13" fill="#111111" />
@@ -24,8 +24,8 @@ export default function LandingPage() {
     <div className="flex min-h-screen flex-col bg-white">
       <header className="flex items-center justify-between border-b border-gray-100 px-6 py-4 sm:px-10">
         <div className="flex items-center gap-2">
-          <OkaraMark className="h-6 w-6" />
-          <span className="text-[15px] font-bold tracking-tight">Okara</span>
+          <MarloMark className="h-6 w-6" />
+          <span className="text-[15px] font-bold tracking-tight">Marlo</span>
         </div>
         <Link
           href="/login"
@@ -44,7 +44,7 @@ export default function LandingPage() {
               running 24/7.
             </h1>
             <p className="mt-4 max-w-md text-[15px] leading-relaxed text-gray-600">
-              Okara audits your SEO, tracks competitors, finds leads, and sends
+              Marlo audits your SEO, tracks competitors, finds leads, and sends
               outreach — all through agents connected to your own accounts and
               your own LLM keys.
             </p>
@@ -66,7 +66,7 @@ export default function LandingPage() {
           </div>
 
           <div className="rounded-xl border border-gray-100 bg-gray-50 p-6">
-            <p className="mb-4 text-[13px] font-semibold text-gray-500">What Okara does</p>
+            <p className="mb-4 text-[13px] font-semibold text-gray-500">What Marlo does</p>
             <ul className="space-y-3">
               {FEATURES.map((feature) => (
                 <li key={feature} className="flex items-center gap-2.5 text-[14px] text-gray-800">

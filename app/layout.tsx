@@ -17,8 +17,8 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "MLForge Studio",
-  description: "AI CMO dashboard",
+  title: "Marlo",
+  description: "Open-source, self-hostable AI CMO.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

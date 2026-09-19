@@ -6,7 +6,7 @@ import { useProviders, findProviderForModel } from "@/lib/providers-store";
 import { useToast } from "@/components/dashboard/Toast";
 
 /** Splits the generator's `---\ntitle:...\ndescription:...\n---\n<body>` output
- * into its parts so the meta fields render like Okara's SEO Health signal rows
+ * into its parts so the meta fields render like Marlo's SEO Health signal rows
  * instead of dumping raw frontmatter into the article preview. */
 function parseArticle(raw: string) {
   const match = raw.match(/^---\s*\ntitle:\s*(.*)\ndescription:\s*(.*)\n---\s*\n([\s\S]*)$/);

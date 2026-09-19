@@ -34,7 +34,7 @@ function AppleIcon() {
   );
 }
 
-function OkaraMark({ className }: { className?: string }) {
+function MarloMark({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 28 28" className={className} aria-hidden="true">
       <circle cx="14" cy="14" r="13" fill="#111111" />
@@ -121,8 +121,8 @@ export default function LoginPage() {
         <div className="flex items-center justify-center overflow-hidden rounded-md border border-black/10 bg-white px-6 sm:px-10 lg:px-14 xl:px-16">
           <div className="w-full max-w-[420px]">
             <div className="mb-2 flex items-center gap-2">
-              <OkaraMark className="h-[24px] w-[24px]" />
-              <span className="text-sm font-bold tracking-tight">Okara</span>
+              <MarloMark className="h-[24px] w-[24px]" />
+              <span className="text-sm font-bold tracking-tight">Marlo</span>
             </div>
 
             <h1 className="text-2xl font-medium tracking-[-0.04em] sm:text-3xl">

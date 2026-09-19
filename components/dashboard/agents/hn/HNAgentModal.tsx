@@ -150,7 +150,7 @@ export default function HNAgentModal({
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-gray-700">Product Description</label>
                 <textarea
-                  placeholder="e.g. Okara is an AI-powered content marketing platform..."
+                  placeholder="e.g. Marlo is an AI-powered content marketing platform..."
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-black focus:outline-none focus:ring-1 focus:ring-black h-32 resize-none"

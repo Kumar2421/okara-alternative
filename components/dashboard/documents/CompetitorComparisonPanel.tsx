@@ -22,10 +22,10 @@ type ComparisonData = {
 };
 
 const OUR_PRODUCT: Competitor = {
-  id: "okara",
-  url: "https://okara.ai",
-  name: "Okara",
-  startingPrice: "$0 (free tier available)",
+  id: "marlo",
+  url: "https://github.com/Kumar2421/marlo",
+  name: "Marlo",
+  startingPrice: "$0 (self-hosted)",
   features: [
     "SEO audit & crawling",
     "Competitor analysis",
@@ -271,7 +271,7 @@ export default function CompetitorComparisonPanel({ onClose }: { onClose: () => 
 
               {/* Insights */}
               <div className="rounded-lg bg-gray-50 p-4">
-                <h3 className="mb-2 text-[13px] font-semibold text-gray-900">Why Okara wins</h3>
+                <h3 className="mb-2 text-[13px] font-semibold text-gray-900">Why Marlo wins</h3>
                 <ul className="space-y-1.5 text-[12px] text-gray-700">
                   <li>
                     <strong>Cheaper or free</strong> — Free tier + affordable plans vs $99-120/month
@@ -299,7 +299,7 @@ export default function CompetitorComparisonPanel({ onClose }: { onClose: () => 
 function SkeletonComparison() {
   return (
     <div className="space-y-4">
-      {/* Skeleton Okara Card */}
+      {/* Skeleton Marlo Card */}
       <div className="rounded-lg border-2 border-blue-500 bg-blue-50 p-4 animate-pulse">
         <div className="mb-3">
           <div className="mb-2 h-4 w-24 bg-blue-200 rounded"></div>
