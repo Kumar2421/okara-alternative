@@ -1,5 +1,5 @@
-import type { Finding, FindingSeverity, FindingStatus } from "./findingTypes";
-import { canTransitionFinding } from "./findingTypes";
+import type { Finding, FindingSeverity, FindingStatus } from "./findingTypes.ts";
+import { canTransitionFinding } from "./findingTypes.ts";
 
 export type FindingRepository = {
   get(projectId: string, id: string): Promise<Finding | null> | Finding | null;
