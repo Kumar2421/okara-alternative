@@ -46,7 +46,6 @@ function MarloMark({ className }: { className?: string }) {
 
 export default function LoginPage() {
   const router = useRouter();
-  const supabase = createClient();
   const [mode, setMode] = useState<Mode>("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -69,7 +68,8 @@ export default function LoginPage() {
     setNotice(null);
 
     if (isSignUp) {
-      const { data, error: authError } = await supabase.auth.signUp({ email, password });
+      const supabase = createClient();
+    const { data, error: authError } = await supabase.auth.signUp({ email, password });
       if (authError) {
         setError(authError.message);
       } else if (!data.session) {
@@ -80,6 +80,7 @@ export default function LoginPage() {
         router.refresh();
       }
     } else {
+      const supabase = createClient();
       const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
       if (authError) {
         setError(authError.message);
@@ -103,6 +104,7 @@ export default function LoginPage() {
 
   const handleOAuth = async (provider: "google" | "apple") => {
     setError(null);
+    const supabase = createClient();
     await supabase.auth.signInWithOAuth({
       provider,
       options: {

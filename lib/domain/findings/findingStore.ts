@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { getDb } from "@/lib/db";
+import { canTransitionFinding } from "./findingTypes";
 import type { Finding, FindingSeverity } from "./findingTypes";
 
 type FindingRow = {
@@ -16,6 +17,38 @@ function mapFinding(row: FindingRow): Finding {
     recommendation: row.recommendation, status: row.status, firstSeen: row.first_seen,
     lastSeen: row.last_seen, resolvedAt: row.resolved_at,
   };
+}
+
+export function getProjectFinding(projectId: string, id: string): Finding | null {
+  const row = getDb().prepare("SELECT * FROM findings WHERE project_id = ? AND id = ? LIMIT 1").get(projectId, id) as FindingRow | undefined;
+  return row ? mapFinding(row) : null;
+}
+
+export function updateFindingStatus(projectId: string, id: string, status: Finding["status"]): Finding | null {
+  const db = getDb();
+  const existing = getProjectFinding(projectId, id);
+  if (!existing) return null;
+  if (!canTransitionFinding(existing.status, status)) {
+    throw new Error(`Invalid finding status transition: ${existing.status} -> ${status}`);
+  }
+  const now = new Date().toISOString();
+  db.prepare("UPDATE findings SET status = ?, resolved_at = ?, last_seen = ? WHERE project_id = ? AND id = ?")
+    .run(status, status === "verified" ? now : null, now, projectId, id);
+  return getProjectFinding(projectId, id);
+}
+
+export function refreshFinding(projectId: string, id: string, input: {
+  severity: FindingSeverity;
+  evidence: Record<string, unknown>;
+  recommendation: string;
+  status: Finding["status"];
+}): Finding | null {
+  const db = getDb();
+  if (!getProjectFinding(projectId, id)) return null;
+  const now = new Date().toISOString();
+  db.prepare("UPDATE findings SET severity = ?, evidence = ?, recommendation = ?, status = ?, resolved_at = ?, last_seen = ? WHERE project_id = ? AND id = ?")
+    .run(input.severity, JSON.stringify(input.evidence), input.recommendation, input.status, input.status === "verified" ? now : null, now, projectId, id);
+  return getProjectFinding(projectId, id);
 }
 
 export function listProjectFindings(projectId: string): Finding[] {

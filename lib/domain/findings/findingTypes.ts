@@ -20,3 +20,16 @@ export type Finding = {
   lastSeen: string;
   resolvedAt: string | null;
 };
+
+export const FINDING_TRANSITIONS: Record<FindingStatus, FindingStatus[]> = {
+  new: ["acknowledged"],
+  acknowledged: ["fixing"],
+  fixing: ["fixed", "failed"],
+  fixed: ["verified", "failed"],
+  verified: ["fixing"],
+  failed: ["fixing"],
+};
+
+export function canTransitionFinding(from: FindingStatus, to: FindingStatus): boolean {
+  return FINDING_TRANSITIONS[from].includes(to);
+}
