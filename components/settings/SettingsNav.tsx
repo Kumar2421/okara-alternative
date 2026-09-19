@@ -13,6 +13,7 @@ import {
   Shield,
   Smartphone,
   KeyRound,
+  Zap,
 } from "lucide-react";
 
 const AI_CMO_ITEMS = [
@@ -28,6 +29,7 @@ const CHAT_ITEMS = [{ href: "/settings/personalization", label: "Personalization
 
 const GENERAL_ITEMS = [
   { href: "/settings/account", label: "Account & Security", icon: Shield },
+  { href: "/settings/usage", label: "Usage", icon: Zap },
   { href: "/settings/devices", label: "Devices", icon: Smartphone },
 ];
 
