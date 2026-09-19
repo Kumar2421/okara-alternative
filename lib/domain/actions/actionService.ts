@@ -1,5 +1,5 @@
-import type { Action, ActionStatus, ActionType } from "./actionTypes";
-import { canTransitionAction } from "./actionTypes";
+import type { Action, ActionStatus, ActionType } from "./actionTypes.ts";
+import { canTransitionAction } from "./actionTypes.ts";
 
 export type ActionRepository = {
   get(projectId: string, id: string): Promise<Action | null> | Action | null;
