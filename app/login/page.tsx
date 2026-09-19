@@ -69,7 +69,7 @@ export default function LoginPage() {
 
     if (isSignUp) {
       const supabase = createClient();
-    const { data, error: authError } = await supabase.auth.signUp({ email, password });
+      const { data, error: authError } = await supabase.auth.signUp({ email, password });
       if (authError) {
         setError(authError.message);
       } else if (!data.session) {

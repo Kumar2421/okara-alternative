@@ -51,10 +51,7 @@ function projectPageUrl(projectUrl: string, pageUrl: string): URL | null {
   }
 }
 
-async function runRecheck(finding: {
-  url: string | null;
-  evidence: Record<string, unknown>;
-}) {
+async function runRecheck(finding: { url: string | null; evidence: Record<string, unknown> }, pageSpeedApiKey: string | undefined) {
   if (!finding.url) throw new Error("Finding has no ranking page URL.");
   const metrics = {
     query: finding.evidence.query ?? null,
@@ -64,13 +61,30 @@ async function runRecheck(finding: {
     position: finding.evidence.position ?? null,
     score: finding.evidence.score ?? null,
   };
-  const audit = await new SEOAgent(process.env.PAGESPEED_API_KEY || undefined).audit(finding.url);
+  const audit = await new SEOAgent(pageSpeedApiKey).audit(finding.url);
   const rule = deriveSearchFinding(audit);
   return {
     audit,
     rule,
     evidence: auditEvidence(audit, metrics),
   };
+}
+
+// Same BYOK-then-platform-key pattern as seo/audit/route.ts — a connected
+// PageSpeed key (provider_connections, Vault-backed) wins over the shared
+// server key.
+async function resolvePlatformPageSpeedKey(db: ReturnType<typeof createServiceClient>, userId: string): Promise<string | undefined> {
+  const { data: conn } = await db
+    .from("provider_connections")
+    .select("api_key_secret_id")
+    .eq("user_id", userId)
+    .eq("provider_id", "pagespeed_api_key")
+    .maybeSingle();
+  if (conn?.api_key_secret_id) {
+    const { data: secret } = await db.rpc("vault_get_secret", { p_id: conn.api_key_secret_id });
+    if (secret) return secret as string;
+  }
+  return process.env.PAGESPEED_API_KEY || undefined;
 }
 
 export async function GET(req: NextRequest) {
@@ -128,7 +142,7 @@ export async function POST(req: NextRequest) {
       if (!project?.url) return NextResponse.json({ error: "Active project has no website URL." }, { status: 422 });
       const target = projectPageUrl(project.url, pageUrl);
       if (!target) return NextResponse.json({ error: "Ranking page must belong to the active project website." }, { status: 403 });
-      const audit = await new SEOAgent(process.env.PAGESPEED_API_KEY || undefined).audit(target.toString());
+      const audit = await new SEOAgent(await resolvePlatformPageSpeedKey(db, user.id)).audit(target.toString());
       const rule = deriveSearchFinding(audit);
       if (!rule) return NextResponse.json({ finding: null, message: "No actionable issue found on this ranking page." });
       const finding = await upsertFindingSupabase(db, user.id, {
@@ -181,7 +195,7 @@ export async function PUT(req: NextRequest) {
       if (!finding) return NextResponse.json({ error: "Finding not found." }, { status: 404 });
 
       if (action === "recheck") {
-        const result = await runRecheck(finding);
+        const result = await runRecheck(finding, await resolvePlatformPageSpeedKey(db, user.id));
         const nextStatus = result.rule ? "failed" : "verified";
         const updated = await refreshFindingSupabase(db, user.id, projectId, id, {
           severity: result.rule?.severity ?? finding.severity,
@@ -205,7 +219,8 @@ export async function PUT(req: NextRequest) {
     if (!finding) return NextResponse.json({ error: "Finding not found." }, { status: 404 });
 
     if (action === "recheck") {
-      const result = await runRecheck(finding);
+      const stored = getDb().prepare("SELECT value FROM settings WHERE key = 'pagespeed_api_key'").get() as { value: string } | undefined;
+      const result = await runRecheck(finding, stored?.value || process.env.PAGESPEED_API_KEY || undefined);
       const nextStatus = result.rule ? "failed" : "verified";
       const updated = refreshFinding(projectId, id, {
         severity: result.rule?.severity ?? finding.severity,
