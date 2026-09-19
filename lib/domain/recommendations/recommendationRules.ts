@@ -1,5 +1,6 @@
-import type { Finding } from "@/lib/domain/findings/findingTypes";
 import type { Recommendation, RecommendationPriority, RecommendationType } from "./recommendationTypes";
+
+type FindingLike = { id: string; entityType: string; entityId: string; url: string | null; evidence: Record<string, unknown> };
 
 type FindingPageEvidence = {
   meta?: { canonical?: string; indexable?: boolean };
@@ -7,13 +8,13 @@ type FindingPageEvidence = {
   serverTiming?: { ttfbMs?: number };
 };
 
-function pageEvidence(finding: Finding): FindingPageEvidence {
+function pageEvidence(finding: FindingLike): FindingPageEvidence {
   const page = finding.evidence.page;
   return page && typeof page === "object" ? page as FindingPageEvidence : {};
 }
 
 function recommendation(
-  finding: Finding,
+  finding: FindingLike,
   type: RecommendationType,
   title: string,
   summary: string,
@@ -38,7 +39,7 @@ function recommendation(
   };
 }
 
-export function deriveRecommendations(finding: Finding): Recommendation[] {
+export function deriveRecommendations(finding: FindingLike): Recommendation[] {
   const page = pageEvidence(finding);
   const recommendations: Recommendation[] = [];
 
