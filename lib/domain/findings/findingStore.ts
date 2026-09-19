@@ -18,6 +18,51 @@ function mapFinding(row: FindingRow): Finding {
   };
 }
 
+export const FINDING_TRANSITIONS: Record<Finding["status"], Finding["status"][]> = {
+  new: ["acknowledged"],
+  acknowledged: ["fixing"],
+  fixing: ["fixed", "failed"],
+  fixed: ["verified", "failed"],
+  verified: ["fixing"],
+  failed: ["fixing"],
+};
+
+export function canTransitionFinding(from: Finding["status"], to: Finding["status"]): boolean {
+  return FINDING_TRANSITIONS[from].includes(to);
+}
+
+export function getProjectFinding(projectId: string, id: string): Finding | null {
+  const row = getDb().prepare("SELECT * FROM findings WHERE project_id = ? AND id = ? LIMIT 1").get(projectId, id) as FindingRow | undefined;
+  return row ? mapFinding(row) : null;
+}
+
+export function updateFindingStatus(projectId: string, id: string, status: Finding["status"]): Finding | null {
+  const db = getDb();
+  const existing = getProjectFinding(projectId, id);
+  if (!existing) return null;
+  if (!canTransitionFinding(existing.status, status)) {
+    throw new Error(`Invalid finding status transition: ${existing.status} -> ${status}`);
+  }
+  const now = new Date().toISOString();
+  db.prepare("UPDATE findings SET status = ?, resolved_at = ?, last_seen = ? WHERE project_id = ? AND id = ?")
+    .run(status, status === "verified" ? now : null, now, projectId, id);
+  return getProjectFinding(projectId, id);
+}
+
+export function refreshFinding(projectId: string, id: string, input: {
+  severity: FindingSeverity;
+  evidence: Record<string, unknown>;
+  recommendation: string;
+  status: Finding["status"];
+}): Finding | null {
+  const db = getDb();
+  if (!getProjectFinding(projectId, id)) return null;
+  const now = new Date().toISOString();
+  db.prepare("UPDATE findings SET severity = ?, evidence = ?, recommendation = ?, status = ?, resolved_at = ?, last_seen = ? WHERE project_id = ? AND id = ?")
+    .run(input.severity, JSON.stringify(input.evidence), input.recommendation, input.status, input.status === "verified" ? now : null, now, projectId, id);
+  return getProjectFinding(projectId, id);
+}
+
 export function listProjectFindings(projectId: string): Finding[] {
   const rows = getDb().prepare(
     "SELECT * FROM findings WHERE project_id = ? ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, last_seen DESC"
