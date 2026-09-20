@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 export const DASHBOARD_DATASETS = [
   "project_documents",
@@ -54,7 +54,7 @@ export function DashboardDataProvider({ children }: { children: React.ReactNode 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -64,13 +64,30 @@ export function DashboardDataProvider({ children }: { children: React.ReactNode 
     } finally {
       setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    void refresh();
   }, []);
 
-  const value = useMemo(() => ({ data, loading, error, refresh }), [data, loading, error]);
+  useEffect(() => {
+    let cancelled = false;
+
+    void fetchDashboardData()
+      .then((nextData) => {
+        if (!cancelled) setData(nextData);
+      })
+      .catch((cause) => {
+        if (!cancelled) {
+          setError(cause instanceof Error ? cause.message : "Failed to load dashboard data");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const value = useMemo(() => ({ data, loading, error, refresh }), [data, loading, error, refresh]);
   return <DashboardDataContext.Provider value={value}>{children}</DashboardDataContext.Provider>;
 }
 
