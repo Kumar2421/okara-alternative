@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Layers,
   ChevronLeft,
@@ -20,6 +20,8 @@ import { DOC_TYPES } from "@/lib/document-types";
 import CollapsedRail, { RailButton } from "./CollapsedRail";
 import { useToast } from "./Toast";
 import { useProject } from "@/lib/project-store";
+import { useProjectContext } from "@/lib/context-data";
+import { selectContextPanelDocumentStatus } from "@/lib/context-panel-adapter";
 import { useProviders, findProviderForModel } from "@/lib/providers-store";
 import { useTerminalLog } from "@/lib/terminal-log-store";
 import ProductInfoPanel from "./documents/ProductInfoPanel";
@@ -47,11 +49,6 @@ export default function ContextPanel({
   const [comparisonOpen, setComparisonOpen] = useState(false);
   const [contentStrategyOpen, setContentStrategyOpen] = useState(false);
   const [designGuideOpen, setDesignGuideOpen] = useState(false);
-  const [productInfoExists, setProductInfoExists] = useState(false);
-  const [marketingStrategyExists, setMarketingStrategyExists] = useState(false);
-  const [competitorAnalysisExists, setCompetitorAnalysisExists] = useState(false);
-  const [contentStrategyExists, setContentStrategyExists] = useState(false);
-  const [designGuideExists, setDesignGuideExists] = useState(false);
   const [competitors, setCompetitors] = useState<Competitor[]>([]);
   const [competitorsLoading, setCompetitorsLoading] = useState(true);
   const [addingCompetitor, setAddingCompetitor] = useState(false);
@@ -59,50 +56,57 @@ export default function ContextPanel({
   const [discovering, setDiscovering] = useState(false);
   const { show } = useToast();
   const { project, loading, competitorsVersion } = useProject();
+  const {
+    documents,
+    competitors: contextCompetitors,
+    loading: contextLoading,
+    error: contextError,
+    refresh: refreshContext,
+  } = useProjectContext();
   const { primaryModel } = useProviders();
   const { log } = useTerminalLog();
+
+  const documentStatus = useMemo(
+    () => selectContextPanelDocumentStatus(documents),
+    [documents],
+  );
 
   const loadCompetitors = useCallback(async () => {
     setCompetitorsLoading(true);
     try {
-      const res = await fetch("/api/project/competitors");
-      const data = await res.json();
-      setCompetitors(data.competitors ?? []);
-    } catch {
-      // route unreachable — list just stays empty
+      await refreshContext();
     } finally {
       setCompetitorsLoading(false);
     }
-  }, []);
-
-  const checkDocExists = useCallback(async (apiPath: string, setExists: (v: boolean) => void) => {
-    try {
-      const res = await fetch(`/api/project/documents/${apiPath}`);
-      const data = await res.json();
-      setExists(!!data.document?.content);
-    } catch {
-      setExists(false);
-    }
-  }, []);
+  }, [refreshContext]);
 
   useEffect(() => {
-    if (project) {
-      loadCompetitors();
-      checkDocExists("product-info", setProductInfoExists);
-      checkDocExists("marketing-strategy", setMarketingStrategyExists);
-      checkDocExists("competitor-analysis", setCompetitorAnalysisExists);
-      checkDocExists("content-strategy", setContentStrategyExists);
-      checkDocExists("design-guide", setDesignGuideExists);
-    } else {
+    setCompetitors(
+      contextCompetitors.map((competitor) => ({
+        id: competitor.id,
+        url: competitor.url,
+        created_at: competitor.created_at ?? "",
+      })),
+    );
+  }, [contextCompetitors]);
+
+  useEffect(() => {
+    if (!project) {
       setCompetitors([]);
-      setProductInfoExists(false);
-      setMarketingStrategyExists(false);
-      setCompetitorAnalysisExists(false);
-      setContentStrategyExists(false);
-      setDesignGuideExists(false);
       setCompetitorsLoading(false);
+      return;
     }
-  }, [project?.id, competitorsVersion, loadCompetitors, checkDocExists]);
+
+    if (competitorsVersion > 0) {
+      loadCompetitors();
+    }
+  }, [project?.id, competitorsVersion, loadCompetitors]);
+
+  useEffect(() => {
+    if (contextError) {
+      show("Failed to load shared project context.");
+    }
+  }, [contextError, show]);
 
   async function handleAddCompetitor() {
     const url = newCompetitorUrl.trim();
@@ -122,6 +126,7 @@ export default function ContextPanel({
       setCompetitors((prev) => [...prev, data.competitor]);
       setNewCompetitorUrl("");
       setAddingCompetitor(false);
+      await refreshContext();
     } catch {
       show("Failed to add competitor.");
     }
@@ -167,7 +172,7 @@ export default function ContextPanel({
           `${data.usedWebSearch ? "Searched the web and found" : "Based on your site's own content, found"} ${added.length} real competitor${added.length === 1 ? "" : "s"}: ${names}.`
         );
         show(`Found ${added.length} competitor${added.length === 1 ? "" : "s"}.`);
-        loadCompetitors();
+        await refreshContext();
       }
     } catch {
       log("⚠ Couldn't reach the competitor discovery service.");
@@ -180,7 +185,11 @@ export default function ContextPanel({
   async function handleRemoveCompetitor(id: string) {
     setCompetitors((prev) => prev.filter((c) => c.id !== id));
     try {
-      await fetch(`/api/project/competitors?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      const res = await fetch(`/api/project/competitors?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (!res.ok) {
+        throw new Error("Failed to remove competitor");
+      }
+      await refreshContext();
     } catch {
       show("Failed to remove competitor — it may still be saved.");
       loadCompetitors();
@@ -220,7 +229,7 @@ export default function ContextPanel({
       </div>
 
       <div className="okara-scroll flex-1 overflow-y-auto px-4 py-4">
-        {loading ? (
+        {loading || (project && contextLoading && documents.length === 0 && contextCompetitors.length === 0) ? (
           <p className="text-[13px] text-gray-400">Loading...</p>
         ) : !project ? (
           <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-gray-200 px-4 py-8 text-center">
@@ -297,11 +306,11 @@ export default function ContextPanel({
           <div className="mb-6 divide-y divide-gray-100">
             {DOC_TYPES.map((doc) => {
               const hasContent =
-                (doc.docType === "product_info" && productInfoExists) ||
-                (doc.docType === "marketing_strategy" && marketingStrategyExists) ||
-                (doc.docType === "competitor_analysis" && competitorAnalysisExists) ||
-                (doc.docType === "content_strategy" && contentStrategyExists) ||
-                (doc.docType === "design_guide" && designGuideExists);
+                (doc.docType === "product_info" && documentStatus.productInfo) ||
+                (doc.docType === "marketing_strategy" && documentStatus.marketingStrategy) ||
+                (doc.docType === "competitor_analysis" && documentStatus.competitorAnalysis) ||
+                (doc.docType === "content_strategy" && documentStatus.contentStrategy) ||
+                (doc.docType === "design_guide" && documentStatus.designGuide);
               return (
                 <button
                   key={doc.docType}
@@ -446,7 +455,7 @@ export default function ContextPanel({
         <ProductInfoPanel
           onClose={() => {
             setProductInfoOpen(false);
-            checkDocExists("product-info", setProductInfoExists);
+            refreshContext();
           }}
         />
       )}
@@ -454,7 +463,7 @@ export default function ContextPanel({
         <MarketingStrategyPanel
           onClose={() => {
             setMarketingStrategyOpen(false);
-            checkDocExists("marketing-strategy", setMarketingStrategyExists);
+            refreshContext();
           }}
         />
       )}
@@ -462,7 +471,7 @@ export default function ContextPanel({
         <CompetitorAnalysisPanel
           onClose={() => {
             setCompetitorAnalysisOpen(false);
-            checkDocExists("competitor-analysis", setCompetitorAnalysisExists);
+            refreshContext();
           }}
         />
       )}
@@ -471,7 +480,7 @@ export default function ContextPanel({
         <ContentStrategyPanel
           onClose={() => {
             setContentStrategyOpen(false);
-            checkDocExists("content-strategy", setContentStrategyExists);
+            refreshContext();
           }}
         />
       )}
@@ -479,7 +488,7 @@ export default function ContextPanel({
         <DesignGuidePanel
           onClose={() => {
             setDesignGuideOpen(false);
-            checkDocExists("design-guide", setDesignGuideExists);
+            refreshContext();
           }}
         />
       )}
