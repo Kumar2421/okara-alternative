@@ -38,6 +38,10 @@ export async function GET() {
       const { data: userData, error: userError } = await supabase.auth.getUser();
       response.supabase.authenticated = !userError && Boolean(userData.user);
 
+      if (FEATURES.PLATFORM_MODE && !response.supabase.authenticated) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      }
+
       const { error: connectivityError } = await supabase
         .from("projects")
         .select("id")
