@@ -25,7 +25,10 @@ export type ProjectContext = {
   competitors: ContextCompetitor[];
 };
 
-function rowsFor<T extends Record<string, unknown>>(data: DashboardData | null, dataset: "project_documents" | "project_competitors"): T[] {
+function rowsFor<T extends Record<string, unknown>>(
+  data: DashboardData | null,
+  dataset: "project_documents" | "project_competitors",
+): T[] {
   return (data?.data[dataset] ?? []) as T[];
 }
 
@@ -37,9 +40,26 @@ export function selectProjectContext(data: DashboardData | null): ProjectContext
     projectId: data.projectId,
     documents: rowsFor<ContextDocument>(data, "project_documents"),
     competitors: rowsFor<ContextCompetitor>(data, "project_competitors").filter(
-      (competitor): competitor is ContextCompetitor => typeof competitor.id === "string" && typeof competitor.url === "string",
+      (competitor): competitor is ContextCompetitor =>
+        typeof competitor.id === "string" && typeof competitor.url === "string",
     ),
   };
+}
+
+/**
+ * Returns whether a context document contains usable content.
+ * Keeps document-presence checks consistent across Context Panel consumers.
+ */
+export function hasContextDocument(
+  documents: ContextDocument[],
+  docType: string,
+): boolean {
+  return documents.some(
+    (document) =>
+      document.doc_type === docType &&
+      typeof document.content === "string" &&
+      document.content.trim().length > 0,
+  );
 }
 
 export function useProjectContext() {
