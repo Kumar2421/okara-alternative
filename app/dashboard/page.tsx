@@ -9,6 +9,7 @@ import LeadsPanel from "@/components/dashboard/LeadsPanel";
 // column slot. Re-import "@/components/dashboard/AgentsFeedPanel" to restore.
 import ChatPanel from "@/components/dashboard/ChatPanel";
 import Loading from "../loading";
+import { DashboardDataProvider } from "@/lib/dashboard-data";
 
 const RAIL = "56px";
 
@@ -34,16 +35,18 @@ export default function DashboardPage() {
   if (booting) return <Loading />;
 
   return (
-    <div className="flex h-screen flex-col bg-white">
-      <TerminalLog />
-      <div className="grid min-h-0 flex-1" style={{ gridTemplateColumns: cols }}>
-        <ContextPanel open={contextOpen} onToggle={() => setContextOpen((v) => !v)} />
-        <Suspense fallback={null}>
-          <AnalyticsPanel open={analyticsOpen} onToggle={() => setAnalyticsOpen((v) => !v)} />
-        </Suspense>
-        <LeadsPanel open={agentsOpen} onToggle={() => setAgentsOpen((v) => !v)} />
-        <ChatPanel open={chatOpen} onToggle={() => setChatOpen((v) => !v)} />
+    <DashboardDataProvider>
+      <div className="flex h-screen flex-col bg-white">
+        <TerminalLog />
+        <div className="grid min-h-0 flex-1" style={{ gridTemplateColumns: cols }}>
+          <ContextPanel open={contextOpen} onToggle={() => setContextOpen((v) => !v)} />
+          <Suspense fallback={null}>
+            <AnalyticsPanel open={analyticsOpen} onToggle={() => setAnalyticsOpen((v) => !v)} />
+          </Suspense>
+          <LeadsPanel open={agentsOpen} onToggle={() => setAgentsOpen((v) => !v)} />
+          <ChatPanel open={chatOpen} onToggle={() => setChatOpen((v) => !v)} />
+        </div>
       </div>
-    </div>
+    </DashboardDataProvider>
   );
 }
