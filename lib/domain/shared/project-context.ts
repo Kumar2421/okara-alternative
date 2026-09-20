@@ -23,7 +23,7 @@ export async function getAuthenticatedProjectContext(
     }
 
     const db = createServiceClient();
-    let projectQuery = db
+    const projectQuery = db
       .from("projects")
       .select("id, owner_id, name, category, description, url, created_at, updated_at")
       .eq("owner_id", user.id);
