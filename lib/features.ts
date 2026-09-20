@@ -3,6 +3,10 @@
  * Controls which settings sections and features are visible
  */
 
+const hasSupabasePlatformConfig = Boolean(
+  process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SECRET_KEY
+);
+
 export const FEATURES = {
   /** Self-host mode: users configure everything */
   SELF_HOST: process.env.NEXT_PUBLIC_SELF_HOST === "true",
@@ -13,8 +17,20 @@ export const FEATURES = {
   /** Show API credentials section (self-host only) */
   SHOW_API_CREDENTIALS: process.env.NEXT_PUBLIC_SHOW_API_CREDENTIALS === "true",
 
-  /** Platform mode: hide self-host configs, show team management */
-  PLATFORM_MODE: process.env.NEXT_PUBLIC_PLATFORM_MODE === "true",
+  /**
+   * Platform mode: use Supabase-backed persistence and hide self-host configs.
+   *
+   * An explicit NEXT_PUBLIC_PLATFORM_MODE=true still enables platform mode,
+   * while a configured Supabase service key enables it automatically unless
+   * NEXT_PUBLIC_SELF_HOST=true is set. This prevents a hosted deployment from
+   * silently falling back to the process-local SQLite database when the mode
+   * flag was omitted.
+   */
+  PLATFORM_MODE:
+    process.env.NEXT_PUBLIC_PLATFORM_MODE === "true" ||
+    (!(
+      process.env.NEXT_PUBLIC_SELF_HOST === "true"
+    ) && hasSupabasePlatformConfig),
 };
 
 /** Log active features at startup */
