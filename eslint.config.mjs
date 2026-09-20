@@ -6,6 +6,7 @@ const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
   {
+    files: ["components/dashboard/ContextPanel.tsx"],
     rules: {
       "react-hooks/set-state-in-effect": "off",
     },
