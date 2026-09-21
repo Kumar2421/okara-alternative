@@ -40,7 +40,7 @@ export default function GoogleAnalyticsCard() {
   async function load() {
     try {
       const [envData, resourceData] = await Promise.all([
-        FEATURES.PLATFORM_MODE ? Promise.resolve({ active: envActive }) : fetch("/api/settings/env").then((r) => r.json()),
+        fetch("/api/settings/env").then((r) => r.json()),
         fetch("/api/project/integrations/google/resources").then((r) => r.json()),
       ]);
       setEnvActive(envData.active ?? { GMAIL_CLIENT_ID: false, GMAIL_CLIENT_SECRET: false });
@@ -95,7 +95,9 @@ export default function GoogleAnalyticsCard() {
     }
   }
 
-  const clientCredsActive = FEATURES.PLATFORM_MODE || (envActive.GMAIL_CLIENT_ID && envActive.GMAIL_CLIENT_SECRET);
+  // GET /api/settings/env reports the real server env state in both modes —
+  // platform mode is NOT assumed active here (see GmailCard.tsx, same fix).
+  const clientCredsActive = envActive.GMAIL_CLIENT_ID && envActive.GMAIL_CLIENT_SECRET;
   const gsc = resources.find((r) => r.integrationType === "google-search-console");
   const ga4 = resources.find((r) => r.integrationType === "google-analytics");
   const connected = Boolean(gsc?.integrationId || ga4?.integrationId);
@@ -131,7 +133,9 @@ export default function GoogleAnalyticsCard() {
       ) : !loaded ? null : !clientCredsActive ? (
         <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-800">
           <AlertTriangle size={12} className="mt-0.5 shrink-0" />
-          Set up the Gmail OAuth Client ID/Secret above first — this reuses the same client.
+          {FEATURES.PLATFORM_MODE
+            ? "Google sign-in isn't configured on this deployment yet — the site operator needs to set GMAIL_CLIENT_ID/GMAIL_CLIENT_SECRET as real environment variables."
+            : "Set up the Gmail OAuth Client ID/Secret above first — this reuses the same client."}
         </div>
       ) : connected ? (
         <div className="space-y-3">

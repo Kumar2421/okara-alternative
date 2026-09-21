@@ -36,18 +36,9 @@ export default function GmailCard() {
   }, [searchParams, show]);
 
   useEffect(() => {
-    const requests: Promise<unknown>[] = [fetch("/api/settings").then((r) => r.json())];
-    if (!FEATURES.PLATFORM_MODE) requests.unshift(fetch("/api/settings/env").then((r) => r.json()));
-
-    Promise.all(requests)
-      .then((results) => {
-        const settingsData = (FEATURES.PLATFORM_MODE ? results[0] : results[1]) as {
-          settings?: { key: string; value: string }[];
-        };
-        if (!FEATURES.PLATFORM_MODE) {
-          const envData = results[0] as { active?: typeof envActive };
-          setEnvActive(envData.active ?? { GMAIL_CLIENT_ID: false, GMAIL_CLIENT_SECRET: false });
-        }
+    Promise.all([fetch("/api/settings/env").then((r) => r.json()), fetch("/api/settings").then((r) => r.json())])
+      .then(([envData, settingsData]: [{ active?: typeof envActive }, { settings?: { key: string; value: string }[] }]) => {
+        setEnvActive(envData.active ?? { GMAIL_CLIENT_ID: false, GMAIL_CLIENT_SECRET: false });
         const emailRow = settingsData.settings?.find((s) => s.key === "gmail_email");
         if (emailRow?.value) setConnectedEmail(emailRow.value);
       })
@@ -96,10 +87,12 @@ export default function GmailCard() {
     }
   }
 
-  // Platform mode always has the shared app-level client configured by the
-  // operator — no per-user entry, so treat it as active unconditionally and
-  // let a real Connect attempt surface a clear error if it somehow isn't.
-  const clientCredsActive = FEATURES.PLATFORM_MODE || (envActive.GMAIL_CLIENT_ID && envActive.GMAIL_CLIENT_SECRET);
+  // GET /api/settings/env reports the real server env state in both modes
+  // (only the write/POST path is self-host-only) — platform mode is NOT
+  // assumed active here. Deploying without the operator having set
+  // GMAIL_CLIENT_ID/SECRET as real Vercel env vars must show as genuinely
+  // not-configured, not silently look ready and fail when clicked.
+  const clientCredsActive = envActive.GMAIL_CLIENT_ID && envActive.GMAIL_CLIENT_SECRET;
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-4">
@@ -133,7 +126,13 @@ export default function GmailCard() {
 
       {!loaded ? null : (
         <>
-          {!clientCredsActive ? (
+          {!clientCredsActive && FEATURES.PLATFORM_MODE ? (
+            <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-800">
+              <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+              Google sign-in isn&apos;t configured on this deployment yet — the site operator needs to set
+              GMAIL_CLIENT_ID/GMAIL_CLIENT_SECRET as real environment variables.
+            </div>
+          ) : !clientCredsActive ? (
             <div className="rounded-lg bg-gray-50 p-3">
               {savedButNotActive && (
                 <div className="mb-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-800">
