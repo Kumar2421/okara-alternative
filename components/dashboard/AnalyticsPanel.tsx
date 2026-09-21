@@ -211,7 +211,7 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
   const [findings, setFindings] = useState<AnalyticsFinding[]>([]);
   const [findingCreating, setFindingCreating] = useState<Record<string, boolean>>({});
   const { show } = useToast();
-  const { project } = useProject();
+  const { project, auditVersion } = useProject();
   const { log, logDone } = useTerminalLog();
   const searchParams = useSearchParams();
 
@@ -244,7 +244,11 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
       // eslint-disable-next-line react-hooks/set-state-in-effect
       loadAudit(project.url);
     }
-  }, [open, project?.url, loadAudit]);
+    // auditVersion bumps once the automatic post-creation crawl actually
+    // finishes — project.url alone updates the instant the project is
+    // created, well before that, so without this the first fetch here can
+    // land before any audit data exists and nothing re-triggers it.
+  }, [open, project?.url, auditVersion, loadAudit]);
 
   const fetchTraffic = useCallback((range: 7 | 30) => {
     setTrafficLoading(true);

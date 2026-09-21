@@ -37,6 +37,13 @@ type Ctx = {
   /** Bumped after auto-discovery adds competitors post-creation — ContextPanel
    * watches this to refresh its competitor list without polling. */
   competitorsVersion: number;
+  /** Bumped once the automatic post-creation SEO crawl actually finishes.
+   * `project.url` changes the instant the project is created — well before
+   * the crawl (awaited afterward) completes — so anything that refetches
+   * only on `project.url` (e.g. AnalyticsPanel) would fetch too early and
+   * see no audit yet, with no signal telling it to try again. This is that
+   * signal. */
+  auditVersion: number;
 };
 
 /** Runs right after a successful crawl during project creation — real
@@ -116,6 +123,7 @@ export default function ProjectProvider({ children }: { children: React.ReactNod
   const [projects, setProjects] = useState<ActiveProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [competitorsVersion, setCompetitorsVersion] = useState(0);
+  const [auditVersion, setAuditVersion] = useState(0);
   const { log, logDone } = useTerminalLog();
   const { primaryModel } = useProviders();
 
@@ -170,6 +178,7 @@ export default function ProjectProvider({ children }: { children: React.ReactNod
 
         if (auditRes.ok) {
           crawlSucceeded = true;
+          setAuditVersion((v) => v + 1);
           const audit = await auditRes.json();
           log(
             audit.meta?.title
@@ -268,7 +277,7 @@ export default function ProjectProvider({ children }: { children: React.ReactNod
 
   return (
     <ProjectCtx.Provider
-      value={{ project, projects, loading, createProject, switchProject, updateProject, deleteProject, competitorsVersion }}
+      value={{ project, projects, loading, createProject, switchProject, updateProject, deleteProject, competitorsVersion, auditVersion }}
     >
       {children}
     </ProjectCtx.Provider>
