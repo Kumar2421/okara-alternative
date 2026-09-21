@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, Suspense } from "react";
-import { useRouter } from "next/navigation";
 import TerminalLog from "@/components/dashboard/TerminalLog";
 import ContextPanel from "@/components/dashboard/ContextPanel";
 import AnalyticsPanel from "@/components/dashboard/AnalyticsPanel";
@@ -11,26 +10,26 @@ import LeadsPanel from "@/components/dashboard/LeadsPanel";
 import ChatPanel from "@/components/dashboard/ChatPanel";
 import Loading from "../loading";
 import { DashboardDataProvider, useDashboardData } from "@/lib/dashboard-data";
+import OnboardingModal from "@/components/dashboard/OnboardingModal";
 
 const RAIL = "56px";
 
-/** First-time users with no project yet get sent to /onboarding instead of
- * a dashboard full of empty panels — driven by the same /api/project/data
- * fetch every panel already needs, via the dashboard data provider this
- * page already mounts. Any other fetch failure (real 500, network) is left
- * alone here; only the specific "no project" 404 redirects. */
+/** First-time users with no project yet see the dashboard underneath (so
+ * it's already loaded once the dialog closes) with a small onboarding
+ * dialog on top — driven by the same /api/project/data fetch every panel
+ * already needs, via the dashboard data provider this page already mounts.
+ * Any other fetch failure (real 500, network) is left alone; only the
+ * specific "no project" 404 shows the dialog. */
 function OnboardingGate({ children }: { children: React.ReactNode }) {
-  const { data, loading, error } = useDashboardData();
-  const router = useRouter();
+  const { data, loading, error, refresh } = useDashboardData();
+  const needsOnboarding = !loading && !data && error === "No active project";
 
-  useEffect(() => {
-    if (!loading && !data && error === "No active project") {
-      router.replace("/onboarding");
-    }
-  }, [loading, data, error, router]);
-
-  if (!loading && !data && error === "No active project") return null;
-  return <>{children}</>;
+  return (
+    <>
+      {children}
+      {needsOnboarding && <OnboardingModal onDone={refresh} />}
+    </>
+  );
 }
 
 export default function DashboardPage() {
