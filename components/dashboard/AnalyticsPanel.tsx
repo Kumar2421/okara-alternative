@@ -73,12 +73,19 @@ function ConnectGoogleServices({ onViewTraffic }: { onViewTraffic: () => void })
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    fetch("/api/settings")
+    // Same real signal GoogleAnalyticsCard uses (integrationId presence),
+    // not the legacy ga_property_id/gsc_site_url settings keys — those only
+    // populate once a resource is explicitly selected, but a connection
+    // (manual "Connect", or "Sign in with Google" granting these scopes at
+    // login — see app/api/auth/callback/route.ts) is real before that
+    // selection happens. Checking the old keys meant this card kept
+    // showing "Connect" even for an account that had genuinely connected.
+    fetch("/api/project/integrations/google/resources")
       .then((r) => r.json())
-      .then((data) => {
-        const find = (key: string) => data.settings?.find((s: { key: string; value: string }) => s.key === key)?.value || "";
-        setGaConnected(!!find("ga_property_id"));
-        setGscConnected(!!find("gsc_site_url"));
+      .then((data: { integrations?: { integrationType: string; integrationId: string | null }[] }) => {
+        const find = (type: string) => data.integrations?.find((i) => i.integrationType === type)?.integrationId;
+        setGaConnected(!!find("google-analytics"));
+        setGscConnected(!!find("google-search-console"));
       })
       .catch(() => {})
       .finally(() => setLoaded(true));
