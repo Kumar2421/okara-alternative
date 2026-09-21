@@ -5,18 +5,23 @@ import { getDb } from "@/lib/db";
 
 export const runtime = "nodejs";
 
-const DATASETS = [
-  "project_documents",
-  "project_competitors",
-  "seo_audits",
-  "link_checks",
-  "geo_checks",
-  "site_crawls",
-  "traffic_checks",
-  "findings",
-  "code_fixes",
-  "leads",
-] as const;
+// Each table's real "most recent" timestamp column — not all of them are
+// created_at. link_checks/geo_checks/site_crawls/traffic_checks are
+// single-row-per-project snapshots keyed on checked_at, and findings tracks
+// first_seen/last_seen instead. Ordering every table by a literal
+// "created_at" (as this route used to) 500s on the five that don't have it.
+const DATASETS: Record<string, string> = {
+  project_documents: "created_at",
+  project_competitors: "created_at",
+  seo_audits: "created_at",
+  link_checks: "checked_at",
+  geo_checks: "checked_at",
+  site_crawls: "checked_at",
+  traffic_checks: "checked_at",
+  findings: "last_seen",
+  code_fixes: "created_at",
+  leads: "created_at",
+};
 
 export async function GET(request: NextRequest) {
   const requestedProjectId = request.nextUrl.searchParams.get("projectId");
@@ -27,12 +32,12 @@ export async function GET(request: NextRequest) {
   const data: Record<string, unknown[]> = {};
 
   if (FEATURES.PLATFORM_MODE && context.supabase) {
-    for (const table of DATASETS) {
+    for (const [table, orderColumn] of Object.entries(DATASETS)) {
       const { data: rows, error } = await context.supabase
         .from(table)
         .select("*")
         .eq("project_id", context.projectId)
-        .order("created_at", { ascending: false });
+        .order(orderColumn, { ascending: false });
       if (error) {
         return NextResponse.json({ error: `Failed to load ${table}: ${error.message}` }, { status: 500 });
       }
@@ -40,9 +45,9 @@ export async function GET(request: NextRequest) {
     }
   } else {
     const db = getDb();
-    for (const table of DATASETS) {
+    for (const [table, orderColumn] of Object.entries(DATASETS)) {
       try {
-        data[table] = db.prepare(`SELECT * FROM ${table} WHERE project_id = ? ORDER BY created_at DESC`).all(context.projectId) as unknown[];
+        data[table] = db.prepare(`SELECT * FROM ${table} WHERE project_id = ? ORDER BY ${orderColumn} DESC`).all(context.projectId) as unknown[];
       } catch {
         data[table] = [];
       }
