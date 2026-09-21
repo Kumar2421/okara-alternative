@@ -16,6 +16,7 @@ import {
   Moon,
   Loader2,
   X,
+  ScrollText,
 } from "lucide-react";
 import { user as mockUser } from "@/lib/mock-data";
 import { useTerminalLog } from "@/lib/terminal-log-store";
@@ -337,35 +338,50 @@ export default function TerminalLog() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [lines]);
 
+  const latest = lines[lines.length - 1];
+
   return (
-    <div className="flex shrink-0 flex-col bg-[#110f0e]">
-      <div className="flex h-[52px] shrink-0 items-center justify-between px-4">
-        <div className="flex items-center gap-1">
-          <DotLottieReact src="/ghost-loader.lottie" autoplay loop className="mr-1 h-7 w-7 shrink-0" />
-          <button
-            onClick={() => setLogOpen((v) => !v)}
-            className="mr-1 flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-white/10 hover:text-white"
-            title={logOpen ? "Collapse terminal" : "Expand terminal"}
-          >
-            <ChevronUp size={14} className={`transition-transform ${logOpen ? "" : "rotate-180"}`} />
-          </button>
-          <ProjectSwitcher />
-          {/* <div className="ml-1 flex items-center gap-1.5 px-2 py-1 text-[13px] text-gray-300">
-            <span className="flex h-4 w-4 items-center justify-center rounded bg-white/10 text-[9px]">
-              🤖
-            </span>
-              Marlo Terminal
-          </div> */}
+    <div className="shrink-0 bg-white p-3 pb-2">
+      <div className="flex flex-col rounded-xl bg-[#110f0e]">
+        <div className="flex h-[52px] shrink-0 items-center justify-between px-4">
+          <div className="flex min-w-0 items-center gap-1">
+            <DotLottieReact src="/ghost-loader.lottie" autoplay loop className="mr-1 h-7 w-7 shrink-0" />
+            <button
+              onClick={() => setLogOpen((v) => !v)}
+              className="mr-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-white/10 hover:text-white"
+              title={logOpen ? "Collapse terminal" : "Expand terminal"}
+            >
+              <ChevronUp size={14} className={`transition-transform ${logOpen ? "" : "rotate-180"}`} />
+            </button>
+            <ProjectSwitcher />
+
+            <div className="ml-2 flex min-w-0 items-center gap-2 border-l border-white/10 pl-3 text-[13px]">
+              <span className="flex shrink-0 items-center gap-1.5 text-gray-400">
+                <ScrollText size={13} />
+                Status Log
+              </span>
+              <span className="shrink-0 text-gray-600">|</span>
+              {latest ? (
+                <span
+                  className={`truncate ${latest.type === "done" ? "text-[#00ab92]" : "text-gray-300"}`}
+                >
+                  {latest.type === "done" && <Check size={12} className="mr-1 inline shrink-0 align-[-1px]" />}
+                  {latest.text}
+                </span>
+              ) : (
+                <span className="truncate text-gray-500">No activity yet.</span>
+              )}
+            </div>
+          </div>
+
+          <UserMenu />
         </div>
 
-        <UserMenu />
-      </div>
-
-      {logOpen && (
-        <div
-          ref={scrollRef}
-          className="okara-scroll-dark max-h-[185px] overflow-y-auto border-t border-white/10 px-4 py-2.5 font-mono text-[12px] leading-[1.65]"
-        >
+        {logOpen && (
+          <div
+            ref={scrollRef}
+            className="okara-scroll-dark max-h-[185px] overflow-y-auto border-t border-white/10 px-4 py-2.5 font-mono text-[12px] leading-[1.65]"
+          >
           {lines.length === 0 && <div className="text-gray-600">Agent activity will show up here as it happens.</div>}
           {lines.map((line, i) => {
             if (line.type === "muted-link") {
@@ -400,8 +416,9 @@ export default function TerminalLog() {
               </div>
             );
           })}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
