@@ -35,7 +35,7 @@ export async function updateSession(request: NextRequest) {
   // auth callbacks, API routes called by already-authenticated pages)
   // is left alone here.
   const path = request.nextUrl.pathname;
-  const isProtected = path.startsWith("/dashboard") || path.startsWith("/settings");
+  const isProtected = path.startsWith("/dashboard") || path.startsWith("/settings") || path.startsWith("/onboarding");
 
   if (!user && isProtected) {
     const url = request.nextUrl.clone();
