@@ -187,18 +187,32 @@ const MAX_REDIRECTS = 5;
 /** Unlike fetch(), Node's raw http(s).request doesn't follow redirects —
  * real sites redirect constantly (http→https, apex↔www, trailing slash), so
  * this has to be handled explicitly or the crawl breaks for most of them.
- * Only the timing of the FINAL hop is reported (that's the one whose HTML we
- * actually use), which is honest — real total time is expected to be dominated
- * by that connection, not the redirect hops. */
-async function timedFetch(url: URL, timeoutMs: number, redirectsLeft = MAX_REDIRECTS, hopsSoFar = 0): Promise<TimedFetchResult> {
+ * TTFB/download are reported from the FINAL hop (that's the response whose
+ * HTML we actually use). connect/TLS are NOT, though — a redirect to
+ * another path on the *same host* (very common: "/" → a canonical page)
+ * reuses that same TCP/TLS socket, so those two events never fire again on
+ * the final hop and would otherwise come back as a false "N/A" even though
+ * the connection genuinely was established, just one hop earlier. Carried
+ * forward from wherever they were actually measured instead of dropped. */
+async function timedFetch(
+  url: URL,
+  timeoutMs: number,
+  redirectsLeft = MAX_REDIRECTS,
+  hopsSoFar = 0,
+  connectionTiming: Pick<FetchTiming, "connectMs" | "tlsHandshakeMs"> = {}
+): Promise<TimedFetchResult> {
   const result = await timedFetchOnce(url, timeoutMs);
+  const carriedConnectionTiming = {
+    connectMs: result.timing.connectMs ?? connectionTiming.connectMs,
+    tlsHandshakeMs: result.timing.tlsHandshakeMs ?? connectionTiming.tlsHandshakeMs,
+  };
   const location = result.headers.location;
   if (result.status >= 300 && result.status < 400 && location && redirectsLeft > 0) {
     const nextUrl = new URL(location, url);
     assertPublicHttpUrl(nextUrl.toString());
-    return timedFetch(nextUrl, timeoutMs, redirectsLeft - 1, hopsSoFar + 1);
+    return timedFetch(nextUrl, timeoutMs, redirectsLeft - 1, hopsSoFar + 1, carriedConnectionTiming);
   }
-  return { ...result, redirectCount: hopsSoFar };
+  return { ...result, timing: { ...result.timing, ...carriedConnectionTiming }, redirectCount: hopsSoFar };
 }
 
 function timedFetchOnce(url: URL, timeoutMs: number): Promise<TimedFetchResult> {
