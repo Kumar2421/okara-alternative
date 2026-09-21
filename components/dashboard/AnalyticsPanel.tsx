@@ -220,7 +220,12 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
       const res = await fetch(`/api/agents/seo/audit?url=${encodeURIComponent(url)}`);
       if (res.ok) {
         const data = await res.json();
-        if (data.payload) setAuditData(JSON.parse(data.payload));
+        // Platform mode: `payload` is a Postgres jsonb column — Supabase
+        // already returns it parsed. Self-host: SQLite stores it as a TEXT
+        // string, still needs JSON.parse(). Unconditionally parsing broke
+        // every platform-mode audit load (JSON.parse on an already-parsed
+        // object stringifies to "[object Object]" first, then fails).
+        if (data.payload) setAuditData(typeof data.payload === "string" ? JSON.parse(data.payload) : data.payload);
       }
     } catch (e) {
       console.error(e);
