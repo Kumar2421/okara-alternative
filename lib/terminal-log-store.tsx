@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useState, useCallback } from "react";
-import { terminalLog as SEED_LOG, type LogLine } from "./mock-terminal";
+import type { LogLine } from "./mock-terminal";
 
 type Ctx = {
   lines: LogLine[];
@@ -20,7 +20,7 @@ export function useTerminalLog() {
 }
 
 export default function TerminalLogProvider({ children }: { children: React.ReactNode }) {
-  const [lines, setLines] = useState<LogLine[]>(SEED_LOG);
+  const [lines, setLines] = useState<LogLine[]>([]);
 
   const log = useCallback((text: string) => {
     setLines((prev) => [...prev, { type: "cmd", text }]);

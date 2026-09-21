@@ -366,6 +366,7 @@ export default function TerminalLog() {
           ref={scrollRef}
           className="okara-scroll-dark max-h-[185px] overflow-y-auto border-t border-white/10 px-4 py-2.5 font-mono text-[12px] leading-[1.65]"
         >
+          {lines.length === 0 && <div className="text-gray-600">Agent activity will show up here as it happens.</div>}
           {lines.map((line, i) => {
             if (line.type === "muted-link") {
               return (
