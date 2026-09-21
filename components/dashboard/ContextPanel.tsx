@@ -21,7 +21,7 @@ import CollapsedRail, { RailButton } from "./CollapsedRail";
 import { useToast } from "./Toast";
 import { useProject } from "@/lib/project-store";
 import { useProjectContext } from "@/lib/context-data";
-import { selectContextPanelDocumentStatus } from "@/lib/context-panel-adapter";
+import { selectContextPanelCompetitors, selectContextPanelDocumentStatus } from "@/lib/context-panel-adapter";
 import { useProviders, findProviderForModel } from "@/lib/providers-store";
 import { useTerminalLog } from "@/lib/terminal-log-store";
 import ProductInfoPanel from "./documents/ProductInfoPanel";
@@ -32,7 +32,6 @@ import ContentStrategyPanel from "./documents/ContentStrategyPanel";
 import DesignGuidePanel from "./documents/DesignGuidePanel";
 import { WebsiteIcon } from "@/components/shared/WebsiteIcon";
 
-type Competitor = { id: string; url: string; created_at: string };
 
 export default function ContextPanel({
   open,
@@ -49,13 +48,11 @@ export default function ContextPanel({
   const [comparisonOpen, setComparisonOpen] = useState(false);
   const [contentStrategyOpen, setContentStrategyOpen] = useState(false);
   const [designGuideOpen, setDesignGuideOpen] = useState(false);
-  const [competitors, setCompetitors] = useState<Competitor[]>([]);
-  const [competitorsLoading, setCompetitorsLoading] = useState(true);
   const [addingCompetitor, setAddingCompetitor] = useState(false);
   const [newCompetitorUrl, setNewCompetitorUrl] = useState("");
   const [discovering, setDiscovering] = useState(false);
   const { show } = useToast();
-  const { project, loading, competitorsVersion } = useProject();
+  const { project, loading } = useProject();
   const {
     documents,
     competitors: contextCompetitors,
@@ -63,6 +60,11 @@ export default function ContextPanel({
     error: contextError,
     refresh: refreshContext,
   } = useProjectContext();
+  const competitors = useMemo(
+    () => selectContextPanelCompetitors(contextCompetitors),
+    [contextCompetitors],
+  );
+  const competitorsLoading = contextLoading && contextCompetitors.length === 0;
   const { primaryModel } = useProviders();
   const { log } = useTerminalLog();
 
@@ -70,37 +72,6 @@ export default function ContextPanel({
     () => selectContextPanelDocumentStatus(documents),
     [documents],
   );
-
-  const loadCompetitors = useCallback(async () => {
-    setCompetitorsLoading(true);
-    try {
-      await refreshContext();
-    } finally {
-      setCompetitorsLoading(false);
-    }
-  }, [refreshContext]);
-
-  useEffect(() => {
-    setCompetitors(
-      contextCompetitors.map((competitor) => ({
-        id: competitor.id,
-        url: competitor.url,
-        created_at: competitor.created_at ?? "",
-      })),
-    );
-  }, [contextCompetitors]);
-
-  useEffect(() => {
-    if (!project) {
-      setCompetitors([]);
-      setCompetitorsLoading(false);
-      return;
-    }
-
-    if (competitorsVersion > 0) {
-      loadCompetitors();
-    }
-  }, [project?.id, competitorsVersion, loadCompetitors]);
 
   useEffect(() => {
     if (contextError) {
@@ -123,7 +94,6 @@ export default function ContextPanel({
         return;
       }
       const data = await res.json();
-      setCompetitors((prev) => [...prev, data.competitor]);
       setNewCompetitorUrl("");
       setAddingCompetitor(false);
       await refreshContext();
@@ -183,7 +153,6 @@ export default function ContextPanel({
   }
 
   async function handleRemoveCompetitor(id: string) {
-    setCompetitors((prev) => prev.filter((c) => c.id !== id));
     try {
       const res = await fetch(`/api/project/competitors?id=${encodeURIComponent(id)}`, { method: "DELETE" });
       if (!res.ok) {
@@ -192,7 +161,7 @@ export default function ContextPanel({
       await refreshContext();
     } catch {
       show("Failed to remove competitor — it may still be saved.");
-      loadCompetitors();
+      await refreshContext();
     }
   }
 
