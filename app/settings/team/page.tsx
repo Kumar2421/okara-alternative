@@ -36,7 +36,7 @@ export default function TeamPage() {
       </div>
 
       <p className="mt-3 text-[11px] text-gray-400">
-        Multi-person workspaces aren't available yet — every project is single-owner for now.
+        Multi-person workspaces aren&apos;t available yet — every project is single-owner for now.
       </p>
     </div>
   );

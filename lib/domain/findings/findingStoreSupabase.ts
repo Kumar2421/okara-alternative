@@ -85,6 +85,8 @@ export async function upsertFinding(
   existingQuery = input.url ? existingQuery.eq("url", input.url) : existingQuery.is("url", null);
   const { data: existing } = await existingQuery.maybeSingle();
 
+  const nextStatus = existing?.status === "verified" ? "fixing" : (existing?.status ?? "new");
+
   const { data, error } = await db
     .from("findings")
     .upsert(
@@ -100,10 +102,10 @@ export async function upsertFinding(
         url: input.url ?? null,
         evidence: input.evidence,
         recommendation: input.recommendation,
-        status: existing?.status ?? "new",
+        status: nextStatus,
         first_seen: existing?.first_seen ?? now,
         last_seen: now,
-        resolved_at: existing?.resolved_at ?? null,
+        resolved_at: nextStatus === "verified" ? existing?.resolved_at ?? now : null,
       },
       { onConflict: "project_id,source,category,entity_type,entity_id,url" }
     )

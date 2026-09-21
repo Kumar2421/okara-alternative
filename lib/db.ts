@@ -234,6 +234,25 @@ function init(): Database.Database {
       UNIQUE(project_id, source, category, entity_type, entity_id, url)
     );
 
+    CREATE TABLE IF NOT EXISTS actions (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      finding_id TEXT NOT NULL,
+      recommendation_id TEXT,
+      type TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'proposed',
+      title TEXT NOT NULL,
+      target TEXT NOT NULL DEFAULT '{}',
+      parameters TEXT NOT NULL DEFAULT '{}',
+      result TEXT,
+      created_at TEXT NOT NULL,
+      started_at TEXT,
+      completed_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS actions_project_created_idx ON actions(project_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS actions_project_finding_idx ON actions(project_id, finding_id);
+
     CREATE TABLE IF NOT EXISTS leads (
       id         TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,
