@@ -89,7 +89,7 @@ export async function putFileContent(
   content: string,
   message: string,
   branch: string,
-  sha: string
+  sha?: string
 ): Promise<void> {
   const res = await githubFetch(token, `/repos/${repoFullName}/contents/${path}`, {
     method: "PUT",

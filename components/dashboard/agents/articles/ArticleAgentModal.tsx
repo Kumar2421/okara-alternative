@@ -72,9 +72,36 @@ export default function ArticleAgentModal({
   const [draft, setDraft] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [savedArticleId, setSavedArticleId] = useState<string | null>(null);
+  const [publishing, setPublishing] = useState<"wordpress" | "github" | null>(null);
+  const [publishResult, setPublishResult] = useState<{ kind: "wordpress" | "github"; url: string } | null>(null);
 
   const { primaryModel } = useProviders();
   const { show } = useToast();
+
+  async function handlePublish(target: "wordpress" | "github") {
+    if (!savedArticleId) return;
+    setPublishing(target);
+    try {
+      const res = await fetch(`/api/agents/articles/publish/${target}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: savedArticleId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        show(data.error || `Failed to publish to ${target === "wordpress" ? "WordPress" : "GitHub"}.`);
+        return;
+      }
+      const url = target === "wordpress" ? data.publishedUrl : data.prUrl;
+      setPublishResult({ kind: target, url });
+      show(target === "wordpress" ? "Published to WordPress." : "Pull request opened.");
+    } catch {
+      show(`Failed to publish to ${target === "wordpress" ? "WordPress" : "GitHub"}.`);
+    } finally {
+      setPublishing(null);
+    }
+  }
 
   const handleGenerate = async () => {
     if (!topic || !keywords || !brandVoice) {
@@ -95,6 +122,8 @@ export default function ArticleAgentModal({
 
     setIsGenerating(true);
     setDraft("");
+    setSavedArticleId(null);
+    setPublishResult(null);
 
     try {
       const res = await fetch("/api/agents/articles/generate", {
@@ -138,17 +167,21 @@ export default function ArticleAgentModal({
       }
 
       setIsSaving(true);
-      await fetch("/api/agents/articles/save", {
+      const newId = crypto.randomUUID();
+      const { title: parsedTitle } = parseArticle(finalContent);
+      const saveRes = await fetch("/api/agents/articles/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          id: crypto.randomUUID(),
+          id: newId,
           topic,
           keywords,
           brandVoice,
           content: finalContent,
+          title: parsedTitle ?? topic,
         }),
       });
+      if (saveRes.ok) setSavedArticleId(newId);
 
     } catch (err) {
       show("An error occurred during generation.");
@@ -243,6 +276,37 @@ export default function ArticleAgentModal({
             {isSaving && (
               <div className="mt-4 text-xs text-green-600 flex items-center justify-center gap-1">
                 <Loader2 size={12} className="animate-spin" /> Saving draft...
+              </div>
+            )}
+
+            {savedArticleId && !isSaving && (
+              <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-4">
+                <button
+                  onClick={() => handlePublish("wordpress")}
+                  disabled={publishing !== null}
+                  className="flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  {publishing === "wordpress" && <Loader2 size={12} className="animate-spin" />}
+                  Publish to WordPress
+                </button>
+                <button
+                  onClick={() => handlePublish("github")}
+                  disabled={publishing !== null}
+                  className="flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  {publishing === "github" && <Loader2 size={12} className="animate-spin" />}
+                  Open GitHub PR
+                </button>
+                {publishResult && (
+                  <a
+                    href={publishResult.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs font-medium text-emerald-600 hover:underline"
+                  >
+                    {publishResult.kind === "wordpress" ? "View post" : "View PR"} ↗
+                  </a>
+                )}
               </div>
             )}
           </div>

@@ -11,12 +11,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid request" }, { status: 400 });
   }
 
-  const { id, topic, keywords, brandVoice, content } = body as {
+  const { id, topic, keywords, brandVoice, content, title } = body as {
     id: string;
     topic: string;
     keywords: string;
     brandVoice: string;
     content: string;
+    title?: string;
   };
 
   if (!id || !topic || !keywords || !brandVoice || !content) {
@@ -51,6 +52,7 @@ export async function POST(req: NextRequest) {
         keywords,
         brand_voice: brandVoice,
         content,
+        title: title ?? topic,
         created_at: new Date().toISOString(),
       })
       .select("id")
@@ -66,14 +68,15 @@ export async function POST(req: NextRequest) {
     const createdAt = new Date().toISOString();
     
     db.prepare(`
-      INSERT INTO articles (id, topic, keywords, brandVoice, content, created_at)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO articles (id, topic, keywords, brandVoice, content, title, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         topic = excluded.topic,
         keywords = excluded.keywords,
         brandVoice = excluded.brandVoice,
-        content = excluded.content
-    `).run(id, topic, keywords, brandVoice, content, createdAt);
+        content = excluded.content,
+        title = excluded.title
+    `).run(id, topic, keywords, brandVoice, content, title ?? topic, createdAt);
 
     return NextResponse.json({ success: true, id });
   } catch (err) {

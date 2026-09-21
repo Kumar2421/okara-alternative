@@ -377,6 +377,25 @@ function migrate(db: Database.Database) {
       db.exec(`ALTER TABLE leads ADD COLUMN last_reply_snippet TEXT`);
     }
   }
+
+  const articlesCols = db.prepare("PRAGMA table_info(articles)").all() as { name: string }[];
+  if (articlesCols.length > 0) {
+    if (!articlesCols.some((c) => c.name === "title")) {
+      db.exec(`ALTER TABLE articles ADD COLUMN title TEXT`);
+    }
+    if (!articlesCols.some((c) => c.name === "status")) {
+      db.exec(`ALTER TABLE articles ADD COLUMN status TEXT NOT NULL DEFAULT 'draft'`);
+    }
+    if (!articlesCols.some((c) => c.name === "published_url")) {
+      db.exec(`ALTER TABLE articles ADD COLUMN published_url TEXT`);
+    }
+    if (!articlesCols.some((c) => c.name === "pr_url")) {
+      db.exec(`ALTER TABLE articles ADD COLUMN pr_url TEXT`);
+    }
+    if (!articlesCols.some((c) => c.name === "published_at")) {
+      db.exec(`ALTER TABLE articles ADD COLUMN published_at TEXT`);
+    }
+  }
 }
 
 export function getDb(): Database.Database {

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Globe, Save } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Globe, Save, Loader2 } from "lucide-react";
 import Toggle from "@/components/settings/Toggle";
 import { useToast } from "@/components/dashboard/Toast";
 
@@ -12,6 +12,15 @@ const PLATFORM_AGENTS = [
   { id: "linkedin", name: "LinkedIn", desc: "The tone and voice for LinkedIn posts.", iconBg: "#0a66c2", icon: "in" },
   { id: "articles", name: "Articles", desc: "How the agent writes long-form content.", iconBg: "#8b5cf6", icon: "📝" },
 ];
+
+const TOGGLE_IDS = ["seo", "reddit", "x", "linkedin", "articles"];
+
+const SETTINGS_KEYS = {
+  region: "agents_region",
+  redditPrompt: "agents_reddit_prompt",
+  searchRegion: "agents_search_region",
+  toggle: (id: string) => `agents_toggle_${id}`,
+};
 
 export default function AgentsSettingsPage() {
   const { show } = useToast();
@@ -25,9 +34,57 @@ export default function AgentsSettingsPage() {
   const [region, setRegion] = useState("United States (English)");
   const [redditPrompt, setRedditPrompt] = useState("");
   const [searchRegion, setSearchRegion] = useState("Global (no filter)");
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((data) => {
+        const find = (key: string) => data.settings?.find((s: { key: string; value: string }) => s.key === key)?.value;
+        setToggles((t) => {
+          const next = { ...t };
+          for (const id of TOGGLE_IDS) {
+            const v = find(SETTINGS_KEYS.toggle(id));
+            if (v !== undefined) next[id] = v === "true";
+          }
+          return next;
+        });
+        setRegion(find(SETTINGS_KEYS.region) ?? "United States (English)");
+        setRedditPrompt(find(SETTINGS_KEYS.redditPrompt) ?? "");
+        setSearchRegion(find(SETTINGS_KEYS.searchRegion) ?? "Global (no filter)");
+      })
+      .catch(() => {})
+      .finally(() => setLoaded(true));
+  }, []);
 
   function setToggle(id: string, v: boolean) {
     setToggles((t) => ({ ...t, [id]: v }));
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      const entries: [string, string][] = [
+        ...TOGGLE_IDS.map((id): [string, string] => [SETTINGS_KEYS.toggle(id), String(toggles[id])]),
+        [SETTINGS_KEYS.region, region],
+        [SETTINGS_KEYS.redditPrompt, redditPrompt],
+        [SETTINGS_KEYS.searchRegion, searchRegion],
+      ];
+      for (const [key, value] of entries) {
+        const res = await fetch("/api/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key, value }),
+        });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? "Failed to save");
+      }
+      show("Settings saved.");
+    } catch (err) {
+      show(err instanceof Error ? err.message : "Failed to save settings.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -38,10 +95,12 @@ export default function AgentsSettingsPage() {
           <p className="text-[13px] text-gray-500">Platform instructions, toggles, and brand voice.</p>
         </div>
         <button
-          onClick={() => show("Settings saved.")}
-          className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-[13px] font-medium text-gray-500 hover:bg-gray-100"
+          onClick={handleSave}
+          disabled={saving || !loaded}
+          className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-[13px] font-medium text-gray-500 hover:bg-gray-100 disabled:opacity-50"
         >
-          <Save size={13} /> Save
+          {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+          {saving ? "Saving..." : "Save"}
         </button>
       </div>
 
