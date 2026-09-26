@@ -17,22 +17,30 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const db = createServiceClient();
-  const [{ data: profile }, { data: config }, { data: events, error: eventsError }, { data: costs }] = await Promise.all([
-    db.from("profiles").select("credits_balance, plan_tier").eq("id", user.id).maybeSingle(),
-    db.from("app_config").select("billing_enabled").eq("id", true).maybeSingle(),
-    db
-      .from("usage_events")
-      .select("id, agent_type, model, tokens_in, tokens_out, credits_charged, status, created_at")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(50),
-    db.from("credit_costs").select("agent_type, credits, description").order("agent_type"),
-  ]);
+  const [{ data: profile }, { data: config }, { data: events, error: eventsError }, { data: costs }, { data: grants }] =
+    await Promise.all([
+      db.from("profiles").select("credits_balance, plan_tier").eq("id", user.id).maybeSingle(),
+      db.from("app_config").select("billing_enabled").eq("id", true).maybeSingle(),
+      db
+        .from("usage_events")
+        .select("id, agent_type, model, tokens_in, tokens_out, credits_charged, status, created_at")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(50),
+      db.from("credit_costs").select("agent_type, credits, description").order("agent_type"),
+      // Total ever granted (signup grant + any future top-ups) — sum of
+      // positive ledger entries. Lets the Credits page show a real
+      // "X used / Y granted" instead of just the current balance.
+      db.from("credit_ledger").select("delta").eq("user_id", user.id).gt("delta", 0),
+    ]);
   if (eventsError) return NextResponse.json({ error: eventsError.message }, { status: 500 });
+
+  const granted = (grants ?? []).reduce((sum, row) => sum + row.delta, 0);
 
   return NextResponse.json({
     available: true,
     balance: profile?.credits_balance ?? 0,
+    granted,
     planTier: profile?.plan_tier ?? "free",
     billingEnabled: config?.billing_enabled ?? false,
     events: events ?? [],

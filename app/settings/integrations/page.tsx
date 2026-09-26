@@ -3,6 +3,7 @@ import ComingSoonCard from "@/components/settings/ComingSoonCard";
 import GitHubCodeFixCard from "@/components/settings/GitHubCodeFixCard";
 import WordPressCard from "@/components/settings/WordPressCard";
 import XConnectCard from "@/components/settings/XConnectCard";
+import GoogleAnalyticsCard from "@/components/settings/GoogleAnalyticsCard";
 import { cmsIntegrations, socialIntegrations, codeRepoIntegrations } from "@/lib/mock-integrations";
 
 // Real, secure connections exist for WordPress (self-hosted), GitHub, and X
@@ -40,11 +41,17 @@ export default function IntegrationsPage() {
 
       <h2 className="text-[15px] font-semibold text-gray-900">Code Repository</h2>
       <p className="mb-4 text-[13px] text-gray-500">Connect a GitHub repo so the SEO agent can open pull requests against it</p>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="mb-8 grid grid-cols-2 gap-3">
         {codeRepoIntegrations.map((i) =>
           i.id === "github-seo" ? <GitHubCodeFixCard key={i.id} /> : <ComingSoonCard key={i.id} name={i.name} desc={i.desc} icon={i.icon} color={i.color} />
         )}
       </div>
+
+      <h2 className="text-[15px] font-semibold text-gray-900">Analytics</h2>
+      <p className="mb-4 text-[13px] text-gray-500">
+        Connect analytics tools to track performance. Disconnecting will remove the connector and all collected data.
+      </p>
+      <GoogleAnalyticsCard />
     </div>
   );
 }

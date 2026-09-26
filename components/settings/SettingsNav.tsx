@@ -14,14 +14,17 @@ import {
   Smartphone,
   KeyRound,
   Zap,
+  Puzzle,
 } from "lucide-react";
 
 const AI_CMO_ITEMS = [
   { href: "/settings/websites", label: "Websites", icon: Globe },
+  { href: "/settings/credits", label: "Credits", icon: Zap, dot: true },
   { href: "/settings/llm-providers", label: "LLM Providers", icon: Cpu, dot: true },
   { href: "/settings/api-credentials", label: "API Credentials", icon: KeyRound },
   { href: "/settings/agents", label: "Agents", icon: SlidersHorizontal },
-  { href: "/settings/integrations", label: "Integrations", icon: Plug },
+  { href: "/settings/integrations", label: "Integrations", icon: Plug, dot: true },
+  { href: "/settings/skills-mcp", label: "Skills & MCP", icon: Puzzle, dot: true },
   { href: "/settings/team", label: "Team", icon: Users, dot: true },
 ];
 
@@ -29,7 +32,6 @@ const CHAT_ITEMS = [{ href: "/settings/personalization", label: "Personalization
 
 const GENERAL_ITEMS = [
   { href: "/settings/account", label: "Account & Security", icon: Shield },
-  { href: "/settings/usage", label: "Usage", icon: Zap },
   { href: "/settings/devices", label: "Devices", icon: Smartphone },
 ];
 

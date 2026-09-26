@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Zap } from "lucide-react";
+import { Loader2, Zap, Lock } from "lucide-react";
 
 type UsageEvent = {
   id: string;
@@ -19,6 +19,7 @@ type CreditCost = { agent_type: string; credits: number; description: string | n
 type UsageData = {
   available: boolean;
   balance?: number;
+  granted?: number;
   planTier?: string;
   billingEnabled?: boolean;
   events?: UsageEvent[];
@@ -32,7 +33,7 @@ function formatAgentType(agentType: string): string {
     .join(" ");
 }
 
-export default function UsagePage() {
+export default function CreditsPage() {
   const [data, setData] = useState<UsageData | null>(null);
   const [loaded, setLoaded] = useState(false);
 
@@ -47,7 +48,7 @@ export default function UsagePage() {
   if (!loaded) {
     return (
       <div className="flex items-center gap-2 text-[13px] text-gray-500">
-        <Loader2 size={14} className="animate-spin" /> Loading usage...
+        <Loader2 size={14} className="animate-spin" /> Loading credits...
       </div>
     );
   }
@@ -55,7 +56,7 @@ export default function UsagePage() {
   if (!data?.available) {
     return (
       <div className="max-w-2xl">
-        <h1 className="text-[15px] font-semibold text-gray-900">Usage</h1>
+        <h1 className="text-[15px] font-semibold text-gray-900">Credits</h1>
         <p className="mb-4 text-[13px] text-gray-500">
           Not applicable in self-host mode — you bring your own LLM keys, so nothing here is metered or charged.
         </p>
@@ -63,28 +64,67 @@ export default function UsagePage() {
     );
   }
 
-  const { balance = 0, billingEnabled = false, events = [], costs = [] } = data;
+  const { balance = 0, granted = 0, billingEnabled = false, events = [], costs = [] } = data;
+  // granted is only real once at least one ledger grant exists (new
+  // accounts always have the signup grant) — guards divide-by-zero for the
+  // rare row that predates the credits system, backfilled with a grant of 0.
+  const used = Math.max(granted - balance, 0);
+  const pctRemaining = granted > 0 ? balance / granted : 1;
+  const status = !billingEnabled ? "Beta" : pctRemaining > 0.2 ? "Healthy" : pctRemaining > 0 ? "Low" : "Out";
+  const statusColor =
+    status === "Out" ? "bg-red-50 text-red-700" : status === "Low" ? "bg-amber-50 text-amber-700" : "bg-[#e6f7f4] text-[#00846f]";
 
   return (
     <div className="max-w-3xl">
-      <h1 className="text-[15px] font-semibold text-gray-900">Usage</h1>
-      <p className="mb-4 text-[13px] text-gray-500">
-        What your agent actions have cost, and what each one costs going forward.
-      </p>
+      <h1 className="text-[15px] font-semibold text-gray-900">Credits</h1>
+      <p className="mb-4 text-[13px] text-gray-500">Monitor usage and manage tasks for your AI CMO.</p>
 
-      <div className="mb-6 flex items-center justify-between rounded-xl border border-gray-200 bg-white p-4">
-        <div>
-          <div className="text-[11px] uppercase tracking-wide text-gray-400">Balance</div>
-          <div className="text-2xl font-semibold text-gray-900">
-            {billingEnabled ? balance.toLocaleString() : "Unlimited"}
-            {billingEnabled && <span className="ml-1 text-[13px] font-normal text-gray-400">credits</span>}
+      <div className="mb-6 rounded-xl border border-gray-200 bg-white p-4">
+        <div className="mb-3 flex items-start justify-between">
+          <div>
+            <div className="text-[11px] uppercase tracking-wide text-gray-400">Credits used</div>
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-2xl font-semibold text-gray-900">{used.toLocaleString()}</span>
+              {granted > 0 && <span className="text-[13px] text-gray-400">/ {granted.toLocaleString()}</span>}
+            </div>
+          </div>
+          <span className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-medium ${statusColor}`}>
+            <Zap size={13} /> {status}
+          </span>
+        </div>
+
+        {granted > 0 && (
+          <div className="mb-4 h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
+            <div className="h-full rounded-full bg-[#111111]" style={{ width: `${Math.min((used / granted) * 100, 100)}%` }} />
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 divide-x divide-gray-100 border-t border-gray-100 pt-3">
+          <div>
+            <div className="text-[11px] text-gray-400">Credits remaining</div>
+            <div className="text-[15px] font-semibold text-gray-900">
+              {billingEnabled ? balance.toLocaleString() : "Unlimited (beta)"}
+            </div>
+          </div>
+          <div className="pl-4">
+            <div className="text-[11px] text-gray-400">Resets</div>
+            <div className="text-[15px] font-semibold text-gray-900">No refill</div>
           </div>
         </div>
-        {!billingEnabled && (
-          <span className="flex items-center gap-1.5 rounded-full bg-[#e6f7f4] px-3 py-1.5 text-[12px] font-medium text-[#00846f]">
-            <Zap size={13} /> Beta — every action is still tracked below, none of them charge you yet
-          </span>
-        )}
+      </div>
+
+      {!billingEnabled && (
+        <div className="mb-6 flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-[13px] text-gray-600">
+          <Zap size={14} className="shrink-0 text-gray-400" />
+          Beta — every action below is still tracked in real time, none of them charge you yet.
+        </div>
+      )}
+
+      <h2 className="mb-1 text-[13px] font-semibold text-gray-900">Monthly estimate</h2>
+      <p className="mb-3 text-[12px] text-gray-500">Automated monthly tasks — available on paid plans.</p>
+      <div className="mb-6 flex items-center gap-2 rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-[13px] text-gray-400">
+        <Lock size={14} className="shrink-0" />
+        Per-agent monthly credit estimates land with paid plans — not available during the credits beta.
       </div>
 
       <h2 className="mb-2 text-[13px] font-semibold text-gray-900">Recent activity</h2>
