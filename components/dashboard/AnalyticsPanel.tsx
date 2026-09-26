@@ -13,6 +13,9 @@ import type { Finding as AnalyticsFinding } from "@/lib/domain/findings/findingT
 import type { GeoCitationRow } from "@/lib/domain/geo/GEOAgent";
 import { useProject } from "@/lib/project-store";
 import { useTerminalLog } from "@/lib/terminal-log-store";
+import { FEATURES } from "@/lib/features";
+import { createClient } from "@/utils/supabase/client";
+import { GOOGLE_ANALYTICS_SCOPES } from "@/lib/googleOAuthScopes";
 
 const TABS = ["SEO", "Links", "Technical", "GEO", "Traffic", "Findings"] as const;
 type Tab = (typeof TABS)[number];
@@ -71,6 +74,7 @@ function ConnectGoogleServices({ onViewTraffic }: { onViewTraffic: () => void })
   const [gaConnected, setGaConnected] = useState(false);
   const [gscConnected, setGscConnected] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [connecting, setConnecting] = useState(false);
 
   useEffect(() => {
     // Same real signal GoogleAnalyticsCard uses (integrationId presence),
@@ -90,6 +94,31 @@ function ConnectGoogleServices({ onViewTraffic }: { onViewTraffic: () => void })
       .catch(() => {})
       .finally(() => setLoaded(true));
   }, []);
+
+  // Production: the operator already runs one shared Google OAuth client
+  // (used for login) with the GA4/Search Console scopes attached — reuse
+  // that instead of sending a hosted user to a manual "paste your own
+  // Google Cloud OAuth client id/secret" flow they don't have. Re-running
+  // Google sign-in with the same account just re-grants the extra scopes;
+  // app/api/auth/callback/route.ts turns that into a real connection the
+  // same way the original login did. Self-host mode has no shared operator
+  // identity to reuse, so it keeps the real manual-client-id OAuth flow
+  // (the plain <a href> below).
+  async function handlePlatformConnect() {
+    setConnecting(true);
+    const supabase = createClient();
+    await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${window.location.origin}/api/auth/callback?next=/dashboard`,
+        scopes: GOOGLE_ANALYTICS_SCOPES,
+        queryParams: { access_type: "offline", prompt: "consent" },
+      },
+    });
+    // browser navigates away to Google immediately on success; only reached
+    // on a client-side failure to even start the redirect.
+    setConnecting(false);
+  }
 
   if (dismissed || !loaded) return null;
 
@@ -123,6 +152,14 @@ function ConnectGoogleServices({ onViewTraffic }: { onViewTraffic: () => void })
             >
               <Check size={13} /> Connected
             </button>
+          ) : FEATURES.PLATFORM_MODE ? (
+            <button
+              onClick={handlePlatformConnect}
+              disabled={connecting}
+              className="flex w-full items-center justify-center rounded-lg bg-[#111111] py-1.5 text-[13px] font-medium text-white hover:bg-black disabled:opacity-60"
+            >
+              {connecting ? "Redirecting..." : "Connect with Google"}
+            </button>
           ) : (
             <a
               href="/api/auth/google-analytics/connect?return=dashboard"
@@ -152,6 +189,14 @@ function ConnectGoogleServices({ onViewTraffic }: { onViewTraffic: () => void })
               className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#e6f7f4] py-1.5 text-[13px] font-medium text-[#00846f] hover:bg-[#d7f0eb]"
             >
               <Check size={13} /> Connected
+            </button>
+          ) : FEATURES.PLATFORM_MODE ? (
+            <button
+              onClick={handlePlatformConnect}
+              disabled={connecting}
+              className="flex w-full items-center justify-center rounded-lg bg-[#111111] py-1.5 text-[13px] font-medium text-white hover:bg-black disabled:opacity-60"
+            >
+              {connecting ? "Redirecting..." : "Connect with Google"}
             </button>
           ) : (
             <a

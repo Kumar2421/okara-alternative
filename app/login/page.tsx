@@ -6,13 +6,7 @@ import { Mail, Lock, CheckCircle2 } from "lucide-react";
 import { DotLottieReact } from "@lottiefiles/dotlottie-react";
 import { createClient } from "@/utils/supabase/client";
 import { FEATURES } from "@/lib/features";
-
-// Production-only: signing in with Google also grants GA4 + Search Console
-// read scopes up front, so "Connect Google Services" in the dashboard is
-// just "already connected" instead of a second OAuth dance. Self-host mode
-// keeps the separate manual-client-id flow in Settings → API Credentials.
-const GOOGLE_SCOPES =
-  "https://www.googleapis.com/auth/analytics.readonly https://www.googleapis.com/auth/webmasters.readonly";
+import { GOOGLE_ANALYTICS_SCOPES } from "@/lib/googleOAuthScopes";
 
 type Mode = "signin" | "signup";
 
@@ -111,7 +105,7 @@ export default function LoginPage() {
       options: {
         redirectTo: `${window.location.origin}/api/auth/callback`,
         ...(provider === "google" && FEATURES.PLATFORM_MODE
-          ? { scopes: GOOGLE_SCOPES, queryParams: { access_type: "offline", prompt: "consent" } }
+          ? { scopes: GOOGLE_ANALYTICS_SCOPES, queryParams: { access_type: "offline", prompt: "consent" } }
           : {}),
       },
     });

@@ -141,6 +141,7 @@ export async function GET(request: NextRequest) {
   const base = request.nextUrl.origin;
 
   let destination = "/dashboard";
+  let hasGoogleServiceScopes = false;
 
   if (code) {
     const supabase = await createClient();
@@ -150,6 +151,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (data.session?.provider_token) {
+      hasGoogleServiceScopes = true;
       try {
         if (FEATURES.PLATFORM_MODE) {
           if (data.session.provider_refresh_token && data.user) {
@@ -172,6 +174,16 @@ export async function GET(request: NextRequest) {
 
   if (nextParam && nextParam.startsWith("/") && !nextParam.startsWith("//")) {
     destination = nextParam;
+  }
+
+  // Re-running Google sign-in from "Connect Google Services" in the
+  // dashboard (see components/dashboard/AnalyticsPanel.tsx) lands here too
+  // — reuse the exact toast/tab-switch signal the manual OAuth flow uses
+  // (google-analytics/callback/route.ts's ga_connected=1) so both paths
+  // feel identical to the user, instead of silently landing back with no
+  // feedback that anything happened.
+  if (hasGoogleServiceScopes && destination === "/dashboard") {
+    return NextResponse.redirect(`${base}${destination}?ga_connected=1`);
   }
 
   return NextResponse.redirect(`${base}${destination}`);
