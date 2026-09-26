@@ -132,9 +132,30 @@ export default function ProvidersProvider({ children }: { children: React.ReactN
     [persistCache, state]
   );
 
-  const connectedModels = PROVIDER_DEFS.filter((p) => state[p.id]?.connected).flatMap((p) =>
-    p.models.map((m) => ({ providerId: p.id, providerName: p.name, model: m }))
-  );
+  const connectedModels = PROVIDER_DEFS.filter(
+    (p) => state[p.id]?.connected || platformProviders.includes(p.id)
+  ).flatMap((p) => p.models.map((m) => ({ providerId: p.id, providerName: p.name, model: m })));
+
+  // When nothing is BYOK-connected but the operator has a platform key live,
+  // default primaryModel to that provider's first model so chat/agents work
+  // the instant a hosted user lands — no "connect a provider first" dead end
+  // (see app/api/chat/route.ts's own platform-key fallback, which this keeps
+  // in sync with).
+  useEffect(() => {
+    if (!loading && !primaryModel && connectedModels.length > 0) {
+      const model = connectedModels[0].model;
+      setPrimaryModelState(model);
+      persistCache(state, model);
+      fetch("/api/providers", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ primaryModel: model }),
+      }).catch(() => {
+        // best-effort; local state already updated
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, primaryModel, connectedModels.length]);
 
   return (
     <ProvidersCtx.Provider
