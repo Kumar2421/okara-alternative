@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { Check, ExternalLink, Sparkles } from "lucide-react";
+import { Check, ExternalLink, Sparkles, AlertTriangle } from "lucide-react";
 import type { Provider } from "@/lib/mock-providers";
 import { useProviders } from "@/lib/providers-store";
 import { useToast } from "@/components/dashboard/Toast";
 import BrandIcon from "@/components/settings/BrandIcon";
+import { FEATURES } from "@/lib/features";
 
 export default function ProviderCard({ provider }: { provider: Provider }) {
   const { state, connect, disconnect, primaryModel, setPrimaryModel, platformProviders } = useProviders();
@@ -23,6 +24,16 @@ export default function ProviderCard({ provider }: { provider: Provider }) {
   // Same honesty pattern as GmailCard: only shown once the operator has
   // actually configured it, never assumed.
   const isPlatformIncluded = platformProviders.includes(provider.id) && !isConnected;
+  // LM Studio and Ollama are inherently local — they only ever describe "a
+  // server running on this machine" (see mock-providers.ts's own copy:
+  // "no key needed, just a host URL"). In self-host mode that's the same
+  // machine the browser is on — a real connection. In hosted/platform mode
+  // the request runs on Vercel's servers instead, so "http://localhost:1234"
+  // resolves to the SERVER's own loopback, never the user's laptop — always
+  // fails. Block these two specifically in platform mode; "custom" is left
+  // alone since a hosted BYOK user can legitimately point it at their own
+  // real remote OpenAI-compatible endpoint, not just localhost.
+  const blockedInPlatformMode = FEATURES.PLATFORM_MODE && (provider.id === "lmstudio" || provider.id === "ollama");
 
   const [busy, setBusy] = useState(false);
 
@@ -148,6 +159,12 @@ export default function ProviderCard({ provider }: { provider: Provider }) {
               </button>
             </div>
           </details>
+        </div>
+      ) : blockedInPlatformMode ? (
+        <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-800">
+          <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+          {provider.name} only runs on your own machine — not reachable from a hosted deployment. Available in
+          self-host mode only.
         </div>
       ) : (
         <div className="space-y-2">

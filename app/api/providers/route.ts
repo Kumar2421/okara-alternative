@@ -96,6 +96,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Provide an API key or a base URL" }, { status: 400 });
   }
 
+  // LM Studio/Ollama describe a server on the CALLER's own machine — in
+  // platform mode this API route runs on Vercel's servers, so accepting one
+  // here would silently save a connection that can never actually be
+  // reached (see ProviderCard.tsx's matching UI-level block for the full
+  // reasoning). Reject server-side too, not just hide the form client-side.
+  if (FEATURES.PLATFORM_MODE && (body.providerId === "lmstudio" || body.providerId === "ollama")) {
+    return NextResponse.json(
+      { error: `${body.providerId} only runs on your own machine — not available on a hosted deployment.` },
+      { status: 400 }
+    );
+  }
+
   if (FEATURES.PLATFORM_MODE) {
     const user = await requireUser();
     if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
