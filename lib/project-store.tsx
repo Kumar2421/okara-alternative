@@ -56,19 +56,19 @@ async function maybeDiscoverCompetitors(
   log: (text: string) => void,
   primaryModel: string | null,
   onAdded: () => void
-): Promise<void> {
+): Promise<boolean> {
   try {
     const settingsRes = await fetch("/api/settings");
     const settingsData = await settingsRes.json();
     const toggle = settingsData.settings?.find((s: { key: string; value: string }) => s.key === "auto_discover_competitors");
-    if (toggle?.value === "0") return;
+    if (toggle?.value === "0") return false;
 
     if (!primaryModel) {
       log("Skipping competitor discovery — connect a model in Settings to enable it.");
-      return;
+      return false;
     }
     const providerId = findProviderForModel(primaryModel);
-    if (!providerId) return;
+    if (!providerId) return false;
 
     log("Looking for real competitors...");
     // Explicit projectId — this runs as a background continuation after
@@ -86,7 +86,7 @@ async function maybeDiscoverCompetitors(
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       log(`Couldn't auto-discover competitors (${err.error ?? "unknown error"}) — add them manually in the Context panel.`);
-      return;
+      return false;
     }
 
     const data = await res.json();
@@ -97,7 +97,7 @@ async function maybeDiscoverCompetitors(
           ? "No confident competitors found yet — add some manually in the Context panel."
           : "No Tavily key connected, so I only had existing site data to go on — no confident competitors found. Add some manually, or connect Tavily in Settings for deeper discovery."
       );
-      return;
+      return false;
     }
 
     const names = added.map((a) => a.url.replace(/^https?:\/\//, "")).join(", ");
@@ -105,9 +105,104 @@ async function maybeDiscoverCompetitors(
       `${data.usedWebSearch ? "Searched the web and found" : "Based on your site's own content, found"} ${added.length} real competitor${added.length === 1 ? "" : "s"}: ${names}.`
     );
     onAdded();
+    return true;
   } catch {
     log("Couldn't reach the competitor discovery service — add competitors manually in the Context panel.");
+    return false;
   }
+}
+
+/** Same stream → accumulate → POST /save shape as DocumentPanel.tsx's
+ * handleGenerate — every /api/project/documents/<doc>/route.ts POST always
+ * streams (see e.g. ProductInfoGenerator.generate's stream: true), so
+ * nothing is persisted until whoever reads the stream saves it, exactly
+ * like a user manually clicking "Generate" in the Context panel would.
+ * Runs sequentially by design (not Promise.all): several docs are
+ * grounded in an earlier one (Marketing Strategy reads Product Info,
+ * Content Strategy reads all three, Design Guide reads Marketing
+ * Strategy) — see each Generator's own comments — so generating them out
+ * of order would silently produce weaker, ungrounded documents. */
+async function generateAndSaveDocument(
+  apiPath: string,
+  title: string,
+  model: string,
+  providerId: string,
+  log: (text: string) => void
+): Promise<boolean> {
+  const base = `/api/project/documents/${apiPath}`;
+  try {
+    const res = await fetch(base, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model, providerId }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      log(`Couldn't auto-generate ${title} (${data.error ?? "unknown error"}) — generate it manually in the Context panel.`);
+      return false;
+    }
+
+    const reader = res.body?.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let finalContent = "";
+    if (reader) {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        finalContent += decoder.decode(value, { stream: true });
+      }
+    }
+
+    if (!finalContent) return false;
+
+    await fetch(`${base}/save`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: finalContent }),
+    });
+    log(`${title} ready.`);
+    return true;
+  } catch {
+    log(`Couldn't auto-generate ${title} — generate it manually in the Context panel.`);
+    return false;
+  }
+}
+
+/** Runs right after a new project's crawl + competitor discovery finish —
+ * generates every Context document a user would otherwise have to click
+ * "Generate" for one by one (see ContextPanel.tsx's DOCUMENTS list). Same
+ * grounding order the manual flow relies on: Product Info first, then
+ * Marketing Strategy (reads Product Info), then Competitor Analysis (only
+ * if at least one competitor exists — the route 422s otherwise, matching
+ * the manual "Add a competitor first" gate), then Content Strategy (reads
+ * all three), then Design Guide (reads Marketing Strategy). Each step is
+ * independent of the others failing — one document erroring (e.g. a
+ * transient LLM timeout) shouldn't block the rest from being generated. */
+async function autoGenerateContextDocuments(
+  primaryModel: string | null,
+  hasCompetitors: boolean,
+  log: (text: string) => void,
+  logDone: (text: string) => void
+): Promise<void> {
+  if (!primaryModel) {
+    log("Skipping auto-generated context documents — connect a model in Settings to enable it.");
+    return;
+  }
+  const providerId = findProviderForModel(primaryModel);
+  if (!providerId) return;
+
+  log("Writing your Context documents — Product Information, Marketing Strategy, Content Strategy, and Design Guide...");
+  await generateAndSaveDocument("product-info", "Product Information", primaryModel, providerId, log);
+  await generateAndSaveDocument("marketing-strategy", "Marketing Strategy", primaryModel, providerId, log);
+  if (hasCompetitors) {
+    await generateAndSaveDocument("competitor-analysis", "Competitor Analysis", primaryModel, providerId, log);
+  } else {
+    log("Skipping Competitor Analysis — no competitors found or added yet.");
+  }
+  await generateAndSaveDocument("content-strategy", "Content Strategy", primaryModel, providerId, log);
+  await generateAndSaveDocument("design-guide", "Design Guide", primaryModel, providerId, log);
+  logDone("Context documents ready — review and edit anytime in the Context panel.");
 }
 
 const ProjectCtx = createContext<Ctx | null>(null);
@@ -214,7 +309,13 @@ export default function ProjectProvider({ children }: { children: React.ReactNod
           }
         }
 
-        await maybeDiscoverCompetitors(data.project.id, log, primaryModel, () => setCompetitorsVersion((v) => v + 1));
+        const hasCompetitors = await maybeDiscoverCompetitors(
+          data.project.id,
+          log,
+          primaryModel,
+          () => setCompetitorsVersion((v) => v + 1)
+        );
+        await autoGenerateContextDocuments(primaryModel, hasCompetitors, log, logDone);
       }
 
       logDone("Done!");
