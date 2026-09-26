@@ -69,7 +69,12 @@ export const providers: Provider[] = [
     color: "#f55036",
     keyPlaceholder: "gsk_...",
     docsUrl: "https://console.groq.com/keys",
-    models: ["llama-3.3-70b", "mixtral-8x7b"],
+    // llama-3.3-70b-versatile was deprecated/shut down by Groq on 08/16/26;
+    // openai/gpt-oss-120b is their own recommended replacement (see
+    // console.groq.com/docs/deprecations). qwen/qwen3-32b kept as a fast
+    // free-tier fallback. Re-verify against console.groq.com/docs/models
+    // before assuming any Groq model id is still live -- they deprecate fast.
+    models: ["openai/gpt-oss-120b", "qwen/qwen3-32b"],
   },
   {
     id: "xai",
