@@ -12,6 +12,7 @@ import { FEATURES } from "@/lib/features";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
 import { chargeCredits, InsufficientCreditsError } from "@/lib/credits";
+import { PLATFORM_PROVIDER_KEYS } from "@/lib/llm/platformKeys";
 
 // Vercel: LLM/crawl calls can run past the 10s default — allow up to the
 // platform max for this route (Hobby plan caps at 60s; Pro allows more).
@@ -117,33 +118,31 @@ export async function POST(req: NextRequest) {
       .eq("user_id", user.id)
       .eq("provider_id", providerId)
       .maybeSingle();
-    if (!conn?.api_key_secret_id) {
-      return NextResponse.json(
-        { error: `${providerId} isn't connected yet. Connect it in Settings → LLM Providers.` },
-        { status: 422 }
-      );
-    }
 
-    const { data: secret } = await db.rpc("vault_get_secret", { p_id: conn.api_key_secret_id });
-    const apiKey = (secret as string) ?? "";
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: `${providerId} isn't connected yet. Connect it in Settings → LLM Providers.` },
-        { status: 422 }
-      );
-    }
+    let apiKey = "";
+    let baseUrl: string | undefined;
 
-    // Charge once per message sent, before the model call — there's no
-    // streaming here (a plain JSON reply), so unlike articles/generate
-    // there's no "charge before starting the stream" split; this is just
-    // "charge before attempting the generation".
-    try {
-      await chargeCredits(user.id, "chat_message", { model });
-    } catch (err) {
-      if (err instanceof InsufficientCreditsError) {
-        return NextResponse.json({ error: "Out of credits. Upgrade or connect your own key." }, { status: 402 });
+    if (conn?.api_key_secret_id) {
+      const { data: secret } = await db.rpc("vault_get_secret", { p_id: conn.api_key_secret_id });
+      apiKey = (secret as string) ?? "";
+      baseUrl = conn.base_url ?? undefined;
+    } else if (PLATFORM_PROVIDER_KEYS[providerId]) {
+      // Closed-source: platform-provided key, metered via credits — same
+      // BYOK-first-then-platform-key fallback as articles/generate.
+      try {
+        await chargeCredits(user.id, "chat_message", { model });
+      } catch (err) {
+        if (err instanceof InsufficientCreditsError) {
+          return NextResponse.json({ error: "Out of credits. Upgrade or connect your own key." }, { status: 402 });
+        }
+        throw err;
       }
-      throw err;
+      apiKey = PLATFORM_PROVIDER_KEYS[providerId]!;
+    } else {
+      return NextResponse.json(
+        { error: `${providerId} isn't connected yet. Connect it in Settings → LLM Providers.` },
+        { status: 422 }
+      );
     }
 
     try {
@@ -153,7 +152,7 @@ export async function POST(req: NextRequest) {
         model,
         system,
         messages: [...(history ?? []), { role: "user", content: message }],
-        baseUrl: conn.base_url ?? undefined,
+        baseUrl,
       });
       return NextResponse.json({ reply: result.text });
     } catch (err) {

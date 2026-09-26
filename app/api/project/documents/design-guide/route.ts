@@ -8,19 +8,13 @@ import { FEATURES } from "@/lib/features";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
 import { chargeCredits, InsufficientCreditsError } from "@/lib/credits";
+import { PLATFORM_PROVIDER_KEYS } from "@/lib/llm/platformKeys";
 
 // Vercel: LLM/crawl calls can run past the 10s default — allow up to the
 // platform max for this route (Hobby plan caps at 60s; Pro allows more).
 export const maxDuration = 60;
 
 const DOC_TYPE = "design_guide";
-
-/** Server-only, closed-source: platform-provided free-tier keys. Never
- * present in .env.opensource — self-host users always BYOK. */
-const PLATFORM_PROVIDER_KEYS: Record<string, string | undefined> = {
-  groq: process.env.GROQ_API_KEY,
-  mistral: process.env.MISTRAL_API_KEY,
-};
 
 export async function GET() {
   if (FEATURES.PLATFORM_MODE) {

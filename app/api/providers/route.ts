@@ -3,6 +3,7 @@ import { getDb } from "@/lib/db";
 import { FEATURES } from "@/lib/features";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
+import { PLATFORM_PROVIDER_KEYS } from "@/lib/llm/platformKeys";
 
 /**
  * Provider connection registry (BYOK LLM keys).
@@ -48,7 +49,15 @@ export async function GET() {
       keyPreview: r.key_preview,
     }));
 
-    return NextResponse.json({ connections, primaryModel: setting?.value ?? null });
+    return NextResponse.json({
+      connections,
+      primaryModel: setting?.value ?? null,
+      // Providers the platform operator has configured a shared key for —
+      // never the key itself, just which ids are usable without BYOK. Lets
+      // the LLM Providers UI show "Included with your plan" instead of a
+      // key-entry form for these, same honesty pattern as GmailCard.
+      platformProviders: Object.keys(PLATFORM_PROVIDER_KEYS).filter((id) => PLATFORM_PROVIDER_KEYS[id]),
+    });
   }
 
   const db = getDb();
@@ -69,7 +78,7 @@ export async function GET() {
     | { value: string }
     | undefined;
 
-  return NextResponse.json({ connections, primaryModel: primaryModel?.value ?? null });
+  return NextResponse.json({ connections, primaryModel: primaryModel?.value ?? null, platformProviders: [] });
 }
 
 export async function POST(req: NextRequest) {

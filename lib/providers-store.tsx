@@ -15,6 +15,7 @@ type Ctx = {
   state: ProvidersState;
   primaryModel: string | null;
   loading: boolean;
+  platformProviders: string[];
   setPrimaryModel: (model: string) => void;
   connect: (providerId: string, apiKey: string, baseUrl?: string) => Promise<void>;
   disconnect: (providerId: string) => Promise<void>;
@@ -34,6 +35,7 @@ export default function ProvidersProvider({ children }: { children: React.ReactN
   const [state, setState] = useState<ProvidersState>({});
   const [primaryModel, setPrimaryModelState] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [platformProviders, setPlatformProviders] = useState<string[]>([]);
 
   const persistCache = useCallback((next: ProvidersState, primary: string | null) => {
     try {
@@ -62,6 +64,7 @@ export default function ProvidersProvider({ children }: { children: React.ReactN
         (data: {
           connections: { providerId: string; keyPreview: string; baseUrl?: string }[];
           primaryModel: string | null;
+          platformProviders?: string[];
         }) => {
           const next: ProvidersState = {};
           for (const c of data.connections) {
@@ -70,6 +73,7 @@ export default function ProvidersProvider({ children }: { children: React.ReactN
           }
           setState(next);
           setPrimaryModelState(data.primaryModel);
+          setPlatformProviders(data.platformProviders ?? []);
           persistCache(next, data.primaryModel);
         }
       )
@@ -134,7 +138,7 @@ export default function ProvidersProvider({ children }: { children: React.ReactN
 
   return (
     <ProvidersCtx.Provider
-      value={{ state, primaryModel, loading, setPrimaryModel, connect, disconnect, connectedModels }}
+      value={{ state, primaryModel, loading, platformProviders, setPrimaryModel, connect, disconnect, connectedModels }}
     >
       {children}
     </ProvidersCtx.Provider>
