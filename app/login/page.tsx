@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Mail, Lock, CheckCircle2 } from "lucide-react";
 import { DotLottieReact } from "@lottiefiles/dotlottie-react";
@@ -41,12 +41,17 @@ function MarloMark({ className }: { className?: string }) {
 
 export default function LoginPage() {
   const router = useRouter();
-  const [mode, setMode] = useState<Mode>("signin");
+  const [mode, setMode] = useState<Mode>(() =>
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("mode") === "signup"
+      ? "signup"
+      : "signin",
+  );
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);\n\n  useEffect(() => {\n    const requestedMode = new URLSearchParams(window.location.search).get("mode");\n    if (requestedMode === "signup") setMode("signup");\n  }, []);
+  const [isLoading, setIsLoading] = useState(false);
 
   const isSignUp = mode === "signup";
 
