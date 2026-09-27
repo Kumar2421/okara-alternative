@@ -25,11 +25,7 @@ type ProjectRow = {
 };
 
 export async function GET() {
-  if (FEATURES.PLATFORM_MODE) {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-
+  if (FEATURES.PLATFORM_MODE && platformUserId) {
     const db = createServiceClient();
 
     const { data: projects, error } = await db
@@ -67,6 +63,14 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
   if (!body || typeof body.name !== "string" || !body.name.trim() || typeof body.url !== "string" || !body.url.trim()) {
     return NextResponse.json({ error: "name and url are required" }, { status: 400 });
+  }
+
+  let platformUserId: string | null = null;
+  if (FEATURES.PLATFORM_MODE) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    platformUserId = user.id;
   }
 
   let url = body.url.trim();
@@ -108,13 +112,13 @@ export async function POST(req: NextRequest) {
 
     const { data: inserted, error } = await db
       .from("projects")
-      .insert({ owner_id: user.id, name, category, description, url, created_at: now, updated_at: now })
+      .insert({ owner_id: platformUserId, name, category, description, url, created_at: now, updated_at: now })
       .select("id, name, category, description, url, created_at, updated_at")
       .single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
     const { error: settingError } = await db.from("user_settings").upsert(
-      { user_id: user.id, key: "active_project_id", value: inserted.id, updated_at: now },
+      { user_id: platformUserId, key: "active_project_id", value: inserted.id, updated_at: now },
       { onConflict: "user_id,key" }
     );
     if (settingError) return NextResponse.json({ error: settingError.message }, { status: 500 });
