@@ -7,13 +7,6 @@ import { FEATURES } from "@/lib/features";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
 
-/**
- * Real multi-project support: `projects` can hold many rows, `active_project_id`
- * in the settings table (see getActiveProjectId.ts) says which one is live.
- * GET returns both the active project and the full list, so the header's
- * project switcher can render real saved projects, not just one.
- */
-
 type ProjectRow = {
   id: string;
   name: string;
@@ -27,7 +20,9 @@ type ProjectRow = {
 export async function GET() {
   if (FEATURES.PLATFORM_MODE) {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
     const db = createServiceClient();
@@ -69,6 +64,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "name and url are required" }, { status: 400 });
   }
 
+  let platformUserId: string | null = null;
+  if (FEATURES.PLATFORM_MODE) {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    platformUserId = user.id;
+  }
+
   let url = body.url.trim();
   if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
 
@@ -79,9 +84,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Invalid URL" }, { status: 400 });
   }
 
-  // Reject an unreachable URL before it's ever saved — there's no
-  // delete-project capability yet, so a typo'd/dead URL saved here would sit
-  // there permanently instead of surfacing a clear error at creation time.
   const { reachable, status } = await checkUrlReachable(validated.toString());
   if (!reachable) {
     return NextResponse.json(
@@ -99,30 +101,22 @@ export async function POST(req: NextRequest) {
   const description = typeof body.description === "string" ? body.description.trim() : "";
 
   if (FEATURES.PLATFORM_MODE) {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-
     const db = createServiceClient();
     const now = new Date().toISOString();
 
     const { data: inserted, error } = await db
       .from("projects")
-      .insert({ owner_id: user.id, name, category, description, url, created_at: now, updated_at: now })
+      .insert({ owner_id: platformUserId, name, category, description, url, created_at: now, updated_at: now })
       .select("id, name, category, description, url, created_at, updated_at")
       .single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
     const { error: settingError } = await db.from("user_settings").upsert(
-      { user_id: user.id, key: "active_project_id", value: inserted.id, updated_at: now },
+      { user_id: platformUserId, key: "active_project_id", value: inserted.id, updated_at: now },
       { onConflict: "user_id,key" }
     );
     if (settingError) return NextResponse.json({ error: settingError.message }, { status: 500 });
 
-    // Self-host also mirrors the active project's url into a shared
-    // `project_url` setting so every agent route can do one cheap lookup.
-    // In platform mode, agent routes resolve the active project through
-    // getActiveProjectContextSupabase instead — no equivalent setting needed.
     return NextResponse.json({ project: inserted });
   }
 
@@ -137,10 +131,6 @@ export async function POST(req: NextRequest) {
 
   setActiveProjectId(id);
 
-  // Keep the shared project_url setting in sync — every agent route (SEO,
-  // GitHub, etc.) already reads project_url from the settings table, so this
-  // is what actually makes "add a link, everything else fetches fresh" true
-  // without rewriting every agent route's lookup key.
   db.prepare(
     `INSERT INTO settings (key, value) VALUES ('project_url', @url)
      ON CONFLICT(key) DO UPDATE SET value = @url`
