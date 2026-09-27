@@ -11,6 +11,15 @@ export type OAuthState = {
 };
 
 export async function createOAuthState(db: SupabaseClient, userId: string, input: OAuthState): Promise<string> {
+  const { data: project, error: projectError } = await db
+    .from("projects")
+    .select("id")
+    .eq("id", input.projectId)
+    .eq("owner_id", userId)
+    .maybeSingle();
+  if (projectError) throw new Error(projectError.message);
+  if (!project) throw new Error("Project does not belong to the authenticated user.");
+
   const state = crypto.randomBytes(32).toString("hex");
   const { error } = await db.from("integration_oauth_states").insert({
     state,
