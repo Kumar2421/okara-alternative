@@ -140,7 +140,7 @@ export default function AuditPage() {
                   Create a Marlo account to save findings, get recommendations, and recheck improvements.
                 </p>
               </div>
-              <Link href="/login?mode=signup" className="shrink-0 rounded-lg bg-white px-5 py-2.5 text-sm font-medium text-black">
+              <Link href={`/login?mode=signup&url=${encodeURIComponent(result.url)}`} className="shrink-0 rounded-lg bg-white px-5 py-2.5 text-sm font-medium text-black">
                 Create free account
               </Link>
             </div>
