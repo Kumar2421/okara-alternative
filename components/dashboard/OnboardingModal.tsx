@@ -57,7 +57,9 @@ export default function OnboardingModal({ onDone }: { onDone: () => void }) {
 
   const [source, setSource] = useState(SOURCE_OPTIONS[0]);
   const [role, setRole] = useState(ROLE_OPTIONS[0]);
-  const [url, setUrl] = useState("");
+  const [url, setUrl] = useState(() =>
+    typeof window !== "undefined" ? localStorage.getItem("marlo:pending-audit-url") ?? "" : "",
+  );
   const [saving, setSaving] = useState(false);
 
   async function handleContinue() {
@@ -73,6 +75,7 @@ export default function OnboardingModal({ onDone }: { onDone: () => void }) {
         saveSetting("onboarding_completed", "true"),
       ]);
       await createProject({ name: deriveProjectName(url.trim()), url: url.trim() });
+      localStorage.removeItem("marlo:pending-audit-url");
       onDone();
     } catch (err) {
       show(err instanceof Error ? err.message : "Failed to set up your site.");
