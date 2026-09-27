@@ -22,7 +22,7 @@ const SCOPES = [
 
 export type GmailTokens = { accessToken: string; refreshToken?: string; expiresAt: number };
 
-export function buildAuthUrl(redirectUri: string): string {
+export function buildAuthUrl(redirectUri: string, state?: string): string {
   const clientId = process.env.GMAIL_CLIENT_ID;
   if (!clientId) throw new Error("GMAIL_CLIENT_ID not set — add it in Settings → API Credentials, then restart the server.");
 
@@ -33,6 +33,7 @@ export function buildAuthUrl(redirectUri: string): string {
   url.searchParams.set("scope", SCOPES.join(" "));
   url.searchParams.set("access_type", "offline");
   url.searchParams.set("prompt", "consent"); // forces a real refresh_token every time, not just on first-ever consent
+  if (state) url.searchParams.set("state", state);
   return url.toString();
 }
 

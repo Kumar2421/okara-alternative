@@ -5,6 +5,9 @@ import { FEATURES } from "@/lib/features";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
 import { chargeCredits, InsufficientCreditsError } from "@/lib/credits";
+import { upsertFinding as upsertFindingSupabase } from "@/lib/domain/findings/findingStoreSupabase";
+import { upsertFinding } from "@/lib/domain/findings/findingStore";
+import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
 
 // Vercel: LLM/crawl calls can run past the 10s default — allow up to the
 // platform max for this route (Hobby plan caps at 60s; Pro allows more).
@@ -34,6 +37,14 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
     const projectId = projectSetting?.value ?? null;
     if (!projectId) return NextResponse.json({ error: "No active project." }, { status: 422 });
+
+    const { data: project } = await db
+      .from("projects")
+      .select("url")
+      .eq("id", projectId)
+      .eq("owner_id", user.id)
+      .maybeSingle();
+    if (!project?.url) return NextResponse.json({ error: "Active project not found." }, { status: 404 });
 
     // Credit-metered — charge before running the crawl so a user out of
     // credits doesn't pay for the (potentially slow) real crawl work.
@@ -72,6 +83,20 @@ export async function POST(req: NextRequest) {
       );
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+      for (const finding of auditResult.findings) {
+        await upsertFindingSupabase(db, user.id, {
+          projectId,
+          source: "seo-audit",
+          category: finding.category,
+          severity: finding.severity === "Error" ? "critical" : "warning",
+          entityType: "page-issue",
+          entityId: finding.issueId,
+          url: auditResult.url,
+          evidence: { label: finding.label, ...finding.evidence },
+          recommendation: "Fix the reported issue and re-run the audit to verify the change.",
+        });
+      }
+
       return NextResponse.json(auditResult);
     } catch (err) {
       // Note: credits already charged — no refund path yet on audit
@@ -96,6 +121,20 @@ export async function POST(req: NextRequest) {
     const auditResult = await agent.audit(url);
 
     const createdAt = new Date().toISOString();
+
+    for (const finding of auditResult.findings) {
+      upsertFinding({
+        projectId: getActiveProjectId()!,
+        source: "seo-audit",
+        category: finding.category,
+        severity: finding.severity === "Error" ? "critical" : "warning",
+        entityType: "page-issue",
+        entityId: finding.issueId,
+        url: auditResult.url,
+        evidence: { label: finding.label, ...finding.evidence },
+        recommendation: "Fix the reported issue and re-run the audit to verify the change.",
+      });
+    }
 
     db.prepare(`
       INSERT INTO seo_audits (url, payload, created_at)

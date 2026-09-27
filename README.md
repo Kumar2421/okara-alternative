@@ -20,12 +20,6 @@
 > affiliated with, endorsed by, or derived from Okara's proprietary source. Every feature here is grounded
 > in real crawled data and real API calls — no mock data pretending to be real, no invented content
 > dressed up as AI output.
->
-> **Want the hosted, production-ready version instead?** Go straight to the official
-> **[okara.ai](https://okara.ai)** — this repo is for people who want to run their own, inspect every
-> line, and bend it to their own stack.
-
----
 
 ## ✨ Features
 
@@ -37,8 +31,8 @@ what does the work.
 ### 📄 Real strategy documents, not filler text
 Five AI-generated documents per project — **Product Information, Marketing Strategy, Competitor Analysis,
 Content Strategy, Design Guide** — every one grounded in an actual crawl of your site (with a real
-headless-render fallback via Jina AI Reader for JS-heavy SPAs), never inventing a pricing tier, a customer
-segment, or a hex code it wasn't given. When the page doesn't say it, the document says so.
+headless-render fallback via Jina AI Reader for JS-heavy SPAs), never inventing a pricing tier, a
+customer segment, or a hex code it wasn't given. When the page doesn't say it, the document says so.
 
 ### 🔍 Automatic competitor discovery
 Point it at your site and it finds real competitors — web-search-grounded (via Tavily) when connected,
@@ -70,6 +64,8 @@ terminal log. If something fails, you see the real error, not a spinner that qui
 
 ## 🚀 Quick Start
 
+### Self-host
+
 ```bash
 git clone https://github.com/Kumar2421/okara-alternative.git
 cd okara-alternative
@@ -77,21 +73,21 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000), connect at least one LLM provider from
-**Settings → LLM Providers**, then add your first project from the top project switcher. That's it — no
-`.env` file required to get started. Everything (provider keys, PageSpeed/Tavily keys, project data) lives
-in a local SQLite database (`data/okara.db`, gitignored) that never leaves your machine.
+Self-host mode stores project data and provider configuration in local SQLite at `data/okara.db`.
 
-**Optional, for the full experience:**
-| Key | Unlocks |
+### Hosted platform
+
+The hosted build uses Supabase for authenticated, project-scoped persistence. Configure:
+
+| Variable | Purpose |
 |---|---|
-| A LLM provider key (or a local LM Studio/Ollama endpoint) | Everything — this is the only hard requirement |
-| [Google PageSpeed Insights](https://developers.google.com/speed/docs/insights/v5/get-started) | Real Lighthouse scores & Core Web Vitals |
-| [Tavily](https://app.tavily.com) | Web-search-grounded competitor discovery, Competitor Analysis, Content Strategy, and the GEO citation check |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Browser/server Supabase client |
+| `SUPABASE_SECRET_KEY` | Server-only trusted database access |
 
-Gmail outreach, GA4/Search Console (Traffic tab), and automatic Google Cloud API key creation all need
-a Google OAuth client first — see **[docs/google-cloud-setup.md](docs/google-cloud-setup.md)** for the
-exact Console setup (redirect URIs, APIs to enable, test users, troubleshooting).
+Do not expose `SUPABASE_SECRET_KEY` to client code.
+
+See [docs/production-readiness.md](docs/production-readiness.md) for the production runtime contract and acceptance gate.
 
 ---
 
@@ -99,16 +95,16 @@ exact Console setup (redirect URIs, APIs to enable, test users, troubleshooting)
 
 ```
 Next.js 16 (App Router) — one app, frontend + API routes, one deploy target
-├── app/api/**              real backend logic, no separate service to run
-├── lib/llm/*                one driver per provider behind a shared interface
-├── lib/domain/**            agents & generators — SEOAgent, competitor discovery,
-│                            the 5 document generators, GEO/link checkers
-├── lib/db.ts                SQLite (better-sqlite3) — a single portable file
-└── components/**            hand-built UI, no component-kit lock-in
+├── app/api/**                 real backend logic
+├── lib/llm/*                  provider drivers behind a shared interface
+├── lib/domain/**               agents & generators
+├── self-host: lib/db.ts        local SQLite persistence
+├── platform: Supabase          authenticated Postgres persistence
+└── components/**               hand-built UI
 ```
 
-No Python, no separate backend service, no hosted database to provision. Clone it, `npm install`, and
-it runs — the whole point of "self-hostable."
+The self-host and platform persistence paths are intentionally separate. A hosted platform deployment
+must not silently fall back to local SQLite.
 
 ---
 
