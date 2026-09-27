@@ -35,6 +35,16 @@ export async function createAction(db: SupabaseClient, userId: string, input: {
 }): Promise<Action> {
   const { data: project } = await db.from("projects").select("id").eq("id", input.projectId).eq("owner_id", userId).maybeSingle();
   if (!project) throw new Error("Project not found.");
+
+  const { data: finding } = await db
+    .from("findings")
+    .select("id")
+    .eq("id", input.findingId)
+    .eq("project_id", input.projectId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (!finding) throw new Error("Finding not found.");
+
   const id = "action_" + crypto.randomUUID();
   const { data, error } = await db.from("actions").insert({
     id, project_id: input.projectId, finding_id: input.findingId, recommendation_id: input.recommendationId ?? null,
