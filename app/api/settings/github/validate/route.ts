@@ -1,10 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import { FEATURES } from "@/lib/features";
+import { createClient } from "@/utils/supabase/server";
 import { getRepo } from "@/lib/domain/codefix/githubApi";
 
 /** Real, live check — confirms the PAT is valid and can actually see the
  * repo, before either is saved. Same honesty pattern as project creation's
  * URL-reachability check: don't save something that doesn't work. */
 export async function POST(req: NextRequest) {
+  if (FEATURES.PLATFORM_MODE) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
   const body = await req.json().catch(() => null);
   const pat: string | undefined = body?.pat;
   const repo: string | undefined = body?.repo;
