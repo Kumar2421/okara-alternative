@@ -3,6 +3,8 @@ import { getDb } from "@/lib/db";
 import { FEATURES } from "@/lib/features";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
+import { consumeOAuthState } from "@/lib/domain/integrations/oauthState";
+import { consumeOAuthState as consumeOAuthStateSupabase } from "@/lib/domain/integrations/oauthStateSupabase";
 import { exchangeCodeForTokens, getConnectedEmail } from "@/lib/domain/shared/gmailOAuth";
 
 function upsertSetting(db: ReturnType<typeof getDb>, key: string, value: string) {
@@ -13,14 +15,24 @@ function upsertSetting(db: ReturnType<typeof getDb>, key: string, value: string)
 
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code");
+  const state = req.nextUrl.searchParams.get("state");
   const redirectUri = `${req.nextUrl.origin}/api/auth/gmail/callback`;
   const settingsUrl = `${req.nextUrl.origin}/settings/api-credentials`;
 
-  if (!code) {
+  if (!code || !state) {
     return NextResponse.redirect(`${settingsUrl}?gmail_error=${encodeURIComponent("No authorization code returned")}`);
   }
 
   try {
+    let platformUserId: string | null = null;
+    if (FEATURES.PLATFORM_MODE) {
+      const oauthState = await consumeOAuthStateSupabase(createServiceClient(), state);
+      if (!oauthState) return NextResponse.redirect(`${settingsUrl}?gmail_error=${encodeURIComponent("Gmail authorization expired or was already used. Please reconnect.")}`);
+      platformUserId = oauthState.userId;
+    } else {
+      const oauthState = consumeOAuthState(state);
+      if (!oauthState) return NextResponse.redirect(`${settingsUrl}?gmail_error=${encodeURIComponent("Gmail authorization expired or was already used. Please reconnect.")}`);
+    }
     const tokens = await exchangeCodeForTokens(code, redirectUri);
     if (!tokens.refreshToken) {
       // Google only returns a refresh_token on first-ever consent for this
@@ -35,15 +47,11 @@ export async function GET(req: NextRequest) {
     const email = await getConnectedEmail(tokens.accessToken);
 
     if (FEATURES.PLATFORM_MODE) {
-      const supabase = await createClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return NextResponse.redirect(`${settingsUrl}?gmail_error=${encodeURIComponent("Not authenticated")}`);
-
       const db = createServiceClient();
       const [{ data: accessSecretId, error: accessErr }, { data: refreshSecretId, error: refreshErr }] =
         await Promise.all([
-          db.rpc("vault_set_secret", { p_secret: tokens.accessToken, p_name: `gmail_token:${user.id}:access` }),
-          db.rpc("vault_set_secret", { p_secret: tokens.refreshToken, p_name: `gmail_token:${user.id}:refresh` }),
+          db.rpc("vault_set_secret", { p_secret: tokens.accessToken, p_name: `gmail_token:${platformUserId as string}:access` }),
+          db.rpc("vault_set_secret", { p_secret: tokens.refreshToken, p_name: `gmail_token:${platformUserId as string}:refresh` }),
         ]);
       if (accessErr || refreshErr) {
         const raw = accessErr?.message ?? refreshErr?.message ?? "Failed to store token in Vault";
@@ -52,7 +60,7 @@ export async function GET(req: NextRequest) {
 
       const { error } = await db.from("integration_connections").upsert(
         {
-          user_id: user.id,
+          user_id: platformUserId as string,
           project_id: null,
           provider: "gmail",
           access_token_secret_id: accessSecretId as string,
