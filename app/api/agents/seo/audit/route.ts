@@ -7,6 +7,7 @@ import { createServiceClient } from "@/utils/supabase/serviceClient";
 import { chargeCredits, InsufficientCreditsError } from "@/lib/credits";
 import { upsertFinding as upsertFindingSupabase } from "@/lib/domain/findings/findingStoreSupabase";
 import { upsertFinding } from "@/lib/domain/findings/findingStore";
+import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
 
 // Vercel: LLM/crawl calls can run past the 10s default — allow up to the
 // platform max for this route (Hobby plan caps at 60s; Pro allows more).
