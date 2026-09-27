@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { FEATURES } from "@/lib/features";
+import { createClient } from "@/utils/supabase/server";
 
 /** Real, live check against the WordPress REST API — same honesty pattern
  * as GitHub's validate route: never save a connection that doesn't
@@ -6,6 +8,11 @@ import { NextRequest, NextResponse } from "next/server";
  * OAuth, no expiry, just username + generated app password, verified via
  * a real Basic-Auth call to /wp-json/wp/v2/users/me. */
 export async function POST(req: NextRequest) {
+  if (FEATURES.PLATFORM_MODE) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
   const body = await req.json().catch(() => null);
   const siteUrl: string | undefined = body?.siteUrl;
   const username: string | undefined = body?.username;
