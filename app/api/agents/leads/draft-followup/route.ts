@@ -47,13 +47,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "This lead has no real reply to draft a follow-up from." }, { status: 422 });
     }
 
-    const { data: setting } = await db
-      .from("user_settings")
-      .select("value")
-      .eq("user_id", user.id)
-      .eq("key", "active_project_id")
-      .maybeSingle();
-    const activeId = setting?.value ?? null;
     let projectName: string | undefined;
     if (activeId) {
       const { data: project } = await db
