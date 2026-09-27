@@ -27,10 +27,20 @@ export async function POST(req: NextRequest) {
     if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
     const db = createServiceClient();
+    const { data: setting } = await db
+      .from("user_settings")
+      .select("value")
+      .eq("user_id", user.id)
+      .eq("key", "active_project_id")
+      .maybeSingle();
+    const activeId = setting?.value ?? null;
+    if (!activeId) return NextResponse.json({ error: "No active project." }, { status: 422 });
+
     const { data: lead } = await db
       .from("leads")
       .select("id, name, last_reply_snippet")
       .eq("user_id", user.id)
+      .eq("project_id", activeId)
       .eq("id", leadId)
       .maybeSingle();
     if (!lead?.last_reply_snippet) {
