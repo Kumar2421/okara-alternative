@@ -133,10 +133,20 @@ export async function POST(req: NextRequest) {
     }
     const fromEmail = conn.external_email;
 
+    const { data: setting } = await db
+      .from("user_settings")
+      .select("value")
+      .eq("user_id", user.id)
+      .eq("key", "active_project_id")
+      .maybeSingle();
+    const activeId = setting?.value ?? null;
+    if (!activeId) return NextResponse.json({ error: "No active project." }, { status: 422 });
+
     const { data: leads, error: leadsError } = await db
       .from("leads")
       .select("id, name, company, title, email")
       .eq("user_id", user.id)
+      .eq("project_id", activeId)
       .in("id", leadIds);
     if (leadsError) return NextResponse.json({ error: leadsError.message }, { status: 500 });
 
@@ -183,6 +193,7 @@ export async function POST(req: NextRequest) {
           gmail_message_id: r.messageId ?? null,
         })
         .eq("user_id", user.id)
+        .eq("project_id", activeId)
         .eq("id", r.id);
     }
 
