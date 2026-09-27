@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Mail, Lock, CheckCircle2 } from "lucide-react";
 import { DotLottieReact } from "@lottiefiles/dotlottie-react";
@@ -52,11 +52,6 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-
-  useEffect(() => {
-    const requestedMode = new URLSearchParams(window.location.search).get("mode");
-    if (requestedMode === "signup") setMode("signup");
-  }, []);
 
   const isSignUp = mode === "signup";
 
