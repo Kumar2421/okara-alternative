@@ -53,6 +53,12 @@ export default function LoginPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
+  const getPendingAuditUrl = () => {
+    if (typeof window === "undefined") return null;
+    const url = new URLSearchParams(window.location.search).get("url");
+    return url ? decodeURIComponent(url) : null;
+  };
+
   const isSignUp = mode === "signup";
 
   const toggleMode = () => {
@@ -68,6 +74,8 @@ export default function LoginPage() {
     setNotice(null);
 
     if (isSignUp) {
+      const pendingAuditUrl = getPendingAuditUrl();
+      if (pendingAuditUrl) localStorage.setItem("marlo:pending-audit-url", pendingAuditUrl);
       const supabase = createClient();
       const { data, error: authError } = await supabase.auth.signUp({ email, password });
       if (authError) {
