@@ -92,10 +92,22 @@ export async function GET(req: NextRequest) {
     if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
     const db = createServiceClient();
+    const { data: projSetting } = await db
+      .from("user_settings")
+      .select("value")
+      .eq("user_id", user.id)
+      .eq("key", "active_project_id")
+      .maybeSingle();
+    const projectId = projSetting?.value;
+    if (!projectId) {
+      return NextResponse.json({ articles: [] });
+    }
+
     const { data: articles, error } = await db
       .from("articles")
       .select("*")
       .eq("user_id", user.id)
+      .eq("project_id", projectId)
       .order("created_at", { ascending: false });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
