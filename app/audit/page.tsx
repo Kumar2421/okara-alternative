@@ -30,8 +30,20 @@ function evidenceText(evidence: Record<string, string | number | null>) {
   return values.join(" · ");
 }
 
+function getAuditSessionId() {
+  if (typeof window === "undefined") return undefined;
+  const key = "marlo:audit-session-id";
+  const existing = window.localStorage.getItem(key);
+  if (existing) return existing;
+  const sessionId = crypto.randomUUID();
+  window.localStorage.setItem(key, sessionId);
+  return sessionId;
+}
+
 function trackAuditEvent(payload: AuditFunnelPayload) {
-  const body = JSON.stringify(payload);
+  const sessionId = getAuditSessionId();
+  if (!sessionId) return;
+  const body = JSON.stringify({ ...payload, sessionId });
   if (typeof navigator !== "undefined" && "sendBeacon" in navigator) {
     navigator.sendBeacon("/api/public/audit/events", new Blob([body], { type: "application/json" }));
     return;
