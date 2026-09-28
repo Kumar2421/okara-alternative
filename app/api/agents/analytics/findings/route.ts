@@ -19,6 +19,7 @@ import { applyRecheck, getFinding, listFindings, transitionFinding } from "@/lib
 import { SEOAgent } from "@/lib/domain/seo/SEOAgent";
 import { reconcileSeoAuditRecheck } from "@/lib/domain/seo/reconcileRecheck";
 import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
+import { resolvePlatformApiKey } from "@/lib/domain/shared/resolvePlatformApiKey";
 import { FEATURES } from "@/lib/features";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
@@ -88,21 +89,8 @@ async function runRecheck(finding: { url: string | null; evidence: Record<string
   };
 }
 
-// Same BYOK-then-platform-key pattern as seo/audit/route.ts — a connected
-// PageSpeed key (provider_connections, Vault-backed) wins over the shared
-// server key.
 async function resolvePlatformPageSpeedKey(db: ReturnType<typeof createServiceClient>, userId: string): Promise<string | undefined> {
-  const { data: conn } = await db
-    .from("provider_connections")
-    .select("api_key_secret_id")
-    .eq("user_id", userId)
-    .eq("provider_id", "pagespeed_api_key")
-    .maybeSingle();
-  if (conn?.api_key_secret_id) {
-    const { data: secret } = await db.rpc("vault_get_secret", { p_id: conn.api_key_secret_id });
-    if (secret) return secret as string;
-  }
-  return process.env.PAGESPEED_API_KEY || undefined;
+  return (await resolvePlatformApiKey(db, userId, "pagespeed_api_key")) || process.env.PAGESPEED_API_KEY || undefined;
 }
 
 export async function GET(req: NextRequest) {

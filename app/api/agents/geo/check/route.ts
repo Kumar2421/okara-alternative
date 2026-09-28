@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { checkCitations } from "@/lib/domain/geo/GEOAgent";
 import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
+import { resolvePlatformApiKey } from "@/lib/domain/shared/resolvePlatformApiKey";
 import { FEATURES } from "@/lib/features";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
@@ -54,29 +55,13 @@ export async function POST() {
 
     const db = createServiceClient();
 
-    // Tavily key: same generic BYOK secret store (provider_connections +
-    // Vault) reused for the PageSpeed key in the site-crawl/pagespeed route —
-    // no dedicated schema table exists for non-LLM API keys.
-    const { data: conn } = await db
-      .from("provider_connections")
-      .select("api_key_secret_id")
-      .eq("user_id", user.id)
-      .eq("provider_id", "tavily_api_key")
-      .maybeSingle();
-    if (!conn?.api_key_secret_id) {
+    const tavilyApiKey = await resolvePlatformApiKey(db, user.id, "tavily_api_key");
+    if (!tavilyApiKey) {
       return NextResponse.json(
         { error: "Connect a Tavily API key in Settings → API Credentials to run a real citation check." },
         { status: 422 }
       );
     }
-    const { data: secret, error: secretError } = await db.rpc("vault_get_secret", { p_id: conn.api_key_secret_id });
-    if (secretError || !secret) {
-      return NextResponse.json(
-        { error: "Connect a Tavily API key in Settings → API Credentials to run a real citation check." },
-        { status: 422 }
-      );
-    }
-    const tavilyApiKey = secret as string;
 
     const { data: projectSetting } = await db
       .from("user_settings")
