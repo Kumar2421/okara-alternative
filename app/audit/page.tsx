@@ -162,7 +162,11 @@ export default function AuditPage() {
                   Create a Marlo account to save findings, get recommendations, and recheck improvements.
                 </p>
               </div>
-              <Link\n                href={`/login?mode=signup&url=${encodeURIComponent(result.url)}`}\n                onClick={() => trackAuditEvent({ event: "signup_cta_clicked" })}\n                className="shrink-0 rounded-lg bg-white px-5 py-2.5 text-sm font-medium text-black"\n              >
+              <Link
+                href={`/login?mode=signup&url=${encodeURIComponent(result.url)}`}
+                onClick={() => trackAuditEvent({ event: "signup_cta_clicked" })}
+                className="shrink-0 rounded-lg bg-white px-5 py-2.5 text-sm font-medium text-black"
+              >
                 Create free account
               </Link>
             </div>
