@@ -7,6 +7,7 @@ import { DotLottieReact } from "@lottiefiles/dotlottie-react";
 import { createClient } from "@/utils/supabase/client";
 import { FEATURES } from "@/lib/features";
 import { GOOGLE_ANALYTICS_SCOPES } from "@/lib/googleOAuthScopes";
+import type { AuditFunnelPayload } from "@/lib/analytics/auditFunnel";
 
 type Mode = "signin" | "signup";
 
@@ -37,6 +38,27 @@ function MarloMark({ className }: { className?: string }) {
       <circle cx="18.5" cy="9.5" r="3.2" fill="#111111" />
     </svg>
   );
+}
+
+function trackSignupCompleted() {
+  if (typeof window === "undefined") return;
+  const sessionId = window.localStorage.getItem("marlo:audit-session-id");
+  if (!sessionId) return;
+  const payload: AuditFunnelPayload & { sessionId: string } = {
+    event: "signup_completed",
+    sessionId,
+  };
+  const body = JSON.stringify(payload);
+  if ("sendBeacon" in navigator) {
+    navigator.sendBeacon("/api/public/audit/events", new Blob([body], { type: "application/json" }));
+    return;
+  }
+  void fetch("/api/public/audit/events", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body,
+    keepalive: true,
+  }).catch(() => undefined);
 }
 
 export default function LoginPage() {
@@ -97,9 +119,11 @@ export default function LoginPage() {
       if (authError) {
         setError(authError.message);
       } else if (!data.session) {
+        trackSignupCompleted();
         setNotice("Check your email to confirm your account, then sign in.");
         setMode("signin");
       } else {
+        trackSignupCompleted();
         router.push("/dashboard");
         router.refresh();
       }
