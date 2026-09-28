@@ -17,6 +17,7 @@ import {
 import { deriveSearchFinding } from "@/lib/domain/findings/findingRules";
 import { applyRecheck, getFinding, listFindings, transitionFinding } from "@/lib/domain/findings/findingService";
 import { SEOAgent } from "@/lib/domain/seo/SEOAgent";
+import { reconcileSeoAuditRecheck } from "@/lib/domain/seo/reconcileRecheck";
 import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
 import { FEATURES } from "@/lib/features";
 import { createClient } from "@/utils/supabase/server";
@@ -50,6 +51,22 @@ function projectPageUrl(projectUrl: string, pageUrl: string): URL | null {
   } catch {
     return null;
   }
+}
+
+// SEO-audit findings (source: "seo-audit", entityId: the original issueId)
+// must be rechecked against their own issue, not the unrelated
+// indexable/canonical/relevance/TTFB rule runRecheck() below evaluates for
+// analytics findings — otherwise rechecking e.g. a "meta title too long"
+// finding could mark it "verified" while the title is still too long,
+// because the wrong condition was checked. Re-run the audit and delegate
+// the actual reconciliation to a pure, independently tested function.
+async function runSeoAuditRecheck(
+  finding: { url: string | null; entityId: string; severity: "info" | "warning" | "critical" },
+  pageSpeedApiKey: string | undefined,
+) {
+  if (!finding.url) throw new Error("Finding has no page URL.");
+  const audit = await new SEOAgent(pageSpeedApiKey).audit(finding.url);
+  return reconcileSeoAuditRecheck(finding.entityId, audit.findings, finding.severity);
 }
 
 async function runRecheck(finding: { url: string | null; evidence: Record<string, unknown> }, pageSpeedApiKey: string | undefined) {
@@ -196,19 +213,22 @@ export async function PUT(req: NextRequest) {
       if (!finding) return NextResponse.json({ error: "Finding not found." }, { status: 404 });
 
       if (action === "recheck") {
-        const result = await runRecheck(finding, await resolvePlatformPageSpeedKey(db, user.id));
-        const nextStatus = result.rule ? "failed" : "verified";
+        const pageSpeedApiKey = await resolvePlatformPageSpeedKey(db, user.id);
+        const result = finding.source === "seo-audit"
+          ? await runSeoAuditRecheck(finding, pageSpeedApiKey)
+          : await runRecheck(finding, pageSpeedApiKey).then((r) => ({
+              issueDetected: Boolean(r.rule),
+              severity: r.rule?.severity ?? finding.severity,
+              recommendation: r.rule?.recommendation ?? "Issue no longer detected. Keep the page under observation and re-check if it changes.",
+              evidence: r.evidence,
+            }));
+        const nextStatus = result.issueDetected ? "failed" : "verified";
         const updated = await applyRecheck({
           get: (p, findingId) => getProjectFindingSupabase(db, user.id, p, findingId),
           list: (p) => listProjectFindingsSupabase(db, user.id, p),
           transition: (p, findingId, nextStatus) => updateFindingStatusSupabase(db, user.id, p, findingId, nextStatus),
           refresh: (p, findingId, input) => refreshFindingSupabase(db, user.id, p, findingId, input),
-        }, projectId, id, {
-          severity: result.rule?.severity ?? finding.severity,
-          evidence: result.evidence,
-          recommendation: result.rule?.recommendation ?? "Issue no longer detected. Keep the page under observation and re-check if it changes.",
-          issueDetected: Boolean(result.rule),
-        });
+        }, projectId, id, result);
         return NextResponse.json({ finding: updated, verification: { status: nextStatus, changed: nextStatus === "verified" } });
       }
 
@@ -226,19 +246,22 @@ export async function PUT(req: NextRequest) {
 
     if (action === "recheck") {
       const stored = getDb().prepare("SELECT value FROM settings WHERE key = 'pagespeed_api_key'").get() as { value: string } | undefined;
-      const result = await runRecheck(finding, stored?.value || process.env.PAGESPEED_API_KEY || undefined);
-      const nextStatus = result.rule ? "failed" : "verified";
+      const pageSpeedApiKey = stored?.value || process.env.PAGESPEED_API_KEY || undefined;
+      const result = finding.source === "seo-audit"
+        ? await runSeoAuditRecheck(finding, pageSpeedApiKey)
+        : await runRecheck(finding, pageSpeedApiKey).then((r) => ({
+            issueDetected: Boolean(r.rule),
+            severity: r.rule?.severity ?? finding.severity,
+            recommendation: r.rule?.recommendation ?? "Issue no longer detected. Keep the page under observation and re-check if it changes.",
+            evidence: r.evidence,
+          }));
+      const nextStatus = result.issueDetected ? "failed" : "verified";
       const updated = await applyRecheck({
         get: (p, findingId) => getProjectFinding(p, findingId),
         list: (p) => listProjectFindings(p),
         transition: (p, findingId, nextStatus) => updateFindingStatus(p, findingId, nextStatus),
         refresh: (p, findingId, input) => refreshFinding(p, findingId, input),
-      }, projectId, id, {
-        severity: result.rule?.severity ?? finding.severity,
-        evidence: result.evidence,
-        recommendation: result.rule?.recommendation ?? "Issue no longer detected. Keep the page under observation and re-check if it changes.",
-        issueDetected: Boolean(result.rule),
-      });
+      }, projectId, id, result);
       return NextResponse.json({ finding: updated, verification: { status: nextStatus, changed: nextStatus === "verified" } });
     }
 
