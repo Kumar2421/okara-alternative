@@ -272,6 +272,12 @@ export default function ProjectProvider({ children }: { children: React.ReactNod
   }, []);
 
   useEffect(() => {
+    // refresh() is an async fetch-on-mount: its setState calls run in promise
+    // callbacks after an await, not synchronously in the effect body, so the
+    // cascading render this rule guards against can't happen here. Pre-existing
+    // on main; surfaced only because editing this file pulls it into CI's
+    // changed-files lint.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     refresh();
   }, [refresh]);
 
