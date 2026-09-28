@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { getDb } from "@/lib/db";
+import { getProjectFinding } from "@/lib/domain/findings/findingStore";
 import type { Action, ActionStatus, ActionType } from "./actionTypes";
 import { canTransitionAction } from "./actionTypes";
 
@@ -25,8 +26,10 @@ export function getProjectAction(projectId: string, id: string): Action | null {
   return row ? mapAction(row) : null;
 }
 
-export function listProjectActions(projectId: string): Action[] {
-  const rows = getDb().prepare("SELECT * FROM actions WHERE project_id = ? ORDER BY created_at DESC").all(projectId) as ActionRow[];
+export function listProjectActions(projectId: string, findingId?: string): Action[] {
+  const rows = findingId
+    ? getDb().prepare("SELECT * FROM actions WHERE project_id = ? AND finding_id = ? ORDER BY created_at DESC").all(projectId, findingId) as ActionRow[]
+    : getDb().prepare("SELECT * FROM actions WHERE project_id = ? ORDER BY created_at DESC").all(projectId) as ActionRow[];
   return rows.map(mapAction);
 }
 
@@ -34,6 +37,11 @@ export function createAction(input: {
   projectId: string; findingId: string; recommendationId?: string; type: ActionType; title: string;
   target: Action["target"]; parameters: Record<string, unknown>;
 }): Action {
+  // Parity with the platform/Supabase path, which already rejects an action
+  // for a finding that doesn't belong to the project.
+  if (!getProjectFinding(input.projectId, input.findingId)) {
+    throw new Error("Finding not found.");
+  }
   const id = "action_" + crypto.randomUUID();
   const now = new Date().toISOString();
   getDb().prepare(
