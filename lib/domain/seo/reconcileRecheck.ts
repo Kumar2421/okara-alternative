@@ -1,4 +1,4 @@
-import { explainFinding } from "./findingExplanations";
+import { explainFinding } from "./findingExplanations.ts";
 
 // Deliberately not imported from ./SEOAgent: that file has a TS
 // parameter-property constructor Node's --test runner (strip-only TS mode)
