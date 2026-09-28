@@ -68,6 +68,8 @@ export default function AuditPage() {
     setError("");
     setResult(null);
 
+    trackAuditEvent({ event: "audit_started" });
+
     try {
       const response = await fetch("/api/public/audit", {
         method: "POST",
@@ -76,8 +78,15 @@ export default function AuditPage() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Audit failed.");
+      trackAuditEvent({
+        event: "audit_completed",
+        findingCount: data.summary?.totalFindings,
+        criticalCount: data.summary?.critical,
+        warningCount: data.summary?.warnings,
+      });
       setResult(data);
     } catch (err) {
+      trackAuditEvent({ event: "audit_failed", failureCode: "request_failed" });
       setError(err instanceof Error ? err.message : "Audit failed.");
     } finally {
       setLoading(false);
