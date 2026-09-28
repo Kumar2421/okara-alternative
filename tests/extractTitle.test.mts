@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import * as cheerio from "cheerio";
-import { extractTitle } from "../lib/domain/seo/SEOAgent.ts";
+import { extractTitle } from "../lib/domain/seo/extractTitle.ts";
 
 test("reads the real document title", () => {
   const $ = cheerio.load("<html><head><title>Example Site</title></head><body></body></html>");
