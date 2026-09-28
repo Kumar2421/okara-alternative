@@ -10,6 +10,7 @@ import { upsertFinding } from "@/lib/domain/findings/findingStore";
 import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
 import { takeCachedPublicAudit } from "@/lib/domain/seo/publicAuditCache";
 import { explainFinding } from "@/lib/domain/seo/findingExplanations";
+import { resolvePlatformApiKey } from "@/lib/domain/shared/resolvePlatformApiKey";
 
 // Vercel: LLM/crawl calls can run past the 10s default — allow up to the
 // platform max for this route (Hobby plan caps at 60s; Pro allows more).
@@ -60,20 +61,7 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-      // PageSpeed key: same generic BYOK secret store used by
-      // site-crawl/pagespeed — no dedicated schema table for non-LLM keys.
-      const { data: conn } = await db
-        .from("provider_connections")
-        .select("api_key_secret_id")
-        .eq("user_id", user.id)
-        .eq("provider_id", "pagespeed_api_key")
-        .maybeSingle();
-
-      let pageSpeedApiKey: string | undefined = process.env.PAGESPEED_API_KEY || undefined;
-      if (conn?.api_key_secret_id) {
-        const { data: secret } = await db.rpc("vault_get_secret", { p_id: conn.api_key_secret_id });
-        if (secret) pageSpeedApiKey = secret as string;
-      }
+      const pageSpeedApiKey = (await resolvePlatformApiKey(db, user.id, "pagespeed_api_key")) || process.env.PAGESPEED_API_KEY || undefined;
 
       // No PageSpeed key means this audit would produce the exact same
       // result as the public /audit crawl for this URL — reuse it instead

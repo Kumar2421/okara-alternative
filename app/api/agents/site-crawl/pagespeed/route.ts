@@ -3,6 +3,7 @@ import { getDb } from "@/lib/db";
 import type { CrawledPage } from "@/lib/domain/seo/SiteCrawlAgent";
 import { fetchPageSpeed } from "@/lib/domain/seo/pageSpeedInsights";
 import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
+import { resolvePlatformApiKey } from "@/lib/domain/shared/resolvePlatformApiKey";
 import { FEATURES } from "@/lib/features";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
@@ -29,31 +30,13 @@ export async function POST() {
 
     const db = createServiceClient();
 
-    // PageSpeed key: reusing the generic BYOK secret store (provider_connections
-    // + Vault) that /api/providers already uses for LLM keys, under a
-    // dedicated provider_id — there's no separate schema table for
-    // non-LLM API keys, and this is the same real pattern used to decrypt
-    // a BYOK key in the articles route.
-    const { data: conn } = await db
-      .from("provider_connections")
-      .select("api_key_secret_id")
-      .eq("user_id", user.id)
-      .eq("provider_id", "pagespeed_api_key")
-      .maybeSingle();
-    if (!conn?.api_key_secret_id) {
+    const apiKey = await resolvePlatformApiKey(db, user.id, "pagespeed_api_key");
+    if (!apiKey) {
       return NextResponse.json(
         { error: "Connect a PageSpeed API key in Settings → API Credentials to run real Lighthouse scores." },
         { status: 422 }
       );
     }
-    const { data: secret, error: secretError } = await db.rpc("vault_get_secret", { p_id: conn.api_key_secret_id });
-    if (secretError || !secret) {
-      return NextResponse.json(
-        { error: "Connect a PageSpeed API key in Settings → API Credentials to run real Lighthouse scores." },
-        { status: 422 }
-      );
-    }
-    const apiKey = secret as string;
 
     const { data: projectSetting } = await db
       .from("user_settings")
