@@ -30,13 +30,18 @@ function safeSessionId(value: unknown): string | undefined {
 }
 
 export function sanitizeAuditFunnelPayload(input: AuditFunnelPayload): AuditFunnelPayload {
+  const sessionId = safeSessionId(input.sessionId);
+  const findingCount = safeCount(input.findingCount);
+  const criticalCount = safeCount(input.criticalCount);
+  const warningCount = safeCount(input.warningCount);
+
   return {
     event: input.event,
-    sessionId: safeSessionId(input.sessionId),
-    findingCount: safeCount(input.findingCount),
-    criticalCount: safeCount(input.criticalCount),
-    warningCount: safeCount(input.warningCount),
-    failureCode: input.failureCode,
+    ...(sessionId ? { sessionId } : {}),
+    ...(findingCount !== undefined ? { findingCount } : {}),
+    ...(criticalCount !== undefined ? { criticalCount } : {}),
+    ...(warningCount !== undefined ? { warningCount } : {}),
+    ...(input.failureCode ? { failureCode: input.failureCode } : {}),
   };
 }
 
