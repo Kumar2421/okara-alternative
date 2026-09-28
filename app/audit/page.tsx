@@ -171,6 +171,30 @@ export default function AuditPage() {
               </div>
             </div>
 
+            <div className="mt-6 rounded-xl border border-black/10 bg-white p-5">
+              <div className="flex flex-wrap items-baseline justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-black/40">What we found</p>
+                  <p className="mt-2 text-lg font-medium">
+                    {result.summary.totalFindings === 0
+                      ? "No issues detected by this audit."
+                      : result.summary.totalFindings + " issue" + (result.summary.totalFindings === 1 ? "" : "s") + " found"}
+                  </p>
+                </div>
+                <div className="flex gap-4 text-xs text-black/50">
+                  <span><strong className="text-black">{result.summary.critical}</strong> important</span>
+                  <span><strong className="text-black">{result.summary.warnings}</strong> warning{result.summary.warnings === 1 ? "" : "s"}</span>
+                </div>
+              </div>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-black/55">
+                {result.summary.critical > 0
+                  ? "Start with the important issues, then work through the remaining warnings. Your account keeps the findings and gives you a place to track improvements."
+                  : result.summary.totalFindings > 0
+                    ? "Your account keeps these findings so you can work through the recommendations and recheck improvements."
+                    : "Create an account to save this result and keep your future audits in one place."}
+              </p>
+            </div>
+
             <div className="mt-6 grid gap-4 sm:grid-cols-3">
               {result.findings.map((finding) => (
                 <article key={finding.issueId} className="rounded-xl border border-black/10 bg-white p-5">
@@ -200,10 +224,16 @@ export default function AuditPage() {
 
             <div className="mt-8 flex flex-col gap-5 rounded-xl bg-[#111111] p-7 text-white sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h3 className="text-lg font-medium">Want the full report?</h3>
-                <p className="mt-1 text-sm leading-6 text-white/60">
-                  Create a Marlo account to save findings, get recommendations, and recheck improvements.
-                </p>
+                <div>
+                  <h3 className="text-lg font-medium">
+                    {result.summary.critical > 0
+                      ? "Turn these " + result.summary.critical + " important issue" + (result.summary.critical === 1 ? "" : "s") + " into a fix plan."
+                      : "Keep your audit findings and track the fixes."}
+                  </h3>
+                  <p className="mt-1 text-sm leading-6 text-white/60">
+                    Create a Marlo account to save findings, get recommendations, and recheck improvements.
+                  </p>
+                </div>
               </div>
               <Link
                 href={`/login?mode=signup&url=${encodeURIComponent(result.url)}`}
