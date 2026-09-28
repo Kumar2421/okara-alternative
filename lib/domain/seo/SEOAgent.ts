@@ -1,18 +1,8 @@
 import * as cheerio from "cheerio";
-
-/**
- * Scoped to head > title, first match only: a bare `$("title")` also matches
- * every SVG <title> accessibility tag in the page (common in icon/logo
- * markup) and concatenates all of their text into one string, producing a
- * nonsense multi-hundred-char "title" (confirmed on real sites — GitHub,
- * BBC — where logo-carousel SVG titles got appended to the real one).
- */
-export function extractTitle($: cheerio.CheerioAPI): string {
-  return $("head > title").first().text().trim();
-}
 import { request as httpRequest, type IncomingHttpHeaders } from "http";
 import { request as httpsRequest } from "https";
 import { jinaRead, extractMarkdownLinks } from "@/lib/domain/shared/jinaReader";
+import { extractTitle } from "@/lib/domain/seo/extractTitle";
 import { fetchPageSpeed, type CwvSnapshot } from "@/lib/domain/seo/pageSpeedInsights";
 
 export type { CwvStatus, CwvMetric, CwvSnapshot } from "@/lib/domain/seo/pageSpeedInsights";
@@ -330,13 +320,7 @@ async function checkRobotsTxt(origin: string, pagePath: string): Promise<{ exist
 }
 
 export class SEOAgent {
-  // Not a TS parameter property: Node's --test runner (Node 24, strip-only
-  // TS mode) can't parse `constructor(private x)` syntax, and this file is
-  // now imported by tests/extractTitle.test.mts.
-  private pageSpeedApiKey?: string;
-  constructor(pageSpeedApiKey?: string) {
-    this.pageSpeedApiKey = pageSpeedApiKey;
-  }
+  constructor(private pageSpeedApiKey?: string) {}
 
   async audit(url: string): Promise<SEOAuditPayload> {
     const issues: { label: string; level: "Warning" | "Error" }[] = [];
