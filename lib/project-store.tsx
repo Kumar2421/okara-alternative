@@ -169,16 +169,51 @@ async function generateAndSaveDocument(
   }
 }
 
+/** Competitor Comparison doesn't follow generateAndSaveDocument's
+ * contract: its POST route upserts into project_documents itself and
+ * streams back a small confirmation, with no /save endpoint to call
+ * afterwards (CompetitorComparisonPanel.tsx's handleGenerate does the
+ * same — POST, then re-read). Calling /save for it would 404. */
+async function generateSelfSavingDocument(
+  apiPath: string,
+  title: string,
+  model: string,
+  providerId: string,
+  log: (text: string) => void
+): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/project/documents/${apiPath}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model, providerId }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      log(`Couldn't auto-generate ${title} (${data.error ?? "unknown error"}) — generate it manually in the Context panel.`);
+      return false;
+    }
+
+    // Drain the stream so the request completes before the next one starts.
+    await res.text();
+    log(`${title} ready.`);
+    return true;
+  } catch {
+    log(`Couldn't auto-generate ${title} — generate it manually in the Context panel.`);
+    return false;
+  }
+}
+
 /** Runs right after a new project's crawl + competitor discovery finish —
  * generates every Context document a user would otherwise have to click
- * "Generate" for one by one (see ContextPanel.tsx's DOCUMENTS list). Same
+ * "Generate" for one by one (see ContextPanel.tsx's document panels). Same
  * grounding order the manual flow relies on: Product Info first, then
- * Marketing Strategy (reads Product Info), then Competitor Analysis (only
- * if at least one competitor exists — the route 422s otherwise, matching
- * the manual "Add a competitor first" gate), then Content Strategy (reads
- * all three), then Design Guide (reads Marketing Strategy). Each step is
- * independent of the others failing — one document erroring (e.g. a
- * transient LLM timeout) shouldn't block the rest from being generated. */
+ * Marketing Strategy (reads Product Info), then the two competitor
+ * documents (only if at least one competitor exists — both routes reject
+ * otherwise, matching the manual "Add a competitor first" gate), then
+ * Content Strategy (reads all three), then Design Guide (reads Marketing
+ * Strategy). Each step is independent of the others failing — one document
+ * erroring (e.g. a transient LLM timeout) shouldn't block the rest. */
 async function autoGenerateContextDocuments(
   primaryModel: string | null,
   hasCompetitors: boolean,
@@ -192,13 +227,14 @@ async function autoGenerateContextDocuments(
   const providerId = findProviderForModel(primaryModel);
   if (!providerId) return;
 
-  log("Writing your Context documents — Product Information, Marketing Strategy, Content Strategy, and Design Guide...");
+  log("Writing your Context documents — Product Information, Marketing Strategy, Competitor Analysis, Competitor Comparison, Content Strategy, and Design Guide...");
   await generateAndSaveDocument("product-info", "Product Information", primaryModel, providerId, log);
   await generateAndSaveDocument("marketing-strategy", "Marketing Strategy", primaryModel, providerId, log);
   if (hasCompetitors) {
     await generateAndSaveDocument("competitor-analysis", "Competitor Analysis", primaryModel, providerId, log);
+    await generateSelfSavingDocument("competitor-comparison", "Competitor Comparison", primaryModel, providerId, log);
   } else {
-    log("Skipping Competitor Analysis — no competitors found or added yet.");
+    log("Skipping Competitor Analysis and Competitor Comparison — no competitors found or added yet.");
   }
   await generateAndSaveDocument("content-strategy", "Content Strategy", primaryModel, providerId, log);
   await generateAndSaveDocument("design-guide", "Design Guide", primaryModel, providerId, log);
@@ -236,6 +272,12 @@ export default function ProjectProvider({ children }: { children: React.ReactNod
   }, []);
 
   useEffect(() => {
+    // refresh() is an async fetch-on-mount: its setState calls run in promise
+    // callbacks after an await, not synchronously in the effect body, so the
+    // cascading render this rule guards against can't happen here. Pre-existing
+    // on main; surfaced only because editing this file pulls it into CI's
+    // changed-files lint.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     refresh();
   }, [refresh]);
 
