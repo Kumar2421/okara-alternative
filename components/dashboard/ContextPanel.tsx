@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Layers,
   ChevronLeft,
@@ -52,7 +52,7 @@ export default function ContextPanel({
   const [newCompetitorUrl, setNewCompetitorUrl] = useState("");
   const [discovering, setDiscovering] = useState(false);
   const { show } = useToast();
-  const { project, loading } = useProject();
+  const { project, loading, documentsVersion } = useProject();
   const {
     documents,
     competitors: contextCompetitors,
@@ -78,6 +78,18 @@ export default function ContextPanel({
       show("Failed to load shared project context.");
     }
   }, [contextError, show]);
+
+  // Context documents are generated in the background after onboarding
+  // finishes (see project-store.tsx), so they land AFTER the dashboard's
+  // initial fetch. documentsVersion bumps as each one saves; refetch then so
+  // the panel fills in live instead of waiting for a manual reload. Skips the
+  // initial render — that data came with the first load.
+  const seenDocumentsVersion = useRef(documentsVersion);
+  useEffect(() => {
+    if (documentsVersion === seenDocumentsVersion.current) return;
+    seenDocumentsVersion.current = documentsVersion;
+    refreshContext();
+  }, [documentsVersion, refreshContext]);
 
   async function handleAddCompetitor() {
     const url = newCompetitorUrl.trim();

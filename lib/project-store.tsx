@@ -44,6 +44,11 @@ type Ctx = {
    * see no audit yet, with no signal telling it to try again. This is that
    * signal. */
   auditVersion: number;
+  /** Bumped as each auto-generated Context document is saved. Generation now
+   * runs un-awaited in the background, so it finishes AFTER onboarding calls
+   * the dashboard's refresh() — without this signal the documents would sit
+   * in the database unseen until a manual reload. */
+  documentsVersion: number;
 };
 
 /** Runs right after a successful crawl during project creation — real
@@ -169,6 +174,31 @@ async function generateAndSaveDocument(
   }
 }
 
+/** Confirms `projectId` is still the server's active project.
+ *
+ * Every /api/project/documents/<doc> route resolves its target by reading
+ * active_project_id server-side at request time and accepts no projectId
+ * override (unlike competitors/discover, which takes one explicitly).
+ * Auto-generation runs for minutes after creation, so if the user creates
+ * or switches projects in the meantime, the remaining documents would be
+ * written against whichever project is active by then — silently
+ * attaching this project's Product Info to a different site.
+ *
+ * Checking before each document turns that silent corruption into a clean
+ * stop. It's a narrow race (the check and the generate aren't atomic), but
+ * it closes the realistic minutes-wide window rather than the millisecond
+ * one, without rewriting six route contracts. */
+async function stillActiveProject(projectId: string): Promise<boolean> {
+  try {
+    const res = await fetch("/api/project");
+    if (!res.ok) return false;
+    const data = await res.json();
+    return data.project?.id === projectId;
+  } catch {
+    return false;
+  }
+}
+
 /** Competitor Comparison doesn't follow generateAndSaveDocument's
  * contract: its POST route upserts into project_documents itself and
  * streams back a small confirmation, with no /save endpoint to call
@@ -215,10 +245,12 @@ async function generateSelfSavingDocument(
  * Strategy). Each step is independent of the others failing — one document
  * erroring (e.g. a transient LLM timeout) shouldn't block the rest. */
 async function autoGenerateContextDocuments(
+  projectId: string,
   primaryModel: string | null,
   hasCompetitors: boolean,
   log: (text: string) => void,
-  logDone: (text: string) => void
+  logDone: (text: string) => void,
+  onSaved: () => void
 ): Promise<void> {
   if (!primaryModel) {
     log("Skipping auto-generated context documents — connect a model in Settings to enable it.");
@@ -227,17 +259,38 @@ async function autoGenerateContextDocuments(
   const providerId = findProviderForModel(primaryModel);
   if (!providerId) return;
 
+  /** Bails out if the user switched/created a project mid-run — see
+   * stillActiveProject. Returning false stops the remaining documents. */
+  const guard = async (): Promise<boolean> => {
+    if (await stillActiveProject(projectId)) return true;
+    log("Stopped writing context documents — you switched to another project. Generate them from the Context panel when you're back.");
+    return false;
+  };
+
+  /** Bumps documentsVersion after a successful save so the Context panel
+   * picks the document up — generation runs in the background, after the
+   * dashboard's initial refresh has already happened. */
+  const saved = (ok: boolean): boolean => {
+    if (ok) onSaved();
+    return ok;
+  };
+
   log("Writing your Context documents — Product Information, Marketing Strategy, Competitor Analysis, Competitor Comparison, Content Strategy, and Design Guide...");
-  await generateAndSaveDocument("product-info", "Product Information", primaryModel, providerId, log);
-  await generateAndSaveDocument("marketing-strategy", "Marketing Strategy", primaryModel, providerId, log);
+  saved(await generateAndSaveDocument("product-info", "Product Information", primaryModel, providerId, log));
+  if (!(await guard())) return;
+  saved(await generateAndSaveDocument("marketing-strategy", "Marketing Strategy", primaryModel, providerId, log));
+  if (!(await guard())) return;
   if (hasCompetitors) {
-    await generateAndSaveDocument("competitor-analysis", "Competitor Analysis", primaryModel, providerId, log);
-    await generateSelfSavingDocument("competitor-comparison", "Competitor Comparison", primaryModel, providerId, log);
+    saved(await generateAndSaveDocument("competitor-analysis", "Competitor Analysis", primaryModel, providerId, log));
+    if (!(await guard())) return;
+    saved(await generateSelfSavingDocument("competitor-comparison", "Competitor Comparison", primaryModel, providerId, log));
+    if (!(await guard())) return;
   } else {
     log("Skipping Competitor Analysis and Competitor Comparison — no competitors found or added yet.");
   }
-  await generateAndSaveDocument("content-strategy", "Content Strategy", primaryModel, providerId, log);
-  await generateAndSaveDocument("design-guide", "Design Guide", primaryModel, providerId, log);
+  saved(await generateAndSaveDocument("content-strategy", "Content Strategy", primaryModel, providerId, log));
+  if (!(await guard())) return;
+  saved(await generateAndSaveDocument("design-guide", "Design Guide", primaryModel, providerId, log));
   logDone("Context documents ready — review and edit anytime in the Context panel.");
 }
 
@@ -255,6 +308,7 @@ export default function ProjectProvider({ children }: { children: React.ReactNod
   const [loading, setLoading] = useState(true);
   const [competitorsVersion, setCompetitorsVersion] = useState(0);
   const [auditVersion, setAuditVersion] = useState(0);
+  const [documentsVersion, setDocumentsVersion] = useState(0);
   const { log, logDone } = useTerminalLog();
   const { primaryModel } = useProviders();
 
@@ -357,10 +411,34 @@ export default function ProjectProvider({ children }: { children: React.ReactNod
           primaryModel,
           () => setCompetitorsVersion((v) => v + 1)
         );
-        await autoGenerateContextDocuments(primaryModel, hasCompetitors, log, logDone);
+
+        // Deliberately NOT awaited. Six documents generate sequentially and
+        // each route allows up to 60s (maxDuration), so awaiting here can
+        // hold OnboardingModal's spinner for minutes before the user ever
+        // sees the dashboard — the modal only calls onDone() after
+        // createProject resolves. The terminal log streams progress as each
+        // document lands, and the Context panel fills in behind it.
+        //
+        // Errors are already handled per-document inside
+        // autoGenerateContextDocuments (each logs and moves on), so the
+        // catch here only covers an unexpected throw in the orchestration
+        // itself — without it that would surface as an unhandled rejection.
+        void autoGenerateContextDocuments(
+          data.project.id,
+          primaryModel,
+          hasCompetitors,
+          log,
+          logDone,
+          () => setDocumentsVersion((v) => v + 1)
+        ).catch(() => {
+          log("Couldn't finish writing your context documents — generate them from the Context panel.");
+        });
       }
 
-      logDone("Done!");
+      // Context documents may still be generating in the background (see the
+      // un-awaited call above); autoGenerateContextDocuments logs its own
+      // completion, so this only marks setup itself as finished.
+      logDone("Setup complete — your dashboard is ready.");
     },
     [log, logDone, primaryModel]
   );
@@ -420,7 +498,7 @@ export default function ProjectProvider({ children }: { children: React.ReactNod
 
   return (
     <ProjectCtx.Provider
-      value={{ project, projects, loading, createProject, switchProject, updateProject, deleteProject, competitorsVersion, auditVersion }}
+      value={{ project, projects, loading, createProject, switchProject, updateProject, deleteProject, competitorsVersion, auditVersion, documentsVersion }}
     >
       {children}
     </ProjectCtx.Provider>
