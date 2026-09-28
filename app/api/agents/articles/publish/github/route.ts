@@ -30,11 +30,25 @@ export async function POST(req: NextRequest) {
 
     const db = createServiceClient();
 
+    // Scope the lookup to the caller's ACTIVE project, not just their user
+    // id: articles are per-project, so a user with several projects could
+    // otherwise publish an article belonging to a different project than
+    // the one they're currently working in.
+    const { data: setting } = await db
+      .from("user_settings")
+      .select("value")
+      .eq("user_id", user.id)
+      .eq("key", "active_project_id")
+      .maybeSingle();
+    const projectId = setting?.value ?? null;
+    if (!projectId) return NextResponse.json({ error: "No active project." }, { status: 422 });
+
     const { data: article } = await db
       .from("articles")
       .select("id, topic, title, content")
       .eq("id", id)
       .eq("user_id", user.id)
+      .eq("project_id", projectId)
       .maybeSingle();
     if (!article) return NextResponse.json({ error: "Article not found." }, { status: 404 });
 
@@ -75,7 +89,12 @@ export async function POST(req: NextRequest) {
         repo.defaultBranch
       );
 
-      await db.from("articles").update({ status: "pr_open", pr_url: prUrl, published_at: new Date().toISOString() }).eq("id", id);
+      await db
+        .from("articles")
+        .update({ status: "pr_open", pr_url: prUrl, published_at: new Date().toISOString() })
+        .eq("id", id)
+        .eq("user_id", user.id)
+        .eq("project_id", projectId);
 
       return NextResponse.json({ prUrl });
     } catch (err) {
