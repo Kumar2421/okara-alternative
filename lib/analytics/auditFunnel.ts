@@ -3,12 +3,14 @@ export const AUDIT_FUNNEL_EVENTS = [
   "audit_completed",
   "audit_failed",
   "signup_cta_clicked",
+  "signup_completed",
 ] as const;
 
 export type AuditFunnelEvent = (typeof AUDIT_FUNNEL_EVENTS)[number];
 
 export type AuditFunnelPayload = {
   event: AuditFunnelEvent;
+  sessionId?: string;
   findingCount?: number;
   criticalCount?: number;
   warningCount?: number;
@@ -22,13 +24,24 @@ function safeCount(value: unknown): number | undefined {
   return Math.max(0, Math.min(MAX_COUNT, Math.floor(value)));
 }
 
+function safeSessionId(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length < 16 || value.length > 128) return undefined;
+  return value;
+}
+
 export function sanitizeAuditFunnelPayload(input: AuditFunnelPayload): AuditFunnelPayload {
+  const sessionId = safeSessionId(input.sessionId);
+  const findingCount = safeCount(input.findingCount);
+  const criticalCount = safeCount(input.criticalCount);
+  const warningCount = safeCount(input.warningCount);
+
   return {
     event: input.event,
-    findingCount: safeCount(input.findingCount),
-    criticalCount: safeCount(input.criticalCount),
-    warningCount: safeCount(input.warningCount),
-    failureCode: input.failureCode,
+    ...(sessionId ? { sessionId } : {}),
+    ...(findingCount !== undefined ? { findingCount } : {}),
+    ...(criticalCount !== undefined ? { criticalCount } : {}),
+    ...(warningCount !== undefined ? { warningCount } : {}),
+    ...(input.failureCode ? { failureCode: input.failureCode } : {}),
   };
 }
 
