@@ -3,6 +3,13 @@ export const ACTION_TYPES = [
   "remove_noindex",
   "improve_content_relevance",
   "investigate_ttfb",
+  // Every other finding type (the 11 SEOAgent issueIds with no dedicated
+  // automated type — meta title/description, headings, OG/Twitter tags,
+  // robots-txt) had no representable ActionType at all before this, which
+  // silently made "create an action" impossible for the majority of the
+  // product's findings. Not tied to any automated fix — actions here are a
+  // user-facing tracked TODO, not autonomous execution.
+  "manual_fix",
 ] as const;
 
 export type ActionType = (typeof ACTION_TYPES)[number];

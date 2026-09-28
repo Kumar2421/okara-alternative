@@ -1,9 +1,32 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Check, ChevronRight, CircleDot, Loader2, RefreshCw } from "lucide-react";
+import { AlertTriangle, Check, ChevronRight, CircleDot, Loader2, Plus, RefreshCw } from "lucide-react";
 import type { Finding, FindingStatus } from "@/lib/domain/findings/findingTypes";
 import type { Recommendation } from "@/lib/domain/recommendations/recommendationTypes";
+import type { Action, ActionStatus } from "@/lib/domain/actions/actionTypes";
+
+const ACTION_STATUS_LABEL: Record<ActionStatus, string> = {
+  proposed: "Proposed",
+  approved: "Approved",
+  running: "In progress",
+  completed: "Done",
+  failed: "Failed",
+  cancelled: "Cancelled",
+};
+
+const ACTION_STATUS_ACTION: Partial<Record<ActionStatus, { next: ActionStatus; label: string }>> = {
+  proposed: { next: "approved", label: "Approve" },
+  approved: { next: "running", label: "Start" },
+  running: { next: "completed", label: "Mark done" },
+};
+
+function actionStatusClass(status: ActionStatus) {
+  if (status === "completed") return "bg-emerald-50 text-emerald-700 border-emerald-200";
+  if (status === "failed") return "bg-red-50 text-red-700 border-red-200";
+  if (status === "running") return "bg-blue-50 text-blue-700 border-blue-200";
+  return "bg-gray-50 text-gray-600 border-gray-200";
+}
 
 const STATUS_ORDER: FindingStatus[] = ["new", "acknowledged", "fixing", "fixed", "verified"];
 
@@ -57,15 +80,80 @@ export default function FindingsWorkspace() {
   const [verification, setVerification] = useState<"verified" | "failed" | null>(null);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [recommendationsLoading, setRecommendationsLoading] = useState(false);
+  const [actions, setActions] = useState<Action[]>([]);
+  const [actionsLoading, setActionsLoading] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
 
   const selected = findings.find((finding) => finding.id === selectedId) ?? null;
 
-  useEffect(() => {
-    if (!selectedId) {
-      setRecommendations([]);
-      return;
+  const loadActions = async (findingId: string) => {
+    setActionsLoading(true);
+    try {
+      const response = await fetch(`/api/agents/actions?findingId=${encodeURIComponent(findingId)}`);
+      const data = await response.json();
+      setActions(response.ok && Array.isArray(data.actions) ? data.actions : []);
+    } catch {
+      setActions([]);
+    } finally {
+      setActionsLoading(false);
     }
+  };
+
+  useEffect(() => {
+    // No reset-to-[] on deselect: the actions section only renders inside
+    // `{selected && (...)}`, so stale state here is never shown — the next
+    // real selection overwrites it before anything reads it.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (selectedId) void loadActions(selectedId);
+  }, [selectedId]);
+
+  const createActionForFinding = async () => {
+    if (!selected) return;
+    setActionBusy(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/agents/actions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ findingId: selected.id, title: selected.recommendation.split(".")[0] || selected.category }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to create action.");
+      await loadActions(selected.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create action.");
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const transitionActionItem = async (action: Action) => {
+    const next = ACTION_STATUS_ACTION[action.status];
+    if (!next) return;
+    setActionBusy(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/agents/actions", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: action.id, status: next.next }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to update action.");
+      setActions((current) => current.map((item) => item.id === data.action.id ? data.action : item));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update action.");
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    // No reset-to-[] on deselect: same reasoning as the actions effect above
+    // — this section only renders inside `{selected && (...)}`.
+    if (!selectedId) return;
     let active = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setRecommendationsLoading(true);
     fetch(`/api/agents/analytics/findings/recommendations?id=${encodeURIComponent(selectedId)}`)
       .then(async (response) => {
@@ -226,7 +314,7 @@ export default function FindingsWorkspace() {
                       <span className={`rounded-full border px-2 py-1 text-[10px] font-medium ${statusClass(selected.status)}`}>{STATUS_LABEL[selected.status]}</span>
                     </div>
                     <h4 className="text-base font-semibold text-gray-900">{selected.recommendation.split(".")[0]}</h4>
-                    <div className="mt-1 text-[11px] text-gray-500">Query: <span className="font-medium text-gray-700">{selected.entityId}</span></div>
+                    <div className="mt-1 text-[11px] text-gray-500">{selected.source === "seo-audit" ? "Issue" : "Query"}: <span className="font-medium text-gray-700">{selected.entityId}</span></div>
                     {selected.url && <a href={selected.url} target="_blank" rel="noreferrer" className="mt-0.5 block truncate text-[11px] text-[#00846f] hover:underline">{selected.url}</a>}
                   </div>
                   <button onClick={() => void load()} title="Refresh findings" className="rounded-lg border border-gray-200 p-2 text-gray-500 hover:bg-gray-50"><RefreshCw size={13} /></button>
@@ -280,6 +368,38 @@ export default function FindingsWorkspace() {
                             <span className="shrink-0 rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[9px] font-semibold uppercase text-gray-500">{item.priority}</span>
                           </div>
                           <div className="mt-2 text-[10px] text-gray-500"><span className="font-medium text-gray-700">{item.implementation.kind}</span> · {item.implementation.description}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                <section>
+                  <div className="mb-2 flex items-center justify-between">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Actions</div>
+                    <button disabled={actionBusy} onClick={() => void createActionForFinding()} className="flex items-center gap-1 text-[11px] font-medium text-gray-600 hover:text-gray-900 disabled:opacity-50">
+                      <Plus size={12} /> Track as action
+                    </button>
+                  </div>
+                  {actionsLoading ? (
+                    <div className="flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 p-3 text-[12px] text-gray-500">
+                      <Loader2 size={13} className="animate-spin" /> Loading actions...
+                    </div>
+                  ) : actions.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 p-3 text-[12px] text-gray-500">No action tracked for this finding yet.</div>
+                  ) : (
+                    <div className="space-y-2">
+                      {actions.map((action) => (
+                        <div key={action.id} className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 p-3">
+                          <div className="min-w-0">
+                            <div className="truncate text-[12px] font-medium text-gray-900">{action.title}</div>
+                            <span className={`mt-1 inline-block rounded-full border px-1.5 py-0.5 text-[9px] font-semibold uppercase ${actionStatusClass(action.status)}`}>{ACTION_STATUS_LABEL[action.status]}</span>
+                          </div>
+                          {ACTION_STATUS_ACTION[action.status] && (
+                            <button disabled={actionBusy} onClick={() => void transitionActionItem(action)} className="shrink-0 rounded-lg border border-gray-200 px-2.5 py-1.5 text-[11px] font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+                              {ACTION_STATUS_ACTION[action.status]!.label}
+                            </button>
+                          )}
                         </div>
                       ))}
                     </div>

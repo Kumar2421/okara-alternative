@@ -22,10 +22,12 @@ export async function getProjectAction(db: SupabaseClient, userId: string, proje
   return data ? mapRow(data) : null;
 }
 
-export async function listProjectActions(db: SupabaseClient, userId: string, projectId: string): Promise<Action[]> {
+export async function listProjectActions(db: SupabaseClient, userId: string, projectId: string, findingId?: string): Promise<Action[]> {
   const { data: project } = await db.from("projects").select("id").eq("id", projectId).eq("owner_id", userId).maybeSingle();
   if (!project) return [];
-  const { data } = await db.from("actions").select("*").eq("project_id", projectId).order("created_at", { ascending: false });
+  let query = db.from("actions").select("*").eq("project_id", projectId);
+  if (findingId) query = query.eq("finding_id", findingId);
+  const { data } = await query.order("created_at", { ascending: false });
   return (data ?? []).map(mapRow);
 }
 
