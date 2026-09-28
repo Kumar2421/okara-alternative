@@ -36,3 +36,9 @@ CI validates mechanical correctness. Deployment validates deployability. Product
 ## Coordination rule
 
 Agents must coordinate through repository state, PRs, CI results, deployment evidence, and explicit handoffs. Do not rely on private chat context as shared state.
+
+Several agents may be working in the same clone at the same time. Before
+branching or checking out, run `git status` and `git worktree list`: another
+agent's uncommitted files or checked-out branch may already be there. Do your
+work in a separate `git worktree` rather than switching the shared working
+tree's branch, and never revert or commit files you did not change.
