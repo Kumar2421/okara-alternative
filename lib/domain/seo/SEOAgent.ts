@@ -330,7 +330,13 @@ async function checkRobotsTxt(origin: string, pagePath: string): Promise<{ exist
 }
 
 export class SEOAgent {
-  constructor(private pageSpeedApiKey?: string) {}
+  // Not a TS parameter property: Node's --test runner (Node 24, strip-only
+  // TS mode) can't parse `constructor(private x)` syntax, and this file is
+  // now imported by tests/extractTitle.test.mts.
+  private pageSpeedApiKey?: string;
+  constructor(pageSpeedApiKey?: string) {
+    this.pageSpeedApiKey = pageSpeedApiKey;
+  }
 
   async audit(url: string): Promise<SEOAuditPayload> {
     const issues: { label: string; level: "Warning" | "Error" }[] = [];
