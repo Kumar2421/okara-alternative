@@ -97,7 +97,7 @@ function UserMenu() {
           {user.initials}
           <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full border-2 border-[#110f0e] bg-[#00ab92]" />
         </div>
-        <div className="leading-tight text-left">
+        <div className="hidden leading-tight text-left md:block">
           <div className="flex items-center gap-1 text-[13px] font-medium text-white">
             {user.name}
             <ChevronDown size={12} className={`opacity-50 transition-transform ${open ? "rotate-180" : ""}`} />
@@ -287,8 +287,8 @@ function ProjectSwitcher() {
         className="flex items-center gap-2 rounded-lg border border-white/15 px-2.5 py-1.5 text-white hover:bg-white/5"
       >
         <ChevronUp size={13} className="opacity-50" />
-        <span className="h-4 w-4 rounded-full bg-indigo-400" />
-        <span className="text-[13px] font-medium">{label}</span>
+        <span className="h-4 w-4 shrink-0 rounded-full bg-indigo-400" />
+        <span className="max-w-[100px] truncate text-[13px] font-medium md:max-w-none">{label}</span>
         <ChevronDown size={13} className={`opacity-50 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
       {open && (
@@ -330,7 +330,10 @@ function ProjectSwitcher() {
 }
 
 export default function TerminalLog() {
-  const [logOpen, setLogOpen] = useState(true);
+  // Starts collapsed on mobile — expanded it eats a third of the viewport
+  // and leaves little room for the active panel below. Desktop keeps the
+  // original always-open default.
+  const [logOpen, setLogOpen] = useState(() => !(typeof window !== "undefined" && window.innerWidth < 768));
   const { lines } = useTerminalLog();
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -355,7 +358,7 @@ export default function TerminalLog() {
             </button>
             <ProjectSwitcher />
 
-            <div className="ml-2 flex min-w-0 items-center gap-2 border-l border-white/10 pl-3 text-[13px]">
+            <div className="ml-2 hidden min-w-0 items-center gap-2 border-l border-white/10 pl-3 text-[13px] md:flex">
               <span className="flex shrink-0 items-center gap-1.5 text-gray-400">
                 <ScrollText size={13} />
                 Status Log

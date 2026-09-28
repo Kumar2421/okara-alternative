@@ -169,7 +169,7 @@ export default function ChatPanel({
           <button title="History" className="hover:text-gray-700">
             <Clock size={14} />
           </button>
-          <button title="Collapse" onClick={onToggle} className="text-lg leading-none hover:text-gray-700">
+          <button title="Collapse" onClick={onToggle} className="hidden text-lg leading-none hover:text-gray-700 md:block">
             –
           </button>
           <MoreHorizontal size={14} className="cursor-pointer hover:text-gray-700" />
