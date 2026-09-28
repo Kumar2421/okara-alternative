@@ -2,6 +2,7 @@ import * as cheerio from "cheerio";
 import { request as httpRequest, type IncomingHttpHeaders } from "http";
 import { request as httpsRequest } from "https";
 import { jinaRead, extractMarkdownLinks } from "@/lib/domain/shared/jinaReader";
+import { extractTitle } from "@/lib/domain/seo/extractTitle";
 import { fetchPageSpeed, type CwvSnapshot } from "@/lib/domain/seo/pageSpeedInsights";
 
 export type { CwvStatus, CwvMetric, CwvSnapshot } from "@/lib/domain/seo/pageSpeedInsights";
@@ -387,7 +388,7 @@ export class SEOAgent {
     }
 
     // 2. Parse tags
-    const title = $("title").text() || "";
+    const title = extractTitle($);
     const description = $("meta[name='description']").attr("content") || "";
     const canonical = $("link[rel='canonical']").attr("href")?.trim() || undefined;
     const robots = $("meta[name='robots']").attr("content")?.trim() || undefined;
