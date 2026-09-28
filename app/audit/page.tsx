@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import Link from "next/link";
+import type { AuditFunnelPayload } from "@/lib/analytics/auditFunnel";
 
 type Finding = {
   issueId: string;
@@ -27,6 +28,20 @@ function evidenceText(evidence: Record<string, string | number | null>) {
     .slice(0, 2)
     .map(([key, value]) => `${key.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase())}: ${value}`);
   return values.join(" · ");
+}
+
+function trackAuditEvent(payload: AuditFunnelPayload) {
+  const body = JSON.stringify(payload);
+  if (typeof navigator !== "undefined" && "sendBeacon" in navigator) {
+    navigator.sendBeacon("/api/public/audit/events", new Blob([body], { type: "application/json" }));
+    return;
+  }
+  void fetch("/api/public/audit/events", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body,
+    keepalive: true,
+  }).catch(() => undefined);
 }
 
 export default function AuditPage() {
@@ -147,7 +162,7 @@ export default function AuditPage() {
                   Create a Marlo account to save findings, get recommendations, and recheck improvements.
                 </p>
               </div>
-              <Link href={`/login?mode=signup&url=${encodeURIComponent(result.url)}`} className="shrink-0 rounded-lg bg-white px-5 py-2.5 text-sm font-medium text-black">
+              <Link\n                href={`/login?mode=signup&url=${encodeURIComponent(result.url)}`}\n                onClick={() => trackAuditEvent({ event: "signup_cta_clicked" })}\n                className="shrink-0 rounded-lg bg-white px-5 py-2.5 text-sm font-medium text-black"\n              >
                 Create free account
               </Link>
             </div>
