@@ -45,8 +45,11 @@ function trackAuditEvent(payload: AuditFunnelPayload) {
   if (!sessionId) return;
   const body = JSON.stringify({ ...payload, sessionId });
   if (typeof navigator !== "undefined" && "sendBeacon" in navigator) {
-    navigator.sendBeacon("/api/public/audit/events", new Blob([body], { type: "application/json" }));
-    return;
+    const queued = navigator.sendBeacon(
+      "/api/public/audit/events",
+      new Blob([body], { type: "application/json" }),
+    );
+    if (queued) return;
   }
   void fetch("/api/public/audit/events", {
     method: "POST",
