@@ -1,7 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { reconcileSeoAuditRecheck } from "../lib/domain/seo/reconcileRecheck.ts";
-import type { Finding } from "../lib/domain/seo/SEOAgent.ts";
+
+type Finding = {
+  issueId: string;
+  category: string;
+  severity: "Warning" | "Error";
+  label: string;
+  evidence: Record<string, string | number | null>;
+  autoFixable: boolean;
+};
 
 function finding(overrides: Partial<Finding>): Finding {
   return {

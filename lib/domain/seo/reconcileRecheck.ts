@@ -1,5 +1,18 @@
-import type { Finding as SeoFinding } from "@/lib/domain/seo/SEOAgent";
-import { explainFinding } from "@/lib/domain/seo/findingExplanations";
+import { explainFinding } from "./findingExplanations";
+
+// Deliberately not imported from ./SEOAgent: that file has a TS
+// parameter-property constructor Node's --test runner (strip-only TS mode)
+// can't parse. `import type` should be fully erased before resolution, but
+// this file already burned two CI round-trips on that runner's quirks —
+// safer to duplicate this narrow shape than depend on it.
+type SeoFinding = {
+  issueId: string;
+  category: string;
+  severity: "Warning" | "Error";
+  label: string;
+  evidence: Record<string, string | number | null>;
+  autoFixable: boolean;
+};
 
 export type SeoAuditRecheckResult = {
   issueDetected: boolean;
