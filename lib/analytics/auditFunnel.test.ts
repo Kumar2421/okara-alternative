@@ -16,7 +16,6 @@ test("keeps only bounded funnel metadata", () => {
       findingCount: 12,
       criticalCount: 2,
       warningCount: 7,
-      failureCode: undefined,
     },
   );
 });
@@ -32,7 +31,6 @@ test("drops invalid counts instead of leaking arbitrary payload values", () => {
     }),
     {
       event: "audit_failed",
-      findingCount: undefined,
       criticalCount: 0,
       warningCount: 1000,
       failureCode: "request_failed",
