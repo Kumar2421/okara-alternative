@@ -10,6 +10,8 @@ type Finding = {
   label: string;
   evidence: Record<string, string | number | null>;
   autoFixable: boolean;
+  whyItMatters: string;
+  recommendation: string;
 };
 
 type AuditResult = {
@@ -121,9 +123,14 @@ export default function AuditPage() {
                     <span className="text-[11px] text-black/35">{finding.category}</span>
                   </div>
                   <h3 className="mt-4 text-base font-medium">{finding.label}</h3>
-                  <p className="mt-2 text-sm leading-6 text-black/55">
-                    {evidenceText(finding.evidence) || "The audit detected this issue on the page."}
-                  </p>
+                  {evidenceText(finding.evidence) && (
+                    <p className="mt-1 text-xs text-black/40">{evidenceText(finding.evidence)}</p>
+                  )}
+                  <p className="mt-2 text-sm leading-6 text-black/55">{finding.whyItMatters}</p>
+                  <div className="mt-3 rounded-lg bg-black/[0.03] p-3 text-xs leading-5 text-black/70">
+                    <span className="font-semibold">What to do: </span>
+                    {finding.recommendation}
+                  </div>
                 </article>
               ))}
               {result.findings.length === 0 && (

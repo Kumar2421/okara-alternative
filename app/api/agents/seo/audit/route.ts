@@ -9,6 +9,7 @@ import { upsertFinding as upsertFindingSupabase } from "@/lib/domain/findings/fi
 import { upsertFinding } from "@/lib/domain/findings/findingStore";
 import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
 import { takeCachedPublicAudit } from "@/lib/domain/seo/publicAuditCache";
+import { explainFinding } from "@/lib/domain/seo/findingExplanations";
 
 // Vercel: LLM/crawl calls can run past the 10s default — allow up to the
 // platform max for this route (Hobby plan caps at 60s; Pro allows more).
@@ -88,6 +89,7 @@ export async function POST(req: NextRequest) {
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
       for (const finding of auditResult.findings) {
+        const { whyItMatters, recommendation } = explainFinding(finding);
         await upsertFindingSupabase(db, user.id, {
           projectId,
           source: "seo-audit",
@@ -96,8 +98,8 @@ export async function POST(req: NextRequest) {
           entityType: "page-issue",
           entityId: finding.issueId,
           url: auditResult.url,
-          evidence: { label: finding.label, ...finding.evidence },
-          recommendation: "Fix the reported issue and re-run the audit to verify the change.",
+          evidence: { label: finding.label, whyItMatters, ...finding.evidence },
+          recommendation,
         });
       }
 
@@ -127,6 +129,7 @@ export async function POST(req: NextRequest) {
     const createdAt = new Date().toISOString();
 
     for (const finding of auditResult.findings) {
+      const { whyItMatters, recommendation } = explainFinding(finding);
       upsertFinding({
         projectId: getActiveProjectId()!,
         source: "seo-audit",
@@ -135,8 +138,8 @@ export async function POST(req: NextRequest) {
         entityType: "page-issue",
         entityId: finding.issueId,
         url: auditResult.url,
-        evidence: { label: finding.label, ...finding.evidence },
-        recommendation: "Fix the reported issue and re-run the audit to verify the change.",
+        evidence: { label: finding.label, whyItMatters, ...finding.evidence },
+        recommendation,
       });
     }
 
