@@ -1,4 +1,15 @@
 import * as cheerio from "cheerio";
+
+/**
+ * Scoped to head > title, first match only: a bare `$("title")` also matches
+ * every SVG <title> accessibility tag in the page (common in icon/logo
+ * markup) and concatenates all of their text into one string, producing a
+ * nonsense multi-hundred-char "title" (confirmed on real sites — GitHub,
+ * BBC — where logo-carousel SVG titles got appended to the real one).
+ */
+export function extractTitle($: cheerio.CheerioAPI): string {
+  return $("head > title").first().text().trim();
+}
 import { request as httpRequest, type IncomingHttpHeaders } from "http";
 import { request as httpsRequest } from "https";
 import { jinaRead, extractMarkdownLinks } from "@/lib/domain/shared/jinaReader";
@@ -387,7 +398,7 @@ export class SEOAgent {
     }
 
     // 2. Parse tags
-    const title = $("title").text() || "";
+    const title = extractTitle($);
     const description = $("meta[name='description']").attr("content") || "";
     const canonical = $("link[rel='canonical']").attr("href")?.trim() || undefined;
     const robots = $("meta[name='robots']").attr("content")?.trim() || undefined;
