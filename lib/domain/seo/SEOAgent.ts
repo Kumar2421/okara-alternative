@@ -489,9 +489,11 @@ export class SEOAgent {
     // (e.g. h1 straight to h3 with no h2 between them). Cheerio returns
     // matches in document order, so this reflects the real page structure.
     let lastLevel = 0;
+    let headingOrderOk = true;
     $("h1, h2, h3, h4, h5, h6").each((_, el) => {
       const level = Number(el.tagName?.slice(1));
       if (lastLevel > 0 && level - lastLevel > 1) {
+        headingOrderOk = false;
         issues.push({ label: `Heading order skips a level (h${lastLevel} → h${level})`, level: "Warning" });
         findings.push({
           issueId: "heading-order-skip",
@@ -635,12 +637,19 @@ export class SEOAgent {
     // On-Page Score — a deterministic % of real checks passed, not a
     // Lighthouse-style number. Every check here mirrors something already
     // computed above (title/description length, single H1, OG/Twitter presence).
+    // Must cover every finding category SEOAgent can surface for this page —
+    // a category that's flagged as a finding but excluded here produces a
+    // contradiction a stranger will immediately distrust: 100/100 next to an
+    // active warning (confirmed on a real site: canonical-missing scored 100).
     const onPageChecks = [
       !!title && title.length <= 60,
       !!description && description.length <= 160,
+      !!canonical,
       headings.h1 === 1,
+      headingOrderOk,
       openGraph.length > 0 && missingOg.length === 0,
       twitter.length > 0 && missingTwitter.length === 0,
+      !robotsTxt.disallowsThisPage,
       cacheable,
     ];
     const onPageScore = Math.round((onPageChecks.filter(Boolean).length / onPageChecks.length) * 100);
