@@ -43,7 +43,15 @@ export async function POST(request: Request) {
     });
 
     if (error) {
+      // Was previously swallowed into a console.error with `{ ok: true }`
+      // still returned -- a failed insert (RLS denial, connection issue,
+      // schema mismatch) was indistinguishable from success to any caller
+      // or monitoring that only checks the HTTP response. sendBeacon never
+      // reads the response either way (fire-and-forget by spec), but the
+      // fetch() fallback path -- and any future caller -- can now actually
+      // detect this.
       console.error("[audit-funnel] persistence failed", error);
+      return NextResponse.json({ ok: false, error: "Persistence failed." }, { status: 500 });
     }
 
     return NextResponse.json({ ok: true });
