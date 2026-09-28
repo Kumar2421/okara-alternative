@@ -3,12 +3,14 @@ export const AUDIT_FUNNEL_EVENTS = [
   "audit_completed",
   "audit_failed",
   "signup_cta_clicked",
+  "signup_completed",
 ] as const;
 
 export type AuditFunnelEvent = (typeof AUDIT_FUNNEL_EVENTS)[number];
 
 export type AuditFunnelPayload = {
   event: AuditFunnelEvent;
+  sessionId?: string;
   findingCount?: number;
   criticalCount?: number;
   warningCount?: number;
@@ -22,9 +24,15 @@ function safeCount(value: unknown): number | undefined {
   return Math.max(0, Math.min(MAX_COUNT, Math.floor(value)));
 }
 
+function safeSessionId(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length < 16 || value.length > 128) return undefined;
+  return value;
+}
+
 export function sanitizeAuditFunnelPayload(input: AuditFunnelPayload): AuditFunnelPayload {
   return {
     event: input.event,
+    sessionId: safeSessionId(input.sessionId),
     findingCount: safeCount(input.findingCount),
     criticalCount: safeCount(input.criticalCount),
     warningCount: safeCount(input.warningCount),
