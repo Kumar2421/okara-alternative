@@ -66,7 +66,9 @@ export default function LeadsPanel({ open, onToggle }: { open: boolean; onToggle
   }, []);
 
   useEffect(() => {
-    if (open && project) loadLeads();
+    // Deferred a tick so the fetch's own setLoading(true) doesn't run
+    // synchronously inside the effect body (react-hooks/set-state-in-effect).
+    if (open && project) queueMicrotask(() => loadLeads());
   }, [open, project?.id, loadLeads]);
 
   useEffect(() => {
