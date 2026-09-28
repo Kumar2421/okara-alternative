@@ -10,6 +10,47 @@ permissions:
   contents: read
 
 jobs:
+  pr-base-guard:
+    # A PR's base defaults to whatever branch was checked out when it was
+    # created, so it's easy to open one against a stale feature branch by
+    # accident. That already cost this repo a shipped fix: PR #22 was merged
+    # into `feat/production-runtime-readiness` (34 commits behind main),
+    # GitHub reported it as MERGED and deleted the branch, and the
+    # multi-tenant isolation fix it carried never reached main or production
+    # -- silently, for ~12 hours, until someone diffed main by hand.
+    #
+    # This makes that mistake loud instead of silent. Targeting a non-main
+    # base is still allowed (stacked PRs are legitimate) -- it just has to be
+    # deliberate enough to say so in the PR body.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check PR base branch
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if [ "$BASE_REF" = "main" ]; then
+            echo "Base is main."
+            exit 0
+          fi
+          if printf '%s' "$PR_BODY" | grep -qiF 'intentional-base'; then
+            echo "Base is '$BASE_REF' -- explicitly acknowledged via 'intentional-base' in the PR body."
+            exit 0
+          fi
+          echo "::error::This PR targets '$BASE_REF', not 'main'."
+          echo ""
+          echo "Merging here does NOT ship to main or production. GitHub will still"
+          echo "report the PR as MERGED, which is how PR #22's fix was silently lost."
+          echo ""
+          echo "If this is wrong (the usual case), retarget it:"
+          echo "    gh pr edit <number> --base main"
+          echo ""
+          echo "If a stacked PR onto '$BASE_REF' really is intended, add the word"
+          echo "'intentional-base' to the PR description to acknowledge it."
+          exit 1
+
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 15
