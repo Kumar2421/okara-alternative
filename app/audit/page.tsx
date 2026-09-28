@@ -70,30 +70,49 @@ export default function AuditPage() {
     setLoading(true);
     setError("");
     setResult(null);
-
     trackAuditEvent({ event: "audit_started" });
 
+    let response: Response;
     try {
-      const response = await fetch("/api/public/audit", {
+      response = await fetch("/api/public/audit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url }),
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Audit failed.");
-      trackAuditEvent({
-        event: "audit_completed",
-        findingCount: data.summary?.totalFindings,
-        criticalCount: data.summary?.critical,
-        warningCount: data.summary?.warnings,
-      });
-      setResult(data);
-    } catch (err) {
+    } catch {
+      // fetch() itself only throws on a network-level failure (offline, DNS,
+      // CORS) -- never for a non-2xx response, which is handled below.
       trackAuditEvent({ event: "audit_failed", failureCode: "request_failed" });
-      setError(err instanceof Error ? err.message : "Audit failed.");
-    } finally {
+      setError("Audit failed.");
       setLoading(false);
+      return;
     }
+
+    let data: AuditResult & { error?: string };
+    try {
+      data = await response.json();
+    } catch {
+      trackAuditEvent({ event: "audit_failed", failureCode: "invalid_response" });
+      setError("Audit failed.");
+      setLoading(false);
+      return;
+    }
+
+    if (!response.ok) {
+      trackAuditEvent({ event: "audit_failed", failureCode: "invalid_response" });
+      setError(data.error || "Audit failed.");
+      setLoading(false);
+      return;
+    }
+
+    setResult(data);
+    trackAuditEvent({
+      event: "audit_completed",
+      findingCount: data.summary?.totalFindings,
+      criticalCount: data.summary?.critical,
+      warningCount: data.summary?.warnings,
+    });
+    setLoading(false);
   }
 
   return (
