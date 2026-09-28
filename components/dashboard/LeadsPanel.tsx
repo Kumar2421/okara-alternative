@@ -66,7 +66,9 @@ export default function LeadsPanel({ open, onToggle }: { open: boolean; onToggle
   }, []);
 
   useEffect(() => {
-    if (open && project) loadLeads();
+    // Deferred a tick so the fetch's own setLoading(true) doesn't run
+    // synchronously inside the effect body (react-hooks/set-state-in-effect).
+    if (open && project) queueMicrotask(() => loadLeads());
   }, [open, project?.id, loadLeads]);
 
   useEffect(() => {
@@ -262,7 +264,7 @@ export default function LeadsPanel({ open, onToggle }: { open: boolean; onToggle
           Leads
           {leads.length > 0 && <span className="text-[11px] font-normal text-gray-400">({leads.length})</span>}
         </div>
-        <button onClick={onToggle} title="Collapse" className="text-gray-400 hover:text-gray-700">
+        <button onClick={onToggle} title="Collapse" className="hidden text-gray-400 hover:text-gray-700 md:block">
           <ChevronLeft size={15} />
         </button>
       </div>

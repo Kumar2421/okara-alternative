@@ -608,7 +608,7 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
           <BarChart2 size={15} className="text-gray-500" /> Analytics
         </div>
         <div className="flex items-center gap-3 text-gray-400">
-          <button onClick={onToggle} title="Collapse" className="hover:text-gray-700">
+          <button onClick={onToggle} title="Collapse" className="hidden hover:text-gray-700 md:block">
             <ChevronLeft size={15} />
           </button>
         </div>
@@ -635,9 +635,9 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
         </div>
       )}
 
-      <div className="flex shrink-0 gap-1 border-b border-gray-200 p-2">
+      <div className="okara-scroll flex shrink-0 gap-1 overflow-x-auto border-b border-gray-200 p-2">
         {TABS.map((t) => (
-          <button key={t} onClick={() => setTab(t)} className={`rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors ${tab === t ? "bg-gray-100 text-gray-900" : "text-gray-400 hover:text-gray-600"}`}>
+          <button key={t} onClick={() => setTab(t)} className={`shrink-0 rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors ${tab === t ? "bg-gray-100 text-gray-900" : "text-gray-400 hover:text-gray-600"}`}>
             {t}
           </button>
         ))}

@@ -204,7 +204,7 @@ export default function ContextPanel({
           <Layers size={15} className="text-gray-500" />
           Context
         </div>
-        <button onClick={onToggle} className="text-gray-400 hover:text-gray-700" title="Collapse">
+        <button onClick={onToggle} className="hidden text-gray-400 hover:text-gray-700 md:block" title="Collapse">
           <ChevronLeft size={15} />
         </button>
       </div>
