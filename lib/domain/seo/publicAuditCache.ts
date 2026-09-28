@@ -17,7 +17,8 @@ const entries = new Map<string, { payload: SEOAuditPayload; expiresAt: number }>
 function normalizeKey(rawUrl: string): string {
   try {
     const u = new URL(rawUrl);
-    return `${u.hostname.toLowerCase()}${u.pathname.replace(/\/+$/, "")}`;
+    u.hash = "";
+    return u.toString();
   } catch {
     return rawUrl.trim().toLowerCase();
   }
