@@ -52,8 +52,16 @@ export function refreshFinding(projectId: string, id: string, input: {
 }
 
 export function listProjectFindings(projectId: string): Finding[] {
+  // Resolved findings sort last regardless of severity — otherwise an old,
+  // already-fixed critical finding (still carrying severity: "critical")
+  // outranks a live, unresolved warning, directly undermining "what should
+  // I fix first." "failed" (recheck ran, issue confirmed still present)
+  // stays ranked by severity like any other active finding.
   const rows = getDb().prepare(
-    "SELECT * FROM findings WHERE project_id = ? ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, last_seen DESC"
+    `SELECT * FROM findings WHERE project_id = ? ORDER BY
+       CASE WHEN status = 'verified' THEN 1 ELSE 0 END,
+       CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
+       last_seen DESC`
   ).all(projectId) as FindingRow[];
   return rows.map(mapFinding);
 }

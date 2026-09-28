@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { canTransitionFinding } from "./findingTypes";
 import type { Finding, FindingSeverity } from "./findingTypes";
+import { compareFindingsByPriority } from "./findingPriority";
 
 /** Supabase mirror of findingStore.ts (self-host, SQLite) — same function
  * names/shapes, same table layout, just Postgres + an explicit userId for
@@ -42,8 +43,6 @@ function mapFinding(row: FindingRow): Finding {
   };
 }
 
-const SEVERITY_ORDER: Record<FindingSeverity, number> = { critical: 0, warning: 1, info: 2 };
-
 export async function listProjectFindings(db: SupabaseClient, userId: string, projectId: string): Promise<Finding[]> {
   const { data } = await db
     .from("findings")
@@ -53,7 +52,7 @@ export async function listProjectFindings(db: SupabaseClient, userId: string, pr
     .order("last_seen", { ascending: false });
 
   const rows = (data ?? []) as FindingRow[];
-  rows.sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
+  rows.sort(compareFindingsByPriority);
   return rows.map(mapFinding);
 }
 
