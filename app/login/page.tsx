@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Mail, Lock, CheckCircle2 } from "lucide-react";
 import { DotLottieReact } from "@lottiefiles/dotlottie-react";
 import { createClient } from "@/utils/supabase/client";
@@ -41,12 +41,23 @@ function MarloMark({ className }: { className?: string }) {
 
 export default function LoginPage() {
   const router = useRouter();
-  const [mode, setMode] = useState<Mode>(() =>
-    typeof window !== "undefined" &&
-    new URLSearchParams(window.location.search).get("mode") === "signup"
-      ? "signup"
-      : "signin",
-  );
+  const searchParams = useSearchParams();
+  const [mode, setMode] = useState<Mode>(() => (searchParams.get("mode") === "signup" ? "signup" : "signin"));
+
+  // A `useState` lazy initializer only runs on first mount. When this page
+  // is reached via a client-side <Link> transition (e.g. from /audit's
+  // "Create free account" CTA), Next's router can reuse an already-mounted
+  // /login instance from an earlier prefetch of the plain, param-less
+  // "/login" link in the page header -- the initializer never re-runs, so
+  // the page silently stays in sign-in mode despite ?mode=signup in the
+  // URL. useSearchParams() is reactive to client-side navigation, so
+  // resyncing from it here self-corrects regardless of how the page was
+  // reached. Confirmed live: reproduced this exact stuck-in-signin state
+  // against production going through the real CTA link.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMode(searchParams.get("mode") === "signup" ? "signup" : "signin");
+  }, [searchParams]);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
