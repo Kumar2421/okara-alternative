@@ -155,7 +155,14 @@ export default function AuditPage() {
     <main className="min-h-screen bg-[#fafaf8] text-[#111111]">
       <header className="border-b border-black/10 bg-white">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-5">
-          <Link href="/login" className="text-sm font-bold tracking-tight">Marlo</Link>
+          <a
+            href="https://marlo.mlforge.in"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm font-bold tracking-tight"
+          >
+            Marlo
+          </a>
           <Link href="/login" className="text-sm text-black/60 hover:text-black">Sign in</Link>
         </div>
       </header>
