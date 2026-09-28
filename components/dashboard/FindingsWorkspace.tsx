@@ -5,6 +5,7 @@ import { AlertTriangle, Check, ChevronRight, CircleDot, Loader2, Plus, RefreshCw
 import type { Finding, FindingStatus } from "@/lib/domain/findings/findingTypes";
 import type { Recommendation } from "@/lib/domain/recommendations/recommendationTypes";
 import type { Action, ActionStatus } from "@/lib/domain/actions/actionTypes";
+import { evidenceRowsForFinding, whyItMattersForFinding } from "@/lib/domain/findings/evidenceDisplay";
 
 const ACTION_STATUS_LABEL: Record<ActionStatus, string> = {
   proposed: "Proposed",
@@ -238,11 +239,8 @@ export default function FindingsWorkspace() {
     }
   };
 
-  const evidence = selected?.evidence ?? {};
-  const page = (evidence.page ?? {}) as Record<string, unknown>;
-  const meta = (page.meta ?? {}) as Record<string, unknown>;
-  const relevance = (page.contentRelevance ?? {}) as Record<string, unknown>;
-  const timing = (page.serverTiming ?? {}) as Record<string, unknown>;
+  const evidenceRows = selected ? evidenceRowsForFinding(selected) : [];
+  const whyItMatters = selected ? whyItMattersForFinding(selected) : null;
 
   if (loading) {
     return <div className="flex items-center justify-center py-16 text-sm text-gray-500"><Loader2 size={18} className="mr-2 animate-spin" />Loading findings...</div>;
@@ -331,15 +329,13 @@ export default function FindingsWorkspace() {
 
                 <section>
                   <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Why this was flagged</div>
+                  {whyItMatters && (
+                    <p className="mb-2 rounded-xl border border-gray-200 bg-gray-50 p-3 text-[12px] leading-5 text-gray-700">{whyItMatters}</p>
+                  )}
                   <div className="overflow-hidden rounded-xl border border-gray-200">
-                    <EvidenceValue label="Clicks" value={evidence.clicks} />
-                    <EvidenceValue label="Impressions" value={evidence.impressions} />
-                    <EvidenceValue label="CTR" value={typeof evidence.ctr === "number" ? `${(evidence.ctr * 100).toFixed(1)}%` : evidence.ctr} />
-                    <EvidenceValue label="Position" value={evidence.position} />
-                    <EvidenceValue label="Indexable" value={meta.indexable} />
-                    <EvidenceValue label="Canonical" value={meta.canonical ?? "Missing"} />
-                    <EvidenceValue label="Keyword relevance" value={typeof relevance.keywordRelevance === "number" ? `${relevance.keywordRelevance}%` : relevance.keywordRelevance} />
-                    <EvidenceValue label="TTFB" value={typeof timing.ttfbMs === "number" ? `${Math.round(timing.ttfbMs)} ms` : null} />
+                    {evidenceRows.map((row) => (
+                      <EvidenceValue key={row.key} label={row.label} value={row.value} />
+                    ))}
                   </div>
                 </section>
 
