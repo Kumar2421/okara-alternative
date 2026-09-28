@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { sanitizeAuditFunnelPayload } from "./auditFunnel";
+import { sanitizeAuditFunnelPayload } from "./auditFunnel.ts";
 
 test("keeps only bounded funnel metadata", () => {
   assert.deepEqual(
