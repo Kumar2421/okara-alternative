@@ -2,12 +2,58 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Mail, Lock, CheckCircle2 } from "lucide-react";
+import { Mail, Lock } from "lucide-react";
 import { DotLottieReact } from "@lottiefiles/dotlottie-react";
 import { createClient } from "@/utils/supabase/client";
 import { FEATURES } from "@/lib/features";
 import { GOOGLE_ANALYTICS_SCOPES } from "@/lib/googleOAuthScopes";
 import type { AuditFunnelPayload } from "@/lib/analytics/auditFunnel";
+import {
+  GoogleSearchConsoleIcon,
+  GoogleAnalyticsIcon,
+  GmailIcon,
+  GitHubIcon,
+  PageSpeedIcon,
+  TavilyIcon,
+  GooglePlacesIcon,
+  WordPressIcon,
+  WebflowIcon,
+  FramerIcon,
+  WixIcon,
+  SanityIcon,
+  LinkedInIcon,
+  XIcon,
+  WhatsAppIcon,
+  TelegramIcon,
+  TikTokIcon,
+  InstagramIcon,
+  SlackIcon,
+} from "@/components/login/IntegrationIcons";
+
+// Same "live today" set as the marketing site's integrations section
+// (marlo/src/components/sites/marlo/root/IntegrationsSection.tsx) -- keep
+// these two in sync if either changes.
+const INTEGRATIONS: { label: string; icon: typeof GmailIcon; soon?: boolean }[] = [
+  { label: "Google Search\nConsole", icon: GoogleSearchConsoleIcon },
+  { label: "Google Analytics", icon: GoogleAnalyticsIcon },
+  { label: "Gmail", icon: GmailIcon },
+  { label: "GitHub", icon: GitHubIcon },
+  { label: "PageSpeed\nInsights", icon: PageSpeedIcon },
+  { label: "Tavily", icon: TavilyIcon },
+  { label: "Google Places", icon: GooglePlacesIcon },
+  { label: "WordPress", icon: WordPressIcon, soon: true },
+  { label: "Webflow", icon: WebflowIcon, soon: true },
+  { label: "Framer", icon: FramerIcon, soon: true },
+  { label: "Wix", icon: WixIcon, soon: true },
+  { label: "Sanity", icon: SanityIcon, soon: true },
+  { label: "LinkedIn", icon: LinkedInIcon, soon: true },
+  { label: "X (Twitter)", icon: XIcon, soon: true },
+  { label: "WhatsApp", icon: WhatsAppIcon, soon: true },
+  { label: "Telegram", icon: TelegramIcon, soon: true },
+  { label: "TikTok", icon: TikTokIcon, soon: true },
+  { label: "Instagram", icon: InstagramIcon, soon: true },
+  { label: "Slack", icon: SlackIcon, soon: true },
+];
 
 type Mode = "signin" | "signup";
 
@@ -305,21 +351,44 @@ export default function LoginPage() {
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-black/20" />
 
-          <div className="relative z-10 flex h-full w-full flex-col justify-between p-8 sm:p-10">
-            <div />
+          <div className="relative z-10 flex h-full w-full flex-col justify-between overflow-y-auto p-8 sm:p-10">
+            <div className="flex items-center gap-2.5">
+              <DotLottieReact src="/ghost-loader.lottie" autoplay loop className="h-9 w-9" />
+              <span className="text-sm font-semibold tracking-tight text-white/90">Marlo</span>
+            </div>
+
             <div>
-              <h2 className="max-w-[520px] text-3xl font-medium tracking-[-0.03em] text-white sm:text-4xl lg:text-[44px] lg:leading-[1.08]">
-                Grow faster,
+              <h2 className="max-w-[520px] text-2xl font-medium tracking-[-0.03em] text-white sm:text-3xl lg:text-[36px] lg:leading-[1.1]">
+                Connect your stack.
                 <br />
-                automatically.
+                Grow automatically.
               </h2>
-              <p className="mt-3 max-w-[420px] text-sm text-white/85">
-                SEO audits, competitor tracking, and lead outreach — run by AI agents
-                connected to your own accounts.
+              <p className="mt-2.5 max-w-[440px] text-sm text-white/75">
+                Real integrations, wired to your own accounts — not mock data. Seven live today,
+                more publishing targets on the way.
               </p>
-              <div className="mt-5 flex items-center gap-2 text-sm text-white/85">
-                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
-                Bring your own LLM key. Your data stays in your project.
+
+              <div className="mt-6 rounded-2xl bg-white p-5 shadow-xl">
+                <div className="flex flex-wrap gap-x-3 gap-y-4">
+                  {INTEGRATIONS.map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <div key={item.label} className="group relative flex w-[68px] flex-col items-center gap-1.5">
+                        <div className="flex h-11 w-11 items-center justify-center rounded-lg border border-black/10 bg-black/[0.03]">
+                          <Icon className="h-5 w-5" />
+                        </div>
+                        <span className="whitespace-pre-line text-center text-[9.5px] leading-tight text-black/55">
+                          {item.label}
+                        </span>
+                        {item.soon && (
+                          <span className="absolute -right-1 -top-1 rounded-full border border-black/10 bg-black/[0.04] px-1 py-0.5 text-[7px] font-medium text-black/50">
+                            SOON
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           </div>
