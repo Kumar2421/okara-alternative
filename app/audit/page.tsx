@@ -1,8 +1,23 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import type { AuditFunnelPayload } from "@/lib/analytics/auditFunnel";
+
+/** Same bounds as the server's own check (lib/domain/seo/SEOAgent.ts
+ * assertPublicHttpUrl) -- this is just a client-side pre-filter so a
+ * malformed ?url= doesn't auto-submit garbage; the server remains the real
+ * gate against private/local addresses. */
+function parsePublicHttpUrl(raw: string): string | null {
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
 
 type Finding = {
   issueId: string;
@@ -60,13 +75,14 @@ function trackAuditEvent(payload: AuditFunnelPayload) {
 }
 
 export default function AuditPage() {
-  const [url, setUrl] = useState("");
+  const searchParams = useSearchParams();
+  const [url, setUrl] = useState(() => parsePublicHttpUrl(searchParams.get("url") ?? "") ?? "");
   const [result, setResult] = useState<AuditResult | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const autoRanRef = useRef(false);
 
-  async function runAudit(event: FormEvent) {
-    event.preventDefault();
+  async function runAuditFor(targetUrl: string) {
     setLoading(true);
     setError("");
     setResult(null);
@@ -77,7 +93,7 @@ export default function AuditPage() {
       response = await fetch("/api/public/audit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ url: targetUrl }),
       });
     } catch {
       // fetch() itself only throws on a network-level failure (offline, DNS,
@@ -114,6 +130,26 @@ export default function AuditPage() {
     });
     setLoading(false);
   }
+
+  function runAudit(event: FormEvent) {
+    event.preventDefault();
+    void runAuditFor(url);
+  }
+
+  // A personalized outreach link (?url=<their site>) should land on their
+  // own result immediately, not an empty form they have to fill in
+  // themselves -- that's the whole point of sending a specific link. Runs
+  // once per page load only (autoRanRef), never re-fires on later
+  // navigation/param changes within the same mount.
+  useEffect(() => {
+    if (autoRanRef.current) return;
+    const prefilled = parsePublicHttpUrl(searchParams.get("url") ?? "");
+    if (!prefilled) return;
+    autoRanRef.current = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void runAuditFor(prefilled);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <main className="min-h-screen bg-[#fafaf8] text-[#111111]">
