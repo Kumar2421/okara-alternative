@@ -8,6 +8,7 @@ import { chargeCredits, InsufficientCreditsError } from "@/lib/credits";
 import { upsertFinding as upsertFindingSupabase } from "@/lib/domain/findings/findingStoreSupabase";
 import { upsertFinding } from "@/lib/domain/findings/findingStore";
 import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
+import { takeCachedPublicAudit } from "@/lib/domain/seo/publicAuditCache";
 
 // Vercel: LLM/crawl calls can run past the 10s default — allow up to the
 // platform max for this route (Hobby plan caps at 60s; Pro allows more).
@@ -73,8 +74,11 @@ export async function POST(req: NextRequest) {
         if (secret) pageSpeedApiKey = secret as string;
       }
 
-      const agent = new SEOAgent(pageSpeedApiKey);
-      const auditResult = await agent.audit(url);
+      // No PageSpeed key means this audit would produce the exact same
+      // result as the public /audit crawl for this URL — reuse it instead
+      // of crawling again if the user just came through that funnel.
+      const auditResult = (!pageSpeedApiKey && takeCachedPublicAudit(url))
+        || await new SEOAgent(pageSpeedApiKey).audit(url);
 
       const createdAt = new Date().toISOString();
       const { error } = await db.from("seo_audits").upsert(
@@ -117,8 +121,8 @@ export async function POST(req: NextRequest) {
       | undefined;
     const pageSpeedApiKey = stored?.value || process.env.PAGESPEED_API_KEY || undefined;
 
-    const agent = new SEOAgent(pageSpeedApiKey);
-    const auditResult = await agent.audit(url);
+    const auditResult = (!pageSpeedApiKey && takeCachedPublicAudit(url))
+      || await new SEOAgent(pageSpeedApiKey).audit(url);
 
     const createdAt = new Date().toISOString();
 

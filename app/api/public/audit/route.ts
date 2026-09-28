@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SEOAgent, assertPublicHttpUrl, type Finding } from "@/lib/domain/seo/SEOAgent";
+import { setCachedPublicAudit } from "@/lib/domain/seo/publicAuditCache";
 
 export const maxDuration = 60;
 
@@ -59,6 +60,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const result = await new SEOAgent().audit(url.toString());
+    setCachedPublicAudit(result.url, result);
     const findings = rankFindings(result.findings);
 
     return NextResponse.json({
