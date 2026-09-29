@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Lock, Check, Loader2, ExternalLink } from "lucide-react";
 import { useToast } from "@/components/dashboard/Toast";
+import { FEATURES } from "@/lib/features";
 
 /** Real X (Twitter) posting credential — separate from any LLM key, used
  * only to actually publish threads (lib/domain/x/XAgent.ts's this.client).
@@ -73,6 +74,21 @@ export default function XConnectCard() {
     } finally {
       setBusy(false);
     }
+  }
+
+  if (FEATURES.PLATFORM_MODE) {
+    return (
+      <div className="rounded-xl border border-gray-200 bg-white p-4">
+        <div className="flex items-start gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#111111] text-[13px] font-bold text-white">𝕏</span>
+          <div>
+            <div className="text-[13px] font-semibold text-gray-900">X (Twitter)</div>
+            <div className="mt-1 text-[12px] text-gray-500">Posting requires an OAuth connection. Hosted token entry is disabled; OAuth-based X publishing will be enabled here when the platform connection is available.</div>
+          </div>
+          <span className="ml-auto rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-500">OAuth coming soon</span>
+        </div>
+      </div>
+    );
   }
 
   return (
