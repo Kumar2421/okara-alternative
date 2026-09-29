@@ -564,12 +564,14 @@ export class SEOAgent {
     // as data, even with a disclosure banner next to it).
     let pageSpeedScores: SEOAuditPayload["pageSpeed"];
     let vitals: SEOAuditPayload["coreWebVitals"];
+    let lighthouseIssues: SEOAuditPayload["lighthouseIssues"];
 
     if (this.pageSpeedApiKey) {
       try {
         const result = await fetchPageSpeed(url, this.pageSpeedApiKey);
         pageSpeedScores = result.pageSpeed;
         vitals = result.coreWebVitals;
+        lighthouseIssues = result.lighthouseIssues;
       } catch (e) {
         console.warn("Failed to fetch real PageSpeed Insights data.", e);
         issues.push({ label: "Failed to fetch PageSpeed Insights data — Performance/CWV not available this run", level: "Warning" });
@@ -728,6 +730,7 @@ export class SEOAgent {
       findings,
       pageSpeed: pageSpeedScores,
       coreWebVitals: vitals,
+      lighthouseIssues,
       bodyText,
       contentSource,
       design: { themeColor, fonts: Array.from(fonts), logoUrl, faviconUrl },
