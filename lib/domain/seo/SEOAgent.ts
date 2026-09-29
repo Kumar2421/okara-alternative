@@ -15,7 +15,7 @@ export type { CwvStatus, CwvMetric, CwvSnapshot } from "@/lib/domain/seo/pageSpe
  * patch can make safely without touching rendered content structure. */
 export type Finding = {
   issueId: string;
-  category: "meta-title" | "meta-description" | "canonical" | "og-tags" | "twitter-tags" | "robots-txt" | "heading-structure";
+  category: "meta-title" | "meta-description" | "canonical" | "og-tags" | "twitter-tags" | "robots-txt" | "heading-structure" | "lighthouse";
   severity: "Warning" | "Error";
   label: string;
   evidence: Record<string, string | number | null>;
@@ -572,6 +572,36 @@ export class SEOAgent {
         pageSpeedScores = result.pageSpeed;
         vitals = result.coreWebVitals;
         lighthouseIssues = result.lighthouseIssues;
+
+        // Promote the highest-signal Lighthouse problems into the same
+        // findings pipeline as on-page SEO issues. Keep this intentionally
+        // small: users need a focused list, not every Lighthouse audit row.
+        if (lighthouseIssues) {
+          const candidates = [
+            ...lighthouseIssues.mobile.map((issue) => ({ ...issue, device: "mobile" as const })),
+            ...lighthouseIssues.desktop.map((issue) => ({ ...issue, device: "desktop" as const })),
+          ]
+            .filter((issue) => issue.mode === "opportunity" || (issue.score !== null && issue.score < 0.5))
+            .sort((a, b) => (a.score ?? 1) - (b.score ?? 1))
+            .slice(0, 6);
+
+          for (const issue of candidates) {
+            findings.push({
+              issueId: `lighthouse-${issue.device}-${issue.id}`,
+              category: "lighthouse",
+              severity: issue.score !== null && issue.score < 0.5 ? "Error" : "Warning",
+              label: issue.title,
+              evidence: {
+                device: issue.device,
+                mode: issue.mode,
+                score: issue.score,
+                displayValue: issue.displayValue ?? null,
+                auditId: issue.id,
+              },
+              autoFixable: false,
+            });
+          }
+        }
       } catch (e) {
         console.warn("Failed to fetch real PageSpeed Insights data.", e);
         issues.push({ label: "Failed to fetch PageSpeed Insights data — Performance/CWV not available this run", level: "Warning" });
