@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Check, ExternalLink } from "lucide-react";
 import { useToast } from "@/components/dashboard/Toast";
+import { FEATURES } from "@/lib/features";
 import BrandIcon from "@/components/settings/BrandIcon";
 
 export default function PageSpeedCard() {
@@ -70,6 +71,21 @@ export default function PageSpeedCard() {
     } finally {
       setBusy(false);
     }
+  }
+
+  if (FEATURES.PLATFORM_MODE) {
+    return (
+      <div className="rounded-xl border border-gray-200 bg-white p-4">
+        <div className="flex items-start gap-3">
+          <BrandIcon id="lighthouse" color="#f44b21" fallback="G" />
+          <div>
+            <div className="text-[13px] font-semibold text-gray-900">Google PageSpeed Insights</div>
+            <div className="mt-1 text-[12px] text-gray-500">Lighthouse and Core Web Vitals are provided by the hosted platform and managed by Marlo. No API key is required.</div>
+          </div>
+          <span className="ml-auto rounded-full bg-[#e6f7f4] px-2 py-0.5 text-[10px] font-medium text-[#00846f]">Managed by Marlo</span>
+        </div>
+      </div>
+    );
   }
 
   return (
