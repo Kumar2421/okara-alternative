@@ -12,6 +12,10 @@ export async function GET(req: NextRequest) {
   const settingsUrl = `${req.nextUrl.origin}/settings/api-credentials`;
   try {
     if (FEATURES.PLATFORM_MODE) {
+      return NextResponse.redirect(settingsUrl + "?gcp_error=" + encodeURIComponent("Google Cloud credentials are managed by the hosted platform."));
+    }
+
+    if (FEATURES.PLATFORM_MODE) {
       const supabase = await createClient();
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return NextResponse.redirect(`${settingsUrl}?gcp_error=${encodeURIComponent("Not authenticated")}`);
