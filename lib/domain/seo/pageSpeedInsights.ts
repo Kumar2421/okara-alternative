@@ -47,10 +47,15 @@ async function fetchLighthouse(url: string, apiKey: string, strategy: "desktop" 
   const data = await res.json();
 
   const categories = data.lighthouseResult?.categories ?? {};
-  const audits = data.lighthouseResult?.audits ?? {};
+  const audits = (data.lighthouseResult?.audits ?? {}) as Record<string, {
+    score?: number;
+    title?: string;
+    displayValue?: string;
+    details?: { type?: string };
+  }>;
 
   const lighthouseIssues: LighthouseIssue[] = Object.entries(audits)
-    .map(([id, audit]: [string, any]) => {
+    .map(([id, audit]) => {
       const score = typeof audit?.score === "number" ? audit.score : null;
       const mode = audit?.details?.type === "opportunity" ? "opportunity" : "diagnostic";
       return {
