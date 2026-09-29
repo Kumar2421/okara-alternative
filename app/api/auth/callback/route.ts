@@ -3,6 +3,7 @@ import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
 import { FEATURES } from "@/lib/features";
 import { getConnectedEmail, listSearchConsoleSites, listGA4Properties } from "@/lib/domain/shared/googleAnalyticsOAuth";
+import { getConnectedEmail as getGmailConnectedEmail } from "@/lib/domain/shared/gmailOAuth";
 import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
 import {
   upsertProjectIntegration,
@@ -29,6 +30,43 @@ import {
  * this is a no-op. Requires an active project to attach to — if none
  * exists yet (brand new install, no project created), this silently skips;
  * the user can always connect manually later once a project exists. */
+async function persistPlatformGmailTokens(
+  userId: string,
+  providerToken: string,
+  providerRefreshToken: string
+) {
+  const db = createServiceClient();
+  const email = await getGmailConnectedEmail(providerToken);
+  const now = new Date().toISOString();
+
+  const [{ data: accessSecretId, error: accessErr }, { data: refreshSecretId, error: refreshErr }] =
+    await Promise.all([
+      db.rpc("vault_set_secret", { p_secret: providerToken, p_name: `gmail_token:${userId}:access` }),
+      db.rpc("vault_set_secret", { p_secret: providerRefreshToken, p_name: `gmail_token:${userId}:refresh` }),
+    ]);
+
+  if (accessErr || refreshErr) {
+    throw new Error(accessErr?.message ?? refreshErr?.message ?? "Failed to store Gmail token");
+  }
+
+  const { error } = await db.from("integration_connections").upsert(
+    {
+      user_id: userId,
+      project_id: null,
+      provider: "gmail",
+      access_token_secret_id: accessSecretId as string,
+      refresh_token_secret_id: refreshSecretId as string,
+      token_expiry: now,
+      external_email: email ?? null,
+      external_property: null,
+      updated_at: now,
+    },
+    { onConflict: "user_id,project_id,provider" }
+  );
+
+  if (error) throw new Error(error.message);
+}
+
 async function persistGoogleServiceTokensSupabase(
   userId: string,
   providerToken: string,
@@ -156,6 +194,11 @@ export async function GET(request: NextRequest) {
         if (FEATURES.PLATFORM_MODE) {
           if (data.session.provider_refresh_token && data.user) {
             await persistGoogleServiceTokensSupabase(
+              data.user.id,
+              data.session.provider_token,
+              data.session.provider_refresh_token
+            );
+            await persistPlatformGmailTokens(
               data.user.id,
               data.session.provider_token,
               data.session.provider_refresh_token
