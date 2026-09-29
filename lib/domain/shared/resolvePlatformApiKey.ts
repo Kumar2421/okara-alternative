@@ -1,12 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 /**
- * BYOK third-party API keys (PageSpeed, Tavily) are saved through the
- * generic Settings UI (PageSpeedCard.tsx, TavilyCard.tsx -> POST
- * /api/settings), which writes them into user_settings -- a plain
- * per-user key/value row, not Vault-backed, same as self-host's SQLite
- * `settings` table. They are NOT provider_connections rows (that table is
- * for real OAuth-connected providers: gmail, ga4, gsc, gcp, github).
+ * In hosted mode these service credentials are operator-managed through
+ * deployment environment variables. They must never be collected from an
+ * end user. Self-host keeps the existing per-user SQLite settings path.
  *
  * Four read sites had copied the provider_connections+Vault lookup instead
  * (site-crawl/pagespeed, seo/audit, analytics/findings's recheck path, and
@@ -21,6 +18,11 @@ export async function resolvePlatformApiKey(
   userId: string,
   key: "pagespeed_api_key" | "tavily_api_key",
 ): Promise<string | undefined> {
-  const { data } = await db.from("user_settings").select("value").eq("user_id", userId).eq("key", key).maybeSingle();
-  return data?.value || undefined;
+  // Hosted service credentials belong to the operator, never the customer.
+  // The userId parameter is intentionally retained for call-site parity and
+  // future per-tenant policy, but is not used to read a customer secret.
+  void db;
+  void userId;
+  const envKey = key === "pagespeed_api_key" ? process.env.PAGESPEED_API_KEY : process.env.TAVILY_API_KEY;
+  return envKey?.trim() || undefined;
 }
