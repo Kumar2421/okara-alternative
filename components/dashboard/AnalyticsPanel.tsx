@@ -457,6 +457,7 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
         return;
       }
       setFindings((prev) => [data.finding, ...prev.filter((f) => f.id !== data.finding.id)]);
+      window.dispatchEvent(new CustomEvent("marlo:findings-updated"));
       logDone(`Finding created — ${data.finding.severity} ${data.finding.category}`);
     } catch {
       show("Failed to create finding.");
@@ -576,6 +577,7 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
       if (res.ok) {
         const data = await res.json();
         setAuditData(data);
+        window.dispatchEvent(new CustomEvent("marlo:findings-updated"));
         show("SEO Audit completed!");
       } else {
         const err = await res.json();
