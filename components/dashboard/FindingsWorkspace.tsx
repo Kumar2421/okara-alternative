@@ -195,6 +195,12 @@ export default function FindingsWorkspace() {
   };
 
   useEffect(() => {
+    const handleFindingsUpdated = () => { void load(); };
+    window.addEventListener("marlo:findings-updated", handleFindingsUpdated);
+    return () => window.removeEventListener("marlo:findings-updated", handleFindingsUpdated);
+  }, []);
+
+  useEffect(() => {
     let active = true;
     fetch("/api/agents/analytics/findings")
       .then(async (response) => {
