@@ -22,6 +22,7 @@ import { FEATURES } from "@/lib/features";
 export default function GitHubCodeFixCard() {
   const { show } = useToast();
   const [connected, setConnected] = useState(false);
+  const [githubAuthorized, setGithubAuthorized] = useState(false);
   const [repoSaved, setRepoSaved] = useState("");
   const [patInput, setPatInput] = useState("");
   const [repoInput, setRepoInput] = useState("");
@@ -34,6 +35,7 @@ export default function GitHubCodeFixCard() {
         .then(([providersData, settingsData]) => {
           const githubConn = providersData.connections?.find((c: { providerId: string }) => c.providerId === "github");
           const repoRow = settingsData.settings?.find((s: { key: string; value: string }) => s.key === "github_repo");
+          if (githubConn) setGithubAuthorized(true);
           if (githubConn && repoRow?.value) {
             setConnected(true);
             setRepoSaved(repoRow.value);
@@ -77,6 +79,36 @@ export default function GitHubCodeFixCard() {
   }
 
   async function handleConnect() {
+    if (FEATURES.PLATFORM_MODE) {
+      if (!repoInput.trim()) {
+        show("Enter the repository (owner/repo) you want Marlo to use.");
+        return;
+      }
+      setBusy(true);
+      try {
+        const res = await fetch("/api/settings/github/validate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ repo: repoInput.trim() }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          show(data.error || "Couldn't verify repository access.");
+          return;
+        }
+        await saveSetting("github_repo", data.fullName);
+        setConnected(true);
+        setRepoSaved(data.fullName);
+        setRepoInput("");
+        show(`Connected to ${data.fullName} — fixable SEO findings can now open real draft PRs.`);
+      } catch (err) {
+        show(err instanceof Error ? err.message : "Failed to connect repository.");
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
     if (!patInput.trim() || !repoInput.trim()) {
       show("Enter both a token and a repository (owner/repo).");
       return;
@@ -115,7 +147,8 @@ export default function GitHubCodeFixCard() {
     setBusy(true);
     try {
       if (FEATURES.PLATFORM_MODE) {
-        await fetch("/api/providers?providerId=github", { method: "DELETE" });
+        await fetch("/api/auth/github/disconnect", { method: "POST" });
+        setGithubAuthorized(false);
       } else {
         await saveSetting("github_pat", "");
       }
@@ -128,6 +161,36 @@ export default function GitHubCodeFixCard() {
     } finally {
       setBusy(false);
     }
+  }
+
+  if (FEATURES.PLATFORM_MODE) {
+    return (
+      <div className="rounded-xl border border-gray-200 bg-white p-4">
+        <div className="mb-3 flex items-start justify-between">
+          <div className="flex items-start gap-3">
+            <BrandIcon id="github" color="#111111" fallback="G" />
+            <div>
+              <div className="text-[13px] font-semibold text-gray-900">GitHub — Code Fix Agent</div>
+              <div className="mt-1 text-[12px] text-gray-500">Authorize GitHub with your account, then select the repository Marlo may use for draft SEO fixes. No personal access token is required.</div>
+            </div>
+          </div>
+          <span className="rounded-full bg-[#e6f7f4] px-2 py-0.5 text-[10px] font-medium text-[#00846f]">OAuth</span>
+        </div>
+        {!loaded ? null : !githubAuthorized ? (
+          <a href="/api/auth/github/connect" className="inline-flex rounded-lg bg-[#111111] px-3 py-2 text-[13px] font-medium text-white hover:bg-black">Connect GitHub</a>
+        ) : connected ? (
+          <div className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2 text-[12px] text-gray-600">
+            <span className="font-mono">{repoSaved}</span>
+            <button onClick={handleDisconnect} disabled={busy} className="font-medium text-red-600 hover:underline disabled:opacity-50">Disconnect</button>
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            <input value={repoInput} onChange={(e) => setRepoInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleConnect()} placeholder="owner/repository" className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-[13px] text-gray-800 placeholder:text-gray-400" />
+            <button onClick={handleConnect} disabled={busy} className="shrink-0 rounded-lg bg-[#111111] px-3 py-2 text-[13px] font-medium text-white hover:bg-black disabled:opacity-50">{busy ? "Verifying..." : "Use repository"}</button>
+          </div>
+        )}
+      </div>
+    );
   }
 
   return (
