@@ -13,6 +13,11 @@ import { PLATFORM_PROVIDER_KEYS } from "@/lib/llm/platformKeys";
  * masked preview, never the plaintext key.
  */
 
+const PLATFORM_DEFAULT_MODELS: Record<string, string> = {
+  groq: "openai/gpt-oss-120b",
+  mistral: "mistral-large-latest",
+};
+
 function maskKey(apiKey: string): string {
   return apiKey ? `${apiKey.slice(0, 4)}••••${apiKey.slice(-2)}` : "";
 }
@@ -49,14 +54,45 @@ export async function GET() {
       keyPreview: r.key_preview,
     }));
 
+    const platformProviders = Object.keys(PLATFORM_PROVIDER_KEYS).filter(
+      (id) => PLATFORM_PROVIDER_KEYS[id]
+    );
+
+    // Hosted platforms need a usable model on first load, but an explicit
+    // user selection must always win. Only create the default when there is
+    // no saved selection and the operator has a configured platform provider.
+    let primaryModel = setting?.value ?? null;
+    if (!primaryModel && platformProviders.length > 0) {
+      const defaultProvider = platformProviders.find((id) => PLATFORM_DEFAULT_MODELS[id]);
+      const defaultModel = defaultProvider ? PLATFORM_DEFAULT_MODELS[defaultProvider] : null;
+
+      if (defaultModel) {
+        const { error: persistError } = await db.from("user_settings").upsert(
+          {
+            user_id: user.id,
+            key: "primaryModel",
+            value: defaultModel,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "user_id,key" }
+        );
+
+        // Do not block provider discovery if persistence is temporarily
+        // unavailable. Return the usable default for this request; a later
+        // request can retry persistence.
+        if (!persistError) primaryModel = defaultModel;
+        else primaryModel = defaultModel;
+      }
+    }
+
     return NextResponse.json({
       connections,
-      primaryModel: setting?.value ?? null,
+      primaryModel,
       // Providers the platform operator has configured a shared key for —
       // never the key itself, just which ids are usable without BYOK. Lets
       // the LLM Providers UI show "Included with your plan" instead of a
       // key-entry form for these, same honesty pattern as GmailCard.
-      platformProviders: Object.keys(PLATFORM_PROVIDER_KEYS).filter((id) => PLATFORM_PROVIDER_KEYS[id]),
+      platformProviders,
     });
   }
 
