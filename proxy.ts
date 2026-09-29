@@ -1,11 +1,11 @@
-import { type NextRequest } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { updateSession } from "@/utils/supabase/middleware";
 
 export async function proxy(request: NextRequest) {
   // No Supabase project wired yet (credentials pending) — skip auth
   // enforcement entirely rather than lock everyone out with empty env vars.
   if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-    return;
+    return NextResponse.next();
   }
   return updateSession(request);
 }
