@@ -43,6 +43,7 @@ type PageEvidence = {
     desktop: { performance: number; accessibility: number; bestPractices: number; seo: number };
     mobile: { performance: number; accessibility: number; bestPractices: number; seo: number };
   };
+  lighthouseIssues?: { desktop: LighthouseIssue[]; mobile: LighthouseIssue[] };
 };
 type TrafficResult = {
   range: { startDate: string; endDate: string };
@@ -59,6 +60,7 @@ type TrafficResult = {
 
 type CheckedLink = { href: string; text: string; internal: boolean; reachable: boolean; status?: number };
 type PageSpeedScores = { performance: number; accessibility: number; bestPractices: number; seo: number };
+type LighthouseIssue = { id: string; title: string; score: number | null; displayValue?: string; mode: "opportunity" | "diagnostic" };
 type CrawledPage = {
   url: string;
   title: string;
@@ -961,6 +963,45 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
                     </div>
                   )}
                 </Section>
+
+                {auditData.lighthouseIssues && (
+                  <Section title="Lighthouse Diagnostics" subtitle="Real Lighthouse audits behind the scores — not just the four category numbers">
+                    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                      <div className="mb-3 flex rounded-lg bg-gray-200/70 p-1 text-[13px]">
+                        <button
+                          onClick={() => setDevice("desktop")}
+                          className={`flex-1 rounded-md py-1.5 font-medium ${device === "desktop" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500"}`}
+                        >
+                          Desktop
+                        </button>
+                        <button
+                          onClick={() => setDevice("mobile")}
+                          className={`flex-1 rounded-md py-1.5 font-medium ${device === "mobile" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500"}`}
+                        >
+                          Mobile
+                        </button>
+                      </div>
+                      {auditData.lighthouseIssues[device].length === 0 ? (
+                        <div className="text-[12px] text-emerald-700">No Lighthouse audits below the 90% threshold.</div>
+                      ) : (
+                        <div className="space-y-2">
+                          {auditData.lighthouseIssues[device].map((issue) => (
+                            <div key={issue.id} className="flex items-start justify-between gap-3 rounded-lg border border-gray-200 bg-white p-2.5">
+                              <div className="min-w-0">
+                                <div className="text-[12px] font-medium text-gray-800">{issue.title}</div>
+                                <div className="mt-0.5 text-[10px] uppercase tracking-wide text-gray-400">{issue.mode}</div>
+                              </div>
+                              <div className="shrink-0 text-right">
+                                <div className="text-[12px] font-semibold text-gray-900">{issue.score === null ? "N/A" : `${Math.round(issue.score * 100)}`}</div>
+                                {issue.displayValue && <div className="text-[10px] text-gray-500">{issue.displayValue}</div>}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </Section>
+                )}
 
                 <Section title="Core Web Vitals">
                   {auditData.coreWebVitals ? (
