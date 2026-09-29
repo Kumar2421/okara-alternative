@@ -14,8 +14,6 @@ import type { GeoCitationRow } from "@/lib/domain/geo/GEOAgent";
 import { useProject } from "@/lib/project-store";
 import { useTerminalLog } from "@/lib/terminal-log-store";
 import { FEATURES } from "@/lib/features";
-import { createClient } from "@/utils/supabase/client";
-import { GOOGLE_ANALYTICS_SCOPES } from "@/lib/googleOAuthScopes";
 
 const TABS = ["SEO", "Links", "Technical", "GEO", "Traffic", "Findings"] as const;
 type Tab = (typeof TABS)[number];
@@ -104,20 +102,14 @@ function ConnectGoogleServices({ onViewTraffic }: { onViewTraffic: () => void })
   // same way the original login did. Self-host mode has no shared operator
   // identity to reuse, so it keeps the real manual-client-id OAuth flow
   // (the plain <a href> below).
-  async function handlePlatformConnect() {
+  function handlePlatformConnect() {
     setConnecting(true);
-    const supabase = createClient();
-    await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: `${window.location.origin}/api/auth/callback?next=/dashboard`,
-        scopes: GOOGLE_ANALYTICS_SCOPES,
-        queryParams: { access_type: "offline", prompt: "consent" },
-      },
-    });
-    // browser navigates away to Google immediately on success; only reached
-    // on a client-side failure to even start the redirect.
-    setConnecting(false);
+    // Use the dedicated Google service-integration OAuth flow. The login
+    // OAuth callback establishes authentication; it is not the source of
+    // truth for GSC/GA4 connections. This route exchanges the grant,
+    // persists tokens, discovers resources, and returns the user here with
+    // the integration rows already committed.
+    window.location.assign("/api/auth/google-analytics/connect?return=dashboard");
   }
 
   if (dismissed || !loaded) return null;
