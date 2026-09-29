@@ -13,6 +13,10 @@ export async function GET(req: NextRequest) {
 
   try {
     if (FEATURES.PLATFORM_MODE) {
+      return NextResponse.redirect(`${req.nextUrl.origin}/settings/api-credentials?gmail_error=${encodeURIComponent("Hosted Gmail uses the platform Google sign-in. Use Connect with Google.")}`);
+    }
+
+    if (FEATURES.PLATFORM_MODE) {
       const supabase = await createClient();
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return NextResponse.redirect(`${settingsUrl}?gmail_error=${encodeURIComponent("Not authenticated")}`);
