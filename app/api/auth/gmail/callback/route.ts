@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { FEATURES } from "@/lib/features";
-import { createClient } from "@/utils/supabase/server";
-import { createServiceClient } from "@/utils/supabase/serviceClient";
 import { consumeOAuthState } from "@/lib/domain/integrations/oauthState";
-import { consumeOAuthState as consumeOAuthStateSupabase } from "@/lib/domain/integrations/oauthStateSupabase";
 import { exchangeCodeForTokens, getConnectedEmail } from "@/lib/domain/shared/gmailOAuth";
 
 function upsertSetting(db: ReturnType<typeof getDb>, key: string, value: string) {
@@ -25,16 +22,7 @@ export async function GET(req: NextRequest) {
 
   try {
     let platformUserId: string | null = null;
-    if (FEATURES.PLATFORM_MODE) {
-      return NextResponse.redirect(settingsUrl + "?gmail_error=" + encodeURIComponent("Hosted Gmail uses the platform Google sign-in. Please reconnect with Google."));
-    }
-
-    if (FEATURES.PLATFORM_MODE) {
-      const oauthState = await consumeOAuthStateSupabase(createServiceClient(), state);
-      if (!oauthState) return NextResponse.redirect(`${settingsUrl}?gmail_error=${encodeURIComponent("Gmail authorization expired or was already used. Please reconnect.")}`);
-      platformUserId = oauthState.userId;
-    } else {
-      const oauthState = consumeOAuthState(state);
+    const oauthState = consumeOAuthState(state);
       if (!oauthState) return NextResponse.redirect(`${settingsUrl}?gmail_error=${encodeURIComponent("Gmail authorization expired or was already used. Please reconnect.")}`);
     }
     const tokens = await exchangeCodeForTokens(code, redirectUri);
