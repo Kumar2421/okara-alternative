@@ -44,7 +44,6 @@ export default function ProvidersProvider({ children }: { children: React.ReactN
   const [primaryModel, setPrimaryModelState] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [platformProviders, setPlatformProviders] = useState<string[]>([]);
-  const [userId, setUserId] = useState<string | null>(null);
   const userIdRef = useRef<string | null>(null);
 
   const persistCache = useCallback(
@@ -55,12 +54,11 @@ export default function ProvidersProvider({ children }: { children: React.ReactN
         // storage unavailable, keep in-memory only
       }
     },
-    [userId]
+    []
   );
 
   const clearSessionState = useCallback((id: string | null) => {
     userIdRef.current = id;
-    setUserId(id);
     setState({});
     setPrimaryModelState(null);
     setPlatformProviders([]);
@@ -138,7 +136,7 @@ export default function ProvidersProvider({ children }: { children: React.ReactN
     void supabase.auth.getUser().then(({ data }) => {
       if (!mounted) return;
       const id = data.user?.id ?? null;
-      setUserId(id);
+      userIdRef.current = id;
       void loadProviders(id);
     });
 
@@ -157,7 +155,7 @@ export default function ProvidersProvider({ children }: { children: React.ReactN
 
       if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "USER_UPDATED") {
         if (id !== userIdRef.current) {
-          setUserId(id);
+          userIdRef.current = id;
           void loadProviders(id);
         }
       }
