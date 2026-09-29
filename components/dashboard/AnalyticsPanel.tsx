@@ -905,6 +905,35 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
                   </div>
                 )}
 
+                <Section
+                  title="Audit overview"
+                  subtitle="A simple view of what the audit found and where to start."
+                >
+                  <div className="grid grid-cols-3 gap-2">
+                    <button onClick={() => setTab("Findings")} className="rounded-xl border border-gray-200 bg-white p-3 text-left hover:bg-gray-50">
+                      <div className="text-[10px] uppercase tracking-wide text-gray-400">Findings</div>
+                      <div className="mt-1 text-lg font-semibold text-gray-900">{auditData.findings?.length ?? 0}</div>
+                      <div className="mt-0.5 text-[11px] text-gray-500">Needs review</div>
+                    </button>
+                    <button onClick={() => setTab("Findings")} className="rounded-xl border border-gray-200 bg-white p-3 text-left hover:bg-gray-50">
+                      <div className="text-[10px] uppercase tracking-wide text-gray-400">Lighthouse</div>
+                      <div className="mt-1 text-lg font-semibold text-gray-900">{auditData.lighthouseIssues ? auditData.lighthouseIssues.desktop.length + auditData.lighthouseIssues.mobile.length : 0}</div>
+                      <div className="mt-0.5 text-[11px] text-gray-500">Measured issues</div>
+                    </button>
+                    <button onClick={() => setTab("Findings")} className="rounded-xl border border-gray-200 bg-white p-3 text-left hover:bg-gray-50">
+                      <div className="text-[10px] uppercase tracking-wide text-gray-400">Audit issues</div>
+                      <div className="mt-1 text-lg font-semibold text-gray-900">{auditData.issues.length}</div>
+                      <div className="mt-0.5 text-[11px] text-gray-500">Detected on page</div>
+                    </button>
+                  </div>
+                  {(auditData.findings?.length ?? 0) > 0 && (
+                    <button onClick={() => setTab("Findings")} className="mt-3 flex w-full items-center justify-between rounded-xl bg-[#111111] px-3 py-2.5 text-[12px] font-medium text-white hover:bg-black">
+                      <span>See findings and recommended next steps</span>
+                      <ChevronRight size={14} />
+                    </button>
+                  )}
+                </Section>
+
                 <Section title="PageSpeed Scores">
                   {auditData.pageSpeed ? (
                     <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
