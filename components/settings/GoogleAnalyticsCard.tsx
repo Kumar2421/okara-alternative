@@ -158,6 +158,14 @@ export default function GoogleAnalyticsCard() {
             Disconnect Google from this project
           </button>
         </div>
+      ) : FEATURES.PLATFORM_MODE ? (
+        <button
+          onClick={handlePlatformConnect}
+          disabled={busy}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-[#111111] px-3 py-2 text-[13px] font-medium text-white hover:bg-black disabled:opacity-50"
+        >
+          {busy ? "Connecting..." : "Connect Google"}
+        </button>
       ) : (
         <a
           href="/api/auth/google-analytics/connect"
