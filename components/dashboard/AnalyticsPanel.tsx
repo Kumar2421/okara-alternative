@@ -6,9 +6,8 @@ import { BarChart2, ChevronLeft, Link2, X, Lock, Search, Cpu, Globe2, Check, Loa
 import CollapsedRail, { RailButton } from "./CollapsedRail";
 import { useToast } from "./Toast";
 import ScoreCircle from "./ScoreCircle";
-import CodeFixModal from "./CodeFixModal";
 import FindingsWorkspace from "./FindingsWorkspace";
-import type { SEOAuditPayload, Finding } from "@/lib/domain/seo/SEOAgent";
+import type { SEOAuditPayload } from "@/lib/domain/seo/SEOAgent";
 import type { Finding as AnalyticsFinding } from "@/lib/domain/findings/findingTypes";
 import type { GeoCitationRow } from "@/lib/domain/geo/GEOAgent";
 import { useProject } from "@/lib/project-store";
@@ -258,9 +257,6 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
   const [trafficResult, setTrafficResult] = useState<TrafficResult | null>(null);
   const [trafficLoading, setTrafficLoading] = useState(false);
   const [trafficError, setTrafficError] = useState<string | null>(null);
-  const [githubConnected, setGithubConnected] = useState(false);
-  const [codeFixes, setCodeFixes] = useState<Record<string, { status: string; pr_url: string | null }>>({});
-  const [fixingFinding, setFixingFinding] = useState<Finding | null>(null);
   const [pageEvidence, setPageEvidence] = useState<Record<string, PageEvidence | { error: string }>>({});
   const [findings, setFindings] = useState<AnalyticsFinding[]>([]);
   const [findingCreating, setFindingCreating] = useState<Record<string, boolean>>({});
@@ -384,21 +380,6 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
         .finally(() => setTrafficLoading(false));
     }
     if (tab === "SEO") {
-      fetch("/api/settings")
-        .then((r) => r.json())
-        .then((data) => {
-          const patRow = data.settings?.find((s: { key: string; value: string }) => s.key === "github_pat");
-          setGithubConnected(!!patRow?.value);
-        })
-        .catch(() => {});
-      fetch("/api/agents/codefix")
-        .then((r) => r.json())
-        .then((data) => {
-          const map: Record<string, { status: string; pr_url: string | null }> = {};
-          for (const f of data.fixes ?? []) map[f.issue_id] = { status: f.status, pr_url: f.pr_url };
-          setCodeFixes(map);
-        })
-        .catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, project?.id, tab]);
@@ -1059,44 +1040,20 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
                 </Section>
 
                 <Section
-                  title="Issues"
-                  subtitle={githubConnected ? undefined : "Connect GitHub in Settings → API Credentials to fix eligible issues in code."}
+                  title="Audit issues"
+                  subtitle="Every issue below is based on data collected during this audit. Open Findings for the explanation and recommended next steps."
                 >
                   <div className="overflow-hidden rounded-xl border border-gray-200">
-                     {auditData.issues.length === 0 ? (
-                       <div className="p-3 text-sm text-gray-500">No issues found!</div>
-                     ) : (
-                        auditData.issues.map((issue, i) => {
-                          const finding = (auditData.findings ?? []).find((f) => f.label === issue.label);
-                          const fix = finding ? codeFixes[finding.issueId] : undefined;
-                          return (
-                            <div key={i} className="flex items-center justify-between gap-2 border-t border-gray-100 px-3 py-2.5 text-[13px] first:border-t-0">
-                              <span className="flex items-center gap-2 text-gray-700">
-                                <span className={issue.level === "Error" ? "text-red-500" : "text-amber-500"}>⚠</span> {issue.label}
-                              </span>
-                              {finding?.autoFixable && githubConnected && (
-                                fix?.status === "pr_open" || fix?.status === "merged" ? (
-                                  <a
-                                    href={fix.pr_url ?? "#"}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="flex shrink-0 items-center gap-1 text-[11px] font-medium text-[#00846f] hover:underline"
-                                  >
-                                    PR open <ExternalLink size={10} />
-                                  </a>
-                                ) : (
-                                  <button
-                                    onClick={() => setFixingFinding(finding)}
-                                    className="flex shrink-0 items-center gap-1 rounded-full border border-gray-200 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50"
-                                  >
-                                    <Code2 size={11} /> Fix in code
-                                  </button>
-                                )
-                              )}
-                            </div>
-                          );
-                        })
-                     )}
+                    {auditData.issues.length === 0 ? (
+                      <div className="p-3 text-sm text-emerald-700">No on-page issues detected.</div>
+                    ) : (
+                      auditData.issues.map((issue, i) => (
+                        <div key={i} className="flex items-center gap-2 border-t border-gray-100 px-3 py-2.5 text-[13px] first:border-t-0">
+                          <span className={issue.level === "Error" ? "text-red-500" : "text-amber-500"}>⚠</span>
+                          <span className="text-gray-700">{issue.label}</span>
+                        </div>
+                      ))
+                    )}
                   </div>
                 </Section>
               </>
@@ -1419,14 +1376,7 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
           </>
         )}
       </div>
-
-      {fixingFinding && (
-        <CodeFixModal
-          finding={fixingFinding}
-          onClose={() => setFixingFinding(null)}
-          onApplied={(issueId, prUrl) => setCodeFixes((prev) => ({ ...prev, [issueId]: { status: "pr_open", pr_url: prUrl } }))}
-        />
-      )}
+}
     </div>
   );
 }
