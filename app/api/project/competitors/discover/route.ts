@@ -8,6 +8,7 @@ import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
 import { FEATURES } from "@/lib/features";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
+import { PLATFORM_PROVIDER_KEYS } from "@/lib/llm/platformKeys";
 
 // Vercel: LLM/crawl calls can run past the 10s default — allow up to the
 // platform max for this route (Hobby plan caps at 60s; Pro allows more).
@@ -43,22 +44,30 @@ export async function POST(req: NextRequest) {
 
     const db = createServiceClient();
 
-    // free in platform mode for now — no credit_costs entry yet
+    // Hosted users may use the operator-provided platform key without
+    // creating a BYOK provider_connections row. BYOK still takes precedence.
     const { data: conn } = await db
       .from("provider_connections")
       .select("api_key_secret_id, base_url")
       .eq("user_id", user.id)
       .eq("provider_id", providerId)
       .maybeSingle();
-    if (!conn?.api_key_secret_id) {
+
+    let apiKey = "";
+    let baseUrl: string | undefined;
+
+    if (conn?.api_key_secret_id) {
+      const { data: secret } = await db.rpc("vault_get_secret", { p_id: conn.api_key_secret_id });
+      apiKey = (secret as string) ?? "";
+      baseUrl = conn.base_url ?? undefined;
+    } else if (PLATFORM_PROVIDER_KEYS[providerId]) {
+      apiKey = PLATFORM_PROVIDER_KEYS[providerId]!;
+    } else {
       return NextResponse.json(
-        { error: `${providerId} isn't properly connected. Check Settings → LLM Providers.` },
+        { error: `${providerId} isn't connected yet.` },
         { status: 422 }
       );
     }
-    const { data: secret } = await db.rpc("vault_get_secret", { p_id: conn.api_key_secret_id });
-    const apiKey = (secret as string) ?? "";
-    const baseUrl = conn.base_url ?? undefined;
 
     let activeId = requestedProjectId;
     if (!activeId) {
