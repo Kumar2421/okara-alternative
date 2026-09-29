@@ -26,6 +26,10 @@ export async function GET(req: NextRequest) {
   try {
     let platformUserId: string | null = null;
     if (FEATURES.PLATFORM_MODE) {
+      return NextResponse.redirect(settingsUrl + "?gmail_error=" + encodeURIComponent("Hosted Gmail uses the platform Google sign-in. Please reconnect with Google."));
+    }
+
+    if (FEATURES.PLATFORM_MODE) {
       const oauthState = await consumeOAuthStateSupabase(createServiceClient(), state);
       if (!oauthState) return NextResponse.redirect(`${settingsUrl}?gmail_error=${encodeURIComponent("Gmail authorization expired or was already used. Please reconnect.")}`);
       platformUserId = oauthState.userId;
