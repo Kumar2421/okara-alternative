@@ -134,19 +134,20 @@ export default function GmailCard() {
               )}
             </div>
             <div className="text-[12px] text-gray-500">
-              Real send capability for Leads outreach — needs an OAuth Client ID/Secret from Google Cloud
-              Console first, then a real consent flow to connect an inbox.
+              Real send capability for Leads outreach. Hosted users connect through Google sign-in; self-hosters configure their own OAuth client.
             </div>
           </div>
         </div>
-        <a
-          href="https://console.cloud.google.com/apis/credentials"
-          target="_blank"
-          rel="noreferrer"
-          className="flex shrink-0 items-center gap-1 text-[11px] text-gray-400 hover:text-gray-700"
-        >
-          Create OAuth client <ExternalLink size={11} />
-        </a>
+        {!FEATURES.PLATFORM_MODE && (
+          <a
+            href="https://console.cloud.google.com/apis/credentials"
+            target="_blank"
+            rel="noreferrer"
+            className="flex shrink-0 items-center gap-1 text-[11px] text-gray-400 hover:text-gray-700"
+          >
+            Create OAuth client <ExternalLink size={11} />
+          </a>
+        )}
       </div>
 
       {!loaded ? null : FEATURES.PLATFORM_MODE ? (
