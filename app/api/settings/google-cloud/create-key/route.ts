@@ -96,6 +96,10 @@ export async function POST(req: NextRequest) {
   }
 
   if (FEATURES.PLATFORM_MODE) {
+    return NextResponse.json({ error: "Google Cloud API credentials are managed by the hosted platform." }, { status: 410 });
+  }
+
+  if (FEATURES.PLATFORM_MODE) {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
