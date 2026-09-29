@@ -44,10 +44,11 @@ export default function ProvidersProvider({ children }: { children: React.ReactN
   const [primaryModel, setPrimaryModelState] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [platformProviders, setPlatformProviders] = useState<string[]>([]);
-  const [userId, setUserId] = useState<string | null>(null);\n  const userIdRef = useRef<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const userIdRef = useRef<string | null>(null);
 
   const persistCache = useCallback(
-    (next: ProvidersState, primary: string | null, id = userId) => {
+    (next: ProvidersState, primary: string | null, id = userIdRef.current) => {
       try {
         localStorage.setItem(cacheKey(id), JSON.stringify({ state: next, primaryModel: primary }));
       } catch {
@@ -58,7 +59,8 @@ export default function ProvidersProvider({ children }: { children: React.ReactN
   );
 
   const clearSessionState = useCallback((id: string | null) => {
-    userIdRef.current = id;\n    setUserId(id);
+    userIdRef.current = id;
+    setUserId(id);
     setState({});
     setPrimaryModelState(null);
     setPlatformProviders([]);
