@@ -26,6 +26,18 @@ function num(evidence: Evidence, key: string): number | undefined {
 export function explainFinding(finding: { issueId: string; evidence: Evidence }): FindingExplanation {
   const { issueId, evidence } = finding;
 
+  if (issueId.startsWith("lighthouse-")) {
+    const device = str(evidence, "device") || "selected";
+    const mode = str(evidence, "mode") || "diagnostic";
+    const displayValue = str(evidence, "displayValue");
+    return {
+      whyItMatters: displayValue
+        ? `Lighthouse detected a ${mode} issue on the ${device} experience (${displayValue}). It is part of the measured page experience and should be reviewed alongside the other audit findings.`
+        : `Lighthouse detected a ${mode} issue on the ${device} experience. It is part of the measured page experience and should be reviewed alongside the other audit findings.`,
+      recommendation: "Review the Lighthouse audit detail, address the underlying page or application issue, then re-run the audit to verify the result.",
+    };
+  }
+
   switch (issueId) {
     case "robots-txt-disallow":
       return {
