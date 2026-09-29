@@ -1405,7 +1405,6 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
           </>
         )}
       </div>
-}
     </div>
   );
 }
