@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
 import { providers as PROVIDER_DEFS } from "./mock-providers";
 import { createClient } from "@/utils/supabase/client";
 import { FEATURES } from "./features";
@@ -44,7 +44,7 @@ export default function ProvidersProvider({ children }: { children: React.ReactN
   const [primaryModel, setPrimaryModelState] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [platformProviders, setPlatformProviders] = useState<string[]>([]);
-  const [userId, setUserId] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);\n  const userIdRef = useRef<string | null>(null);
 
   const persistCache = useCallback(
     (next: ProvidersState, primary: string | null, id = userId) => {
@@ -58,7 +58,7 @@ export default function ProvidersProvider({ children }: { children: React.ReactN
   );
 
   const clearSessionState = useCallback((id: string | null) => {
-    setUserId(id);
+    userIdRef.current = id;\n    setUserId(id);
     setState({});
     setPrimaryModelState(null);
     setPlatformProviders([]);
@@ -154,7 +154,7 @@ export default function ProvidersProvider({ children }: { children: React.ReactN
       }
 
       if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "USER_UPDATED") {
-        if (id !== userId) {
+        if (id !== userIdRef.current) {
           setUserId(id);
           void loadProviders(id);
         }
@@ -165,7 +165,7 @@ export default function ProvidersProvider({ children }: { children: React.ReactN
       mounted = false;
       authListener.subscription.unsubscribe();
     };
-  }, [clearSessionState, loadProviders, userId]);
+  }, [clearSessionState, loadProviders]);
 
   const connect = useCallback(
     async (providerId: string, apiKey: string, baseUrl?: string) => {
