@@ -126,21 +126,8 @@ export async function POST(req: NextRequest) {
     }
     const audit = auditRow.payload as SEOAuditPayload;
 
-    const { data: tavilySetting } = await db
-      .from("user_settings")
-      .select("value")
-      .eq("user_id", user.id)
-      .eq("key", "tavily_api_key")
-      .maybeSingle();
-    const tavilyApiKey = tavilySetting?.value && providerSupportsTools(providerId) ? tavilySetting.value : undefined;
-
-    const { data: googleSetting } = await db
-      .from("user_settings")
-      .select("value")
-      .eq("user_id", user.id)
-      .eq("key", "google_cloud_api_key")
-      .maybeSingle();
-    const googleApiKey = googleSetting?.value || undefined;
+    const tavilyApiKey = providerSupportsTools(providerId) ? process.env.TAVILY_API_KEY?.trim() || undefined : undefined;
+    const googleApiKey = process.env.GOOGLE_CLOUD_API_KEY?.trim() || undefined;
 
     const { data: conn } = await db
       .from("provider_connections")
