@@ -1,5 +1,3 @@
-import { FEATURES } from "@/lib/features";
-
 export const PLATFORM_ENV_KEYS = [
   "NEXT_PUBLIC_SUPABASE_URL",
   "NEXT_PUBLIC_SUPABASE_ANON_KEY",
@@ -16,12 +14,18 @@ export type PlatformRuntimeConfig = {
 export function getPlatformRuntimeConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): PlatformRuntimeConfig {
-  const missing = FEATURES.PLATFORM_MODE
+  const hasPublicSupabaseConfig = Boolean(
+    env.NEXT_PUBLIC_SUPABASE_URL && env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+  );
+  const platformMode =
+    env.NEXT_PUBLIC_PLATFORM_MODE === "true" ||
+    (env.NEXT_PUBLIC_SELF_HOST !== "true" && hasPublicSupabaseConfig);
+  const missing = platformMode
     ? PLATFORM_ENV_KEYS.filter((key) => !env[key])
     : [];
 
   return {
-    platformMode: FEATURES.PLATFORM_MODE,
+    platformMode,
     missing,
   };
 }
