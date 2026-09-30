@@ -21,7 +21,7 @@ import {
 import { consumeOAuthState as consumeOAuthStateSupabase } from "@/lib/domain/integrations/oauthStateSupabase";
 
 function redirectUrl(req: NextRequest, returnTo: "dashboard" | "settings", params: Record<string, string>) {
-  const base = returnTo === "dashboard" ? req.nextUrl.origin + "/" : req.nextUrl.origin + "/settings/api-credentials";
+  const base = returnTo === "dashboard" ? req.nextUrl.origin + "/dashboard" : req.nextUrl.origin + "/settings/api-credentials";
   const url = new URL(base);
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
   return url.toString();
