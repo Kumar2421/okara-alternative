@@ -52,7 +52,7 @@ export default function ContextPanel({
   const [newCompetitorUrl, setNewCompetitorUrl] = useState("");
   const [discovering, setDiscovering] = useState(false);
   const { show } = useToast();
-  const { project, loading, documentsVersion } = useProject();
+  const { project, loading, competitorsVersion, documentsVersion } = useProject();
   const {
     documents,
     competitors: contextCompetitors,
@@ -90,6 +90,13 @@ export default function ContextPanel({
     seenDocumentsVersion.current = documentsVersion;
     refreshContext();
   }, [documentsVersion, refreshContext]);
+
+  const seenCompetitorsVersion = useRef(competitorsVersion);
+  useEffect(() => {
+    if (competitorsVersion === seenCompetitorsVersion.current) return;
+    seenCompetitorsVersion.current = competitorsVersion;
+    refreshContext();
+  }, [competitorsVersion, refreshContext]);
 
   async function handleAddCompetitor() {
     const url = newCompetitorUrl.trim();
