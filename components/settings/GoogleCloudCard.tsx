@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { Check, ExternalLink, Sparkles } from "lucide-react";
 import { useToast } from "@/components/dashboard/Toast";
 import BrandIcon from "@/components/settings/BrandIcon";
+import { FEATURES } from "@/lib/features";
 
 /** One Google Cloud API key unlocks 3 real features that all use plain
  * API-key auth (no OAuth): Places API (Leads → Local Business mode),
