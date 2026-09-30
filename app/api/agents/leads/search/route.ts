@@ -112,22 +112,7 @@ export async function POST(req: NextRequest) {
 
     const db = createServiceClient();
 
-    // Tavily key: secret, stored via the same generic BYOK store as LLM
-    // provider keys (provider_connections isn't LLM-specific — see /api/providers).
-    const { data: tavilyConn } = await db
-      .from("provider_connections")
-      .select("api_key_secret_id")
-      .eq("user_id", user.id)
-      .eq("provider_id", "tavily")
-      .maybeSingle();
-    if (!tavilyConn?.api_key_secret_id) {
-      return NextResponse.json(
-        { error: "Connect a Tavily API key in Settings → API Credentials to search for real leads." },
-        { status: 422 }
-      );
-    }
-    const { data: tavilySecret } = await db.rpc("vault_get_secret", { p_id: tavilyConn.api_key_secret_id });
-    const tavilyKey = (tavilySecret as string) ?? "";
+    const tavilyKey = process.env.TAVILY_API_KEY?.trim() || "";
 
     // LLM provider key — BYOK only for this route (no platform-provided
     // fallback specified for lead search).
@@ -143,27 +128,9 @@ export async function POST(req: NextRequest) {
     const { data: providerSecret } = await db.rpc("vault_get_secret", { p_id: providerConn.api_key_secret_id });
     const providerApiKey = (providerSecret as string) ?? "";
 
-    // Optional Google CSE fallback: apiKey is a secret (reuse the same
-    // "google_cloud" provider_connections row used by places-search); cx is
-    // a non-secret identifier, stored as plain user_settings (same generic
-    // per-user key/value store used for primaryModel / active_project_id).
-    const { data: googleConn } = await db
-      .from("provider_connections")
-      .select("api_key_secret_id")
-      .eq("user_id", user.id)
-      .eq("provider_id", "google_cloud")
-      .maybeSingle();
-    const { data: googleCxSetting } = await db
-      .from("user_settings")
-      .select("value")
-      .eq("user_id", user.id)
-      .eq("key", "google_cse_id")
-      .maybeSingle();
-    let google: { apiKey: string; cx: string } | undefined;
-    if (googleConn?.api_key_secret_id && googleCxSetting?.value) {
-      const { data: googleSecret } = await db.rpc("vault_get_secret", { p_id: googleConn.api_key_secret_id });
-      if (googleSecret) google = { apiKey: googleSecret as string, cx: googleCxSetting.value };
-    }
+    const googleApiKey = process.env.GOOGLE_CLOUD_API_KEY?.trim();
+    const googleCx = process.env.GOOGLE_CSE_ID?.trim();
+    const google = googleApiKey && googleCx ? { apiKey: googleApiKey, cx: googleCx } : undefined;
 
     const activeId = await getActiveProjectIdSupabase(db, user.id);
     if (!activeId) {

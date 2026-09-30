@@ -33,7 +33,7 @@ export async function POST() {
     const apiKey = await resolvePlatformApiKey(db, user.id, "pagespeed_api_key");
     if (!apiKey) {
       return NextResponse.json(
-        { error: "Connect a PageSpeed API key in Settings → API Credentials to run real Lighthouse scores." },
+        { error: "PageSpeed Insights is not enabled on this hosted deployment. Please contact the operator." },
         { status: 422 }
       );
     }

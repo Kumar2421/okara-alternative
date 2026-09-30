@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Check, ExternalLink } from "lucide-react";
 import { useToast } from "@/components/dashboard/Toast";
+import { FEATURES } from "@/lib/features";
 
 export default function TavilyCard() {
   const { show } = useToast();
@@ -69,6 +70,21 @@ export default function TavilyCard() {
     } finally {
       setBusy(false);
     }
+  }
+
+  if (FEATURES.PLATFORM_MODE) {
+    return (
+      <div className="rounded-xl border border-gray-200 bg-white p-4">
+        <div className="flex items-start gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#0f8a7e] text-[13px] font-bold text-white">T</span>
+          <div>
+            <div className="text-[13px] font-semibold text-gray-900">Tavily Web Search</div>
+            <div className="mt-1 text-[12px] text-gray-500">Live web research is included in the hosted platform and managed by Marlo. No API key is required.</div>
+          </div>
+          <span className="ml-auto rounded-full bg-[#e6f7f4] px-2 py-0.5 text-[10px] font-medium text-[#00846f]">Managed by Marlo</span>
+        </div>
+      </div>
+    );
   }
 
   return (

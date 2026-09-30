@@ -58,7 +58,7 @@ export async function POST() {
     const tavilyApiKey = await resolvePlatformApiKey(db, user.id, "tavily_api_key");
     if (!tavilyApiKey) {
       return NextResponse.json(
-        { error: "Connect a Tavily API key in Settings → API Credentials to run a real citation check." },
+        { error: "Live web citation checking is not enabled on this hosted deployment. Please contact the operator." },
         { status: 422 }
       );
     }

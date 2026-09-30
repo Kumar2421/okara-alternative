@@ -20,6 +20,9 @@ const OAUTH_TOKEN_KEYS = new Set([
   "gcp_access_token",
   "gcp_refresh_token",
   "google_cloud_api_key",
+  "tavily_api_key",
+  "pagespeed_api_key",
+  "google_cse_id",
 ]);
 
 /** Reconstructs the legacy flat key/value shape the Settings UI expects from
