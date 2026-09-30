@@ -149,6 +149,21 @@ export default function GoogleCloudCard() {
     }
   }
 
+  if (FEATURES.PLATFORM_MODE) {
+    return (
+      <div className="rounded-xl border border-gray-200 bg-white p-4">
+        <div className="flex items-start gap-3">
+          <BrandIcon id="google-cloud" color="#4285f4" fallback="G" />
+          <div>
+            <div className="text-[13px] font-semibold text-gray-900">Google Cloud Services</div>
+            <div className="mt-1 text-[12px] text-gray-500">Places, Custom Search, and Knowledge Graph access are managed by the hosted platform. No Google Cloud API key or project configuration is required.</div>
+          </div>
+          <span className="ml-auto rounded-full bg-[#e6f7f4] px-2 py-0.5 text-[10px] font-medium text-[#00846f]">Managed by Marlo</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-4">
       <div className="mb-3 flex items-start justify-between">
