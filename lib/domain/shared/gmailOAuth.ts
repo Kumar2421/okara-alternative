@@ -80,7 +80,7 @@ export async function getValidGmailAccessToken(): Promise<string> {
     const db = createServiceClient();
     const { data: conn } = await db
       .from("integration_connections")
-      .select("access_token_secret_id, refresh_token_secret_id, token_expiry")
+      .select("id, access_token_secret_id, refresh_token_secret_id, token_expiry")
       .eq("user_id", user.id)
       .eq("provider", "gmail")
       .is("project_id", null)
