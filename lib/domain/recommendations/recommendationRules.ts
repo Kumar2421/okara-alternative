@@ -95,6 +95,26 @@ export function deriveRecommendations(finding: FindingLike): Recommendation[] {
     );
   }
 
+  if (finding.evidence.auditId && finding.evidence.device) {
+    const mode = typeof finding.evidence.mode === "string" ? finding.evidence.mode : "diagnostic";
+    const displayValue = typeof finding.evidence.displayValue === "string" ? finding.evidence.displayValue : undefined;
+    const score = typeof finding.evidence.score === "number" ? Math.round(finding.evidence.score * 100) : undefined;
+    recommendations.push(
+      recommendation(
+        finding,
+        "lighthouse_issue",
+        mode === "opportunity" ? "Improve this Lighthouse opportunity" : "Address this Lighthouse diagnostic",
+        displayValue
+          ? `${displayValue}. This audit identifies a measurable Lighthouse issue on the ${String(finding.evidence.device)} experience.`
+          : "This Lighthouse audit identifies a performance, accessibility, best-practice, or SEO issue worth addressing.",
+        score !== undefined && score < 50 ? "high" : "medium",
+        "manual",
+        "Review the Lighthouse audit details, make the smallest relevant page or application change, then re-run the SEO audit to confirm the score improves.",
+        { device: finding.evidence.device, mode, score, displayValue, auditId: finding.evidence.auditId },
+      ),
+    );
+  }
+
   const ttfbMs = page.serverTiming?.ttfbMs;
   if (typeof ttfbMs === "number" && ttfbMs > 1500) {
     recommendations.push(

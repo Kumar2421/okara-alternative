@@ -10,9 +10,17 @@ export type CwvMetric = { value: string; status: CwvStatus };
 export type CwvSnapshot = { lcp: CwvMetric; fcp: CwvMetric; cls: CwvMetric };
 
 export type PageSpeedScores = { performance: number; accessibility: number; bestPractices: number; seo: number };
+export type LighthouseIssue = {
+  id: string;
+  title: string;
+  score: number | null;
+  displayValue?: string;
+  mode: "opportunity" | "diagnostic";
+};
 export type PageSpeedResult = {
   pageSpeed: { desktop: PageSpeedScores; mobile: PageSpeedScores };
   coreWebVitals: { desktop: CwvSnapshot; mobile: CwvSnapshot };
+  lighthouseIssues: { desktop: LighthouseIssue[]; mobile: LighthouseIssue[] };
 };
 
 function statusFromScore(score: number | undefined): CwvStatus {
@@ -39,7 +47,28 @@ async function fetchLighthouse(url: string, apiKey: string, strategy: "desktop" 
   const data = await res.json();
 
   const categories = data.lighthouseResult?.categories ?? {};
-  const audits = data.lighthouseResult?.audits ?? {};
+  const audits = (data.lighthouseResult?.audits ?? {}) as Record<string, {
+    score?: number;
+    title?: string;
+    displayValue?: string;
+    details?: { type?: string };
+  }>;
+
+  const lighthouseIssues: LighthouseIssue[] = Object.entries(audits)
+    .map(([id, audit]) => {
+      const score = typeof audit?.score === "number" ? audit.score : null;
+      const mode = audit?.details?.type === "opportunity" ? "opportunity" : "diagnostic";
+      return {
+        id,
+        title: typeof audit?.title === "string" ? audit.title : id,
+        score,
+        displayValue: typeof audit?.displayValue === "string" ? audit.displayValue : undefined,
+        mode,
+      } as LighthouseIssue;
+    })
+    .filter((audit) => audit.score !== null && audit.score < 0.9 && audit.id !== "largest-contentful-paint" && audit.id !== "first-contentful-paint" && audit.id !== "cumulative-layout-shift")
+    .sort((a, b) => (a.score ?? 1) - (b.score ?? 1))
+    .slice(0, 8);
 
   const cwv: CwvSnapshot = {
     lcp: {
@@ -64,6 +93,7 @@ async function fetchLighthouse(url: string, apiKey: string, strategy: "desktop" 
       seo: Math.round((categories.seo?.score ?? 0) * 100),
     },
     cwv,
+    lighthouseIssues,
   };
 }
 

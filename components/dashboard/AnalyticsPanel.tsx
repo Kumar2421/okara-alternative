@@ -6,9 +6,8 @@ import { BarChart2, ChevronLeft, Link2, X, Lock, Search, Cpu, Globe2, Check, Loa
 import CollapsedRail, { RailButton } from "./CollapsedRail";
 import { useToast } from "./Toast";
 import ScoreCircle from "./ScoreCircle";
-import CodeFixModal from "./CodeFixModal";
 import FindingsWorkspace from "./FindingsWorkspace";
-import type { SEOAuditPayload, Finding } from "@/lib/domain/seo/SEOAgent";
+import type { SEOAuditPayload } from "@/lib/domain/seo/SEOAgent";
 import type { Finding as AnalyticsFinding } from "@/lib/domain/findings/findingTypes";
 import type { GeoCitationRow } from "@/lib/domain/geo/GEOAgent";
 import { useProject } from "@/lib/project-store";
@@ -43,6 +42,7 @@ type PageEvidence = {
     desktop: { performance: number; accessibility: number; bestPractices: number; seo: number };
     mobile: { performance: number; accessibility: number; bestPractices: number; seo: number };
   };
+  lighthouseIssues?: { desktop: LighthouseIssue[]; mobile: LighthouseIssue[] };
 };
 type TrafficResult = {
   range: { startDate: string; endDate: string };
@@ -59,6 +59,7 @@ type TrafficResult = {
 
 type CheckedLink = { href: string; text: string; internal: boolean; reachable: boolean; status?: number };
 type PageSpeedScores = { performance: number; accessibility: number; bestPractices: number; seo: number };
+type LighthouseIssue = { id: string; title: string; score: number | null; displayValue?: string; mode: "opportunity" | "diagnostic" };
 type CrawledPage = {
   url: string;
   title: string;
@@ -256,9 +257,6 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
   const [trafficResult, setTrafficResult] = useState<TrafficResult | null>(null);
   const [trafficLoading, setTrafficLoading] = useState(false);
   const [trafficError, setTrafficError] = useState<string | null>(null);
-  const [githubConnected, setGithubConnected] = useState(false);
-  const [codeFixes, setCodeFixes] = useState<Record<string, { status: string; pr_url: string | null }>>({});
-  const [fixingFinding, setFixingFinding] = useState<Finding | null>(null);
   const [pageEvidence, setPageEvidence] = useState<Record<string, PageEvidence | { error: string }>>({});
   const [findings, setFindings] = useState<AnalyticsFinding[]>([]);
   const [findingCreating, setFindingCreating] = useState<Record<string, boolean>>({});
@@ -382,21 +380,6 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
         .finally(() => setTrafficLoading(false));
     }
     if (tab === "SEO") {
-      fetch("/api/settings")
-        .then((r) => r.json())
-        .then((data) => {
-          const patRow = data.settings?.find((s: { key: string; value: string }) => s.key === "github_pat");
-          setGithubConnected(!!patRow?.value);
-        })
-        .catch(() => {});
-      fetch("/api/agents/codefix")
-        .then((r) => r.json())
-        .then((data) => {
-          const map: Record<string, { status: string; pr_url: string | null }> = {};
-          for (const f of data.fixes ?? []) map[f.issue_id] = { status: f.status, pr_url: f.pr_url };
-          setCodeFixes(map);
-        })
-        .catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, project?.id, tab]);
@@ -457,6 +440,7 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
         return;
       }
       setFindings((prev) => [data.finding, ...prev.filter((f) => f.id !== data.finding.id)]);
+      window.dispatchEvent(new CustomEvent("marlo:findings-updated"));
       logDone(`Finding created — ${data.finding.severity} ${data.finding.category}`);
     } catch {
       show("Failed to create finding.");
@@ -576,6 +560,7 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
       if (res.ok) {
         const data = await res.json();
         setAuditData(data);
+        window.dispatchEvent(new CustomEvent("marlo:findings-updated"));
         show("SEO Audit completed!");
       } else {
         const err = await res.json();
@@ -920,6 +905,35 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
                   </div>
                 )}
 
+                <Section
+                  title="Audit overview"
+                  subtitle="A simple view of what the audit found and where to start."
+                >
+                  <div className="grid grid-cols-3 gap-2">
+                    <button onClick={() => setTab("Findings")} className="rounded-xl border border-gray-200 bg-white p-3 text-left hover:bg-gray-50">
+                      <div className="text-[10px] uppercase tracking-wide text-gray-400">Findings</div>
+                      <div className="mt-1 text-lg font-semibold text-gray-900">{auditData.findings?.length ?? 0}</div>
+                      <div className="mt-0.5 text-[11px] text-gray-500">Needs review</div>
+                    </button>
+                    <button onClick={() => setTab("Findings")} className="rounded-xl border border-gray-200 bg-white p-3 text-left hover:bg-gray-50">
+                      <div className="text-[10px] uppercase tracking-wide text-gray-400">Lighthouse</div>
+                      <div className="mt-1 text-lg font-semibold text-gray-900">{auditData.lighthouseIssues ? auditData.lighthouseIssues.desktop.length + auditData.lighthouseIssues.mobile.length : 0}</div>
+                      <div className="mt-0.5 text-[11px] text-gray-500">Measured issues</div>
+                    </button>
+                    <button onClick={() => setTab("Findings")} className="rounded-xl border border-gray-200 bg-white p-3 text-left hover:bg-gray-50">
+                      <div className="text-[10px] uppercase tracking-wide text-gray-400">Audit issues</div>
+                      <div className="mt-1 text-lg font-semibold text-gray-900">{auditData.issues.length}</div>
+                      <div className="mt-0.5 text-[11px] text-gray-500">Detected on page</div>
+                    </button>
+                  </div>
+                  {(auditData.findings?.length ?? 0) > 0 && (
+                    <button onClick={() => setTab("Findings")} className="mt-3 flex w-full items-center justify-between rounded-xl bg-[#111111] px-3 py-2.5 text-[12px] font-medium text-white hover:bg-black">
+                      <span>See findings and recommended next steps</span>
+                      <ChevronRight size={14} />
+                    </button>
+                  )}
+                </Section>
+
                 <Section title="PageSpeed Scores">
                   {auditData.pageSpeed ? (
                     <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
@@ -959,6 +973,45 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
                     </div>
                   )}
                 </Section>
+
+                {auditData.lighthouseIssues && (
+                  <Section title="Lighthouse Diagnostics" subtitle="Real Lighthouse audits behind the scores — not just the four category numbers">
+                    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                      <div className="mb-3 flex rounded-lg bg-gray-200/70 p-1 text-[13px]">
+                        <button
+                          onClick={() => setDevice("desktop")}
+                          className={`flex-1 rounded-md py-1.5 font-medium ${device === "desktop" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500"}`}
+                        >
+                          Desktop
+                        </button>
+                        <button
+                          onClick={() => setDevice("mobile")}
+                          className={`flex-1 rounded-md py-1.5 font-medium ${device === "mobile" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500"}`}
+                        >
+                          Mobile
+                        </button>
+                      </div>
+                      {auditData.lighthouseIssues[device].length === 0 ? (
+                        <div className="text-[12px] text-emerald-700">No Lighthouse audits below the 90% threshold.</div>
+                      ) : (
+                        <div className="space-y-2">
+                          {auditData.lighthouseIssues[device].map((issue) => (
+                            <div key={issue.id} className="flex items-start justify-between gap-3 rounded-lg border border-gray-200 bg-white p-2.5">
+                              <div className="min-w-0">
+                                <div className="text-[12px] font-medium text-gray-800">{issue.title}</div>
+                                <div className="mt-0.5 text-[10px] uppercase tracking-wide text-gray-400">{issue.mode}</div>
+                              </div>
+                              <div className="shrink-0 text-right">
+                                <div className="text-[12px] font-semibold text-gray-900">{issue.score === null ? "N/A" : `${Math.round(issue.score * 100)}`}</div>
+                                {issue.displayValue && <div className="text-[10px] text-gray-500">{issue.displayValue}</div>}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </Section>
+                )}
 
                 <Section title="Core Web Vitals">
                   {auditData.coreWebVitals ? (
@@ -1016,44 +1069,20 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
                 </Section>
 
                 <Section
-                  title="Issues"
-                  subtitle={githubConnected ? undefined : "Connect GitHub in Settings → API Credentials to fix eligible issues in code."}
+                  title="Audit issues"
+                  subtitle="Every issue below is based on data collected during this audit. Open Findings for the explanation and recommended next steps."
                 >
                   <div className="overflow-hidden rounded-xl border border-gray-200">
-                     {auditData.issues.length === 0 ? (
-                       <div className="p-3 text-sm text-gray-500">No issues found!</div>
-                     ) : (
-                        auditData.issues.map((issue, i) => {
-                          const finding = (auditData.findings ?? []).find((f) => f.label === issue.label);
-                          const fix = finding ? codeFixes[finding.issueId] : undefined;
-                          return (
-                            <div key={i} className="flex items-center justify-between gap-2 border-t border-gray-100 px-3 py-2.5 text-[13px] first:border-t-0">
-                              <span className="flex items-center gap-2 text-gray-700">
-                                <span className={issue.level === "Error" ? "text-red-500" : "text-amber-500"}>⚠</span> {issue.label}
-                              </span>
-                              {finding?.autoFixable && githubConnected && (
-                                fix?.status === "pr_open" || fix?.status === "merged" ? (
-                                  <a
-                                    href={fix.pr_url ?? "#"}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="flex shrink-0 items-center gap-1 text-[11px] font-medium text-[#00846f] hover:underline"
-                                  >
-                                    PR open <ExternalLink size={10} />
-                                  </a>
-                                ) : (
-                                  <button
-                                    onClick={() => setFixingFinding(finding)}
-                                    className="flex shrink-0 items-center gap-1 rounded-full border border-gray-200 px-2 py-1 text-[11px] font-medium text-gray-600 hover:bg-gray-50"
-                                  >
-                                    <Code2 size={11} /> Fix in code
-                                  </button>
-                                )
-                              )}
-                            </div>
-                          );
-                        })
-                     )}
+                    {auditData.issues.length === 0 ? (
+                      <div className="p-3 text-sm text-emerald-700">No on-page issues detected.</div>
+                    ) : (
+                      auditData.issues.map((issue, i) => (
+                        <div key={i} className="flex items-center gap-2 border-t border-gray-100 px-3 py-2.5 text-[13px] first:border-t-0">
+                          <span className={issue.level === "Error" ? "text-red-500" : "text-amber-500"}>⚠</span>
+                          <span className="text-gray-700">{issue.label}</span>
+                        </div>
+                      ))
+                    )}
                   </div>
                 </Section>
               </>
@@ -1376,14 +1405,6 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
           </>
         )}
       </div>
-
-      {fixingFinding && (
-        <CodeFixModal
-          finding={fixingFinding}
-          onClose={() => setFixingFinding(null)}
-          onApplied={(issueId, prUrl) => setCodeFixes((prev) => ({ ...prev, [issueId]: { status: "pr_open", pr_url: prUrl } }))}
-        />
-      )}
     </div>
   );
 }

@@ -3,6 +3,7 @@ export const RECOMMENDATION_TYPES = [
   "noindex",
   "low_keyword_relevance",
   "slow_ttfb",
+  "lighthouse_issue",
 ] as const;
 
 export type RecommendationType = (typeof RECOMMENDATION_TYPES)[number];
