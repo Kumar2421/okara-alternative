@@ -3,7 +3,7 @@ import { request as httpRequest, type IncomingHttpHeaders } from "http";
 import { request as httpsRequest } from "https";
 import { jinaRead, extractMarkdownLinks } from "@/lib/domain/shared/jinaReader";
 import { extractTitle } from "@/lib/domain/seo/extractTitle";
-import { fetchPageSpeed, type CwvSnapshot } from "@/lib/domain/seo/pageSpeedInsights";
+import { fetchPageSpeed, type CwvSnapshot, type LighthouseIssue } from "@/lib/domain/seo/pageSpeedInsights";
 
 export type { CwvStatus, CwvMetric, CwvSnapshot } from "@/lib/domain/seo/pageSpeedInsights";
 
@@ -50,6 +50,10 @@ export type SEOAuditPayload = {
   coreWebVitals?: {
     desktop: CwvSnapshot;
     mobile: CwvSnapshot;
+  };
+  lighthouseIssues?: {
+    desktop: LighthouseIssue[];
+    mobile: LighthouseIssue[];
   };
   /** Visible page text (script/style stripped, whitespace collapsed, capped
    * at ~6000 chars) — the raw material downstream doc generators (Product
