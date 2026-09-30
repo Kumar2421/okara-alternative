@@ -1,7 +1,9 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
 import { providers as PROVIDER_DEFS } from "./mock-providers";
+import { createClient } from "@/utils/supabase/client";
+import { FEATURES } from "./features";
 
 type ConnectionState = {
   connected: boolean;
@@ -23,12 +25,16 @@ type Ctx = {
 };
 
 const ProvidersCtx = createContext<Ctx | null>(null);
-const STORAGE_KEY = "okara.providers.v1"; // fast-paint cache only; /api/providers is the source of truth
+const STORAGE_KEY = "okara.providers.v2";
 
 export function useProviders() {
   const ctx = useContext(ProvidersCtx);
   if (!ctx) throw new Error("useProviders must be used within ProvidersProvider");
   return ctx;
+}
+
+function cacheKey(userId: string | null) {
+  return `${STORAGE_KEY}:${userId ?? "anonymous"}`;
 }
 
 export default function ProvidersProvider({ children }: { children: React.ReactNode }) {
@@ -37,51 +43,105 @@ export default function ProvidersProvider({ children }: { children: React.ReactN
   const [loading, setLoading] = useState(true);
   const [platformProviders, setPlatformProviders] = useState<string[]>([]);
 
-  const persistCache = useCallback((next: ProvidersState, primary: string | null) => {
+  const userIdRef = useRef<string | null>(null);
+
+  const persistCache = useCallback(
+    (next: ProvidersState, primary: string | null, id = userIdRef.current) => {
+      try {
+        localStorage.setItem(cacheKey(id), JSON.stringify({ state: next, primaryModel: primary }));
+      } catch {}
+    },
+    []
+  );
+
+  const clearSessionState = useCallback((id: string | null) => {
+    userIdRef.current = id;
+    setState({});
+    setPrimaryModelState(null);
+    setPlatformProviders([]);
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ state: next, primaryModel: primary }));
-    } catch {
-      // storage unavailable, keep in-memory only
-    }
+      localStorage.removeItem(cacheKey(null));
+      if (id) localStorage.removeItem(cacheKey(id));
+    } catch {}
   }, []);
 
-  useEffect(() => {
-    // paint instantly from cache, then reconcile with the real backend
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        setState(parsed.state || {});
-        setPrimaryModelState(parsed.primaryModel || null);
+  const loadProviders = useCallback(
+    async (id: string | null) => {
+      if (FEATURES.PLATFORM_MODE && !id) {
+        clearSessionState(null);
+        setLoading(false);
+        return;
       }
-    } catch {
-      // ignore corrupt cache
-    }
+      setLoading(true);
+      try {
+        const raw = localStorage.getItem(cacheKey(id));
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          setState(parsed.state || {});
+          setPrimaryModelState(parsed.primaryModel || null);
+        }
+      } catch {}
 
-    fetch("/api/providers")
-      .then((r) => r.json())
-      .then(
-        (data: {
+      try {
+        const response = await fetch("/api/providers", { cache: "no-store" });
+        if (response.status === 401 && FEATURES.PLATFORM_MODE) {
+          clearSessionState(null);
+          return;
+        }
+        if (!response.ok) throw new Error("Failed to load providers");
+        const data: {
           connections: { providerId: string; keyPreview: string; baseUrl?: string }[];
           primaryModel: string | null;
           platformProviders?: string[];
-        }) => {
-          const next: ProvidersState = {};
-          for (const c of data.connections) {
-            // keyPreview stands in for the real key client-side (server never returns it raw)
-            next[c.providerId] = { connected: true, apiKey: c.keyPreview, baseUrl: c.baseUrl };
-          }
-          setState(next);
-          setPrimaryModelState(data.primaryModel);
-          setPlatformProviders(data.platformProviders ?? []);
-          persistCache(next, data.primaryModel);
+        } = await response.json();
+
+        const next: ProvidersState = {};
+        for (const connection of data.connections) {
+          next[connection.providerId] = { connected: true, apiKey: "", baseUrl: connection.baseUrl };
         }
-      )
-      .catch(() => {
-        // backend unreachable — keep whatever the cache had, chat will surface the real error on send
-      })
-      .finally(() => setLoading(false));
-  }, [persistCache]);
+        setState(next);
+        setPrimaryModelState(data.primaryModel);
+        setPlatformProviders(data.platformProviders ?? []);
+        persistCache(next, data.primaryModel, id);
+      } catch {
+      } finally {
+        setLoading(false);
+      }
+    },
+    [clearSessionState, persistCache]
+  );
+
+  useEffect(() => {
+    let mounted = true;
+    const supabase = createClient();
+    void supabase.auth.getUser().then(({ data }) => {
+      if (!mounted) return;
+      const id = data.user?.id ?? null;
+      userIdRef.current = id;
+      void loadProviders(id);
+    });
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!mounted) return;
+      const id = session?.user?.id ?? null;
+      if (event === "SIGNED_OUT") {
+        clearSessionState(null);
+        setLoading(false);
+        return;
+      }
+      if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "USER_UPDATED") {
+        if (id !== userIdRef.current) {
+          userIdRef.current = id;
+          void loadProviders(id);
+        }
+      }
+    });
+
+    return () => {
+      mounted = false;
+      authListener.subscription.unsubscribe();
+    };
+  }, [clearSessionState, loadProviders]);
 
   const connect = useCallback(
     async (providerId: string, apiKey: string, baseUrl?: string) => {
@@ -93,7 +153,7 @@ export default function ProvidersProvider({ children }: { children: React.ReactN
       if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? "Failed to connect");
 
       setState((prev) => {
-        const next = { ...prev, [providerId]: { connected: true, apiKey, baseUrl } };
+        const next = { ...prev, [providerId]: { connected: true, apiKey: "", baseUrl } };
         persistCache(next, primaryModel);
         return next;
       });
@@ -126,7 +186,7 @@ export default function ProvidersProvider({ children }: { children: React.ReactN
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ primaryModel: model }),
       }).catch(() => {
-        // best-effort; local state already updated, next reconcile will catch drift
+        // local state remains usable; the next backend reconciliation restores truth
       });
     },
     [persistCache, state]
@@ -136,26 +196,6 @@ export default function ProvidersProvider({ children }: { children: React.ReactN
     (p) => state[p.id]?.connected || platformProviders.includes(p.id)
   ).flatMap((p) => p.models.map((m) => ({ providerId: p.id, providerName: p.name, model: m })));
 
-  // When nothing is BYOK-connected but the operator has a platform key live,
-  // default primaryModel to that provider's first model so chat/agents work
-  // the instant a hosted user lands — no "connect a provider first" dead end
-  // (see app/api/chat/route.ts's own platform-key fallback, which this keeps
-  // in sync with).
-  useEffect(() => {
-    if (!loading && !primaryModel && connectedModels.length > 0) {
-      const model = connectedModels[0].model;
-      setPrimaryModelState(model);
-      persistCache(state, model);
-      fetch("/api/providers", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ primaryModel: model }),
-      }).catch(() => {
-        // best-effort; local state already updated
-      });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, primaryModel, connectedModels.length]);
 
   return (
     <ProvidersCtx.Provider
