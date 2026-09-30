@@ -118,5 +118,6 @@ export async function fetchPageSpeed(url: string, apiKey: string): Promise<PageS
   return {
     pageSpeed: { desktop: desktopData.scores, mobile: mobileData.scores },
     coreWebVitals: { desktop: desktopData.cwv, mobile: mobileData.cwv },
+    lighthouseIssues: { desktop: desktopData.lighthouseIssues, mobile: mobileData.lighthouseIssues },
   };
 }
