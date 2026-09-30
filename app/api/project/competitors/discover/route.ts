@@ -99,14 +99,7 @@ export async function POST(req: NextRequest) {
     const productInfo = groundingDocs?.find((d) => d.doc_type === "product_info")?.content;
     const marketingStrategy = groundingDocs?.find((d) => d.doc_type === "marketing_strategy")?.content;
 
-    const { data: tavilySetting } = await db
-      .from("user_settings")
-      .select("value")
-      .eq("user_id", user.id)
-      .eq("key", "tavily_api_key")
-      .maybeSingle();
-    const tavilyApiKey =
-      tavilySetting?.value && providerSupportsTools(providerId) ? tavilySetting.value : undefined;
+    const tavilyApiKey = providerSupportsTools(providerId) ? process.env.TAVILY_API_KEY?.trim() || undefined : undefined;
 
     try {
       const agent = new CompetitorDiscoveryAgent(driver, apiKey, baseUrl);
