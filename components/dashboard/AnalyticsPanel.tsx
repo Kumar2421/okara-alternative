@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
-import { BarChart2, ChevronLeft, Link2, X, Lock, Search, Cpu, Globe2, Check, Loader2, RefreshCw, AlertTriangle, ExternalLink, TrendingUp, Code2 } from "lucide-react";
+import { BarChart2, ChevronLeft, ChevronRight, Link2, X, Lock, Search, Cpu, Globe2, Check, Loader2, RefreshCw, AlertTriangle, ExternalLink, TrendingUp, Code2 } from "lucide-react";
 import CollapsedRail, { RailButton } from "./CollapsedRail";
 import { useToast } from "./Toast";
 import ScoreCircle from "./ScoreCircle";
