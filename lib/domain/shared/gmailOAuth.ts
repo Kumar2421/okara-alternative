@@ -13,6 +13,9 @@
  * always re-grants both scopes fresh, no separate migration needed). */
 
 import { getDb } from "@/lib/db";
+import { FEATURES } from "@/lib/features";
+import { createClient } from "@/utils/supabase/server";
+import { createServiceClient } from "@/utils/supabase/serviceClient";
 
 const SCOPES = [
   "https://www.googleapis.com/auth/gmail.send",
@@ -69,6 +72,59 @@ export async function refreshAccessToken(refreshToken: string): Promise<GmailTok
  * token if it's within 60s of expiry, persists the refreshed token back to
  * settings so the next call skips the refresh. Throws if not connected. */
 export async function getValidGmailAccessToken(): Promise<string> {
+  if (FEATURES.PLATFORM_MODE) {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error("Not authenticated.");
+
+    const db = createServiceClient();
+    const { data: conn } = await db
+      .from("integration_connections")
+      .select("access_token_secret_id, refresh_token_secret_id, token_expiry")
+      .eq("user_id", user.id)
+      .eq("provider", "gmail")
+      .is("project_id", null)
+      .maybeSingle();
+
+    if (!conn?.refresh_token_secret_id) {
+      throw new Error("Gmail isn't connected — connect it with Google sign-in.");
+    }
+
+    const [{ data: accessToken }, { data: refreshToken }] = await Promise.all([
+      conn.access_token_secret_id
+        ? db.rpc("vault_get_secret", { p_id: conn.access_token_secret_id })
+        : Promise.resolve({ data: null }),
+      db.rpc("vault_get_secret", { p_id: conn.refresh_token_secret_id }),
+    ]);
+
+    if (!refreshToken) throw new Error("Gmail connection is missing its refresh token. Reconnect with Google.");
+
+    const expiresAt = conn.token_expiry ? new Date(conn.token_expiry).getTime() : 0;
+    if (accessToken && Date.now() < expiresAt - 60_000) {
+      return accessToken as string;
+    }
+
+    const refreshed = await refreshAccessToken(refreshToken as string);
+    const { data: newAccessSecretId, error } = await db.rpc("vault_set_secret", {
+      p_secret: refreshed.accessToken,
+      p_name: `gmail_token:${user.id}:access`,
+    });
+    if (error) throw new Error(error.message);
+
+    const { error: updateError } = await db
+      .from("integration_connections")
+      .update({
+        access_token_secret_id: newAccessSecretId as string,
+        token_expiry: new Date(refreshed.expiresAt).toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", conn.id)
+      .eq("user_id", user.id);
+    if (updateError) throw new Error(updateError.message);
+
+    return refreshed.accessToken;
+  }
+
   const db = getDb();
   const rows = db
     .prepare("SELECT key, value FROM settings WHERE key IN ('gmail_access_token', 'gmail_refresh_token', 'gmail_token_expiry')")
