@@ -132,6 +132,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Provide an API key or a base URL" }, { status: 400 });
   }
 
+  if (FEATURES.PLATFORM_MODE && ["github", "x", "tavily", "google_cloud"].includes(body.providerId)) {
+    return NextResponse.json(
+      { error: `${body.providerId} credentials are managed through their integration flow, not manual API-key configuration.` },
+      { status: 400 }
+    );
+  }
+
   // LM Studio/Ollama describe a server on the CALLER's own machine — in
   // platform mode this API route runs on Vercel's servers, so accepting one
   // here would silently save a connection that can never actually be
