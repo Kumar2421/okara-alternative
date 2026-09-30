@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { updateSession } from "@/utils/supabase/middleware";
-import { FEATURES } from "@/lib/features";
+import { getPlatformRuntimeConfig } from "@/lib/platform/runtimeConfig";
 
 export async function proxy(request: NextRequest) {
   const hasSupabaseConfig = Boolean(
