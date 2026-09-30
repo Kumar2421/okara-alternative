@@ -3,12 +3,14 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 
 import { useEffect, useState } from "react";
-import { Check, AlertTriangle } from "lucide-react";
+import { Check } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useToast } from "@/components/dashboard/Toast";
 import BrandIcon from "@/components/settings/BrandIcon";
 import { useProject } from "@/lib/project-store";
 import { FEATURES } from "@/lib/features";
+import { createClient } from "@/utils/supabase/client";
+import { GOOGLE_ANALYTICS_SCOPES } from "@/lib/googleOAuthScopes";
 
 type Resource = { resourceId: string; resourceName: string; selected: boolean };
 type IntegrationResources = {
@@ -32,18 +34,13 @@ export default function GoogleAnalyticsCard() {
   const { show } = useToast();
   const searchParams = useSearchParams();
   const { project } = useProject();
-  const [envActive, setEnvActive] = useState({ GMAIL_CLIENT_ID: false, GMAIL_CLIENT_SECRET: false });
   const [resources, setResources] = useState<IntegrationResources[]>([]);
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
   async function load() {
     try {
-      const [envData, resourceData] = await Promise.all([
-        fetch("/api/settings/env").then((r) => r.json()),
-        fetch("/api/project/integrations/google/resources").then((r) => r.json()),
-      ]);
-      setEnvActive(envData.active ?? { GMAIL_CLIENT_ID: false, GMAIL_CLIENT_SECRET: false });
+      const resourceData = await fetch("/api/project/integrations/google/resources", { cache: "no-store" }).then((r) => r.json());
       setResources(resourceData.integrations ?? []);
     } catch {
       // Keep the card usable if the backend is temporarily unavailable.
@@ -81,6 +78,24 @@ export default function GoogleAnalyticsCard() {
     }
   }
 
+
+  async function handlePlatformConnect() {
+    setBusy(true);
+    const supabase = createClient();
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${window.location.origin}/api/auth/callback?next=/settings/api-credentials`,
+        scopes: GOOGLE_ANALYTICS_SCOPES,
+        queryParams: { access_type: "offline", prompt: "consent" },
+      },
+    });
+    if (error) {
+      setBusy(false);
+      show(error.message);
+    }
+  }
+
   async function handleDisconnect() {
     setBusy(true);
     try {
@@ -95,9 +110,6 @@ export default function GoogleAnalyticsCard() {
     }
   }
 
-  // GET /api/settings/env reports the real server env state in both modes —
-  // platform mode is NOT assumed active here (see GmailCard.tsx, same fix).
-  const clientCredsActive = envActive.GMAIL_CLIENT_ID && envActive.GMAIL_CLIENT_SECRET;
   const gsc = resources.find((r) => r.integrationType === "google-search-console");
   const ga4 = resources.find((r) => r.integrationType === "google-analytics");
   const connected = Boolean(gsc?.integrationId || ga4?.integrationId);
@@ -130,14 +142,7 @@ export default function GoogleAnalyticsCard() {
         <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-[11px] text-gray-600">
           Select or create a project before connecting Google.
         </div>
-      ) : !loaded ? null : !clientCredsActive ? (
-        <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-800">
-          <AlertTriangle size={12} className="mt-0.5 shrink-0" />
-          {FEATURES.PLATFORM_MODE
-            ? "Google sign-in isn't configured on this deployment yet — the site operator needs to set GMAIL_CLIENT_ID/GMAIL_CLIENT_SECRET as real environment variables."
-            : "Set up the Gmail OAuth Client ID/Secret above first — this reuses the same client."}
-        </div>
-      ) : connected ? (
+      ) : !loaded ? null : connected ? (
         <div className="space-y-3">
           {gsc?.resources.length ? (
             <ResourcePicker title="Search Console site" integrationType="google-search-console" resources={gsc.resources} disabled={busy} onSelect={selectResource} />
@@ -153,6 +158,14 @@ export default function GoogleAnalyticsCard() {
             Disconnect Google from this project
           </button>
         </div>
+      ) : FEATURES.PLATFORM_MODE ? (
+        <button
+          onClick={handlePlatformConnect}
+          disabled={busy}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-[#111111] px-3 py-2 text-[13px] font-medium text-white hover:bg-black disabled:opacity-50"
+        >
+          {busy ? "Connecting..." : "Connect Google"}
+        </button>
       ) : (
         <a
           href="/api/auth/google-analytics/connect"
