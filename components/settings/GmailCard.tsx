@@ -6,6 +6,8 @@ import { useSearchParams } from "next/navigation";
 import { useToast } from "@/components/dashboard/Toast";
 import BrandIcon from "@/components/settings/BrandIcon";
 import { FEATURES } from "@/lib/features";
+import { createClient } from "@/utils/supabase/client";
+import { GOOGLE_ANALYTICS_SCOPES } from "@/lib/googleOAuthScopes";
 
 /** Self-host: two real steps, not one — (1) app-level OAuth Client ID/Secret,
  * written to .env.local, only takes effect after a real server restart
@@ -31,11 +33,17 @@ export default function GmailCard() {
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    const error = searchParams.get("gmail_error");
-    if (error) show(`Gmail connect failed: ${error}`);
-  }, [searchParams, show]);
+    if (FEATURES.PLATFORM_MODE) {
+      fetch("/api/auth/gmail/status", { cache: "no-store" })
+        .then((r) => r.ok ? r.json() : Promise.reject(new Error("status")))
+        .then((data: { email?: string | null }) => {
+          setConnectedEmail(data.email ?? null);
+        })
+        .catch(() => {})
+        .finally(() => setLoaded(true));
+      return;
+    }
 
-  useEffect(() => {
     Promise.all([fetch("/api/settings/env").then((r) => r.json()), fetch("/api/settings").then((r) => r.json())])
       .then(([envData, settingsData]: [{ active?: typeof envActive }, { settings?: { key: string; value: string }[] }]) => {
         setEnvActive(envData.active ?? { GMAIL_CLIENT_ID: false, GMAIL_CLIENT_SECRET: false });
@@ -74,6 +82,23 @@ export default function GmailCard() {
     }
   }
 
+  async function handlePlatformConnect() {
+    setBusy(true);
+    const supabase = createClient();
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${window.location.origin}/api/auth/callback?next=/settings/api-credentials`,
+        scopes: GOOGLE_ANALYTICS_SCOPES,
+        queryParams: { access_type: "offline", prompt: "consent" },
+      },
+    });
+    if (error) {
+      setBusy(false);
+      show(error.message);
+    }
+  }
+
   async function handleDisconnect() {
     setBusy(true);
     try {
@@ -109,30 +134,47 @@ export default function GmailCard() {
               )}
             </div>
             <div className="text-[12px] text-gray-500">
-              Real send capability for Leads outreach — needs an OAuth Client ID/Secret from Google Cloud
-              Console first, then a real consent flow to connect an inbox.
+              Real send capability for Leads outreach. Hosted users connect through Google sign-in; self-hosters configure their own OAuth client.
             </div>
           </div>
         </div>
-        <a
-          href="https://console.cloud.google.com/apis/credentials"
-          target="_blank"
-          rel="noreferrer"
-          className="flex shrink-0 items-center gap-1 text-[11px] text-gray-400 hover:text-gray-700"
-        >
-          Create OAuth client <ExternalLink size={11} />
-        </a>
+        {!FEATURES.PLATFORM_MODE && (
+          <a
+            href="https://console.cloud.google.com/apis/credentials"
+            target="_blank"
+            rel="noreferrer"
+            className="flex shrink-0 items-center gap-1 text-[11px] text-gray-400 hover:text-gray-700"
+          >
+            Create OAuth client <ExternalLink size={11} />
+          </a>
+        )}
       </div>
 
-      {!loaded ? null : (
+      {!loaded ? null : FEATURES.PLATFORM_MODE ? (
+        connectedEmail ? (
+          <div className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2 text-[12px] text-gray-600">
+            <span>{connectedEmail}</span>
+            <button onClick={handleDisconnect} disabled={busy} className="font-medium text-red-600 hover:underline disabled:opacity-50">
+              Disconnect
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-[11px] text-gray-500">
+              Connect Gmail through your Google sign-in. No Client ID, Client Secret, or .env configuration is required for hosted users.
+            </p>
+            <button
+              onClick={handlePlatformConnect}
+              disabled={busy}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-[#111111] px-3 py-2 text-[13px] font-medium text-white hover:bg-black disabled:opacity-50"
+            >
+              {busy ? "Connecting..." : "Connect with Google"}
+            </button>
+          </div>
+        )
+      ) : (
         <>
-          {!clientCredsActive && FEATURES.PLATFORM_MODE ? (
-            <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-800">
-              <AlertTriangle size={12} className="mt-0.5 shrink-0" />
-              Google sign-in isn&apos;t configured on this deployment yet — the site operator needs to set
-              GMAIL_CLIENT_ID/GMAIL_CLIENT_SECRET as real environment variables.
-            </div>
-          ) : !clientCredsActive ? (
+          {!clientCredsActive ? (
             <div className="rounded-lg bg-gray-50 p-3">
               {savedButNotActive && (
                 <div className="mb-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-800">
@@ -147,25 +189,10 @@ export default function GmailCard() {
                 </code>
               </p>
               <div className="mb-2 space-y-2">
-                <input
-                  value={clientId}
-                  onChange={(e) => setClientId(e.target.value)}
-                  placeholder="Client ID"
-                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-[13px] text-gray-800 placeholder:text-gray-400"
-                />
-                <input
-                  value={clientSecret}
-                  onChange={(e) => setClientSecret(e.target.value)}
-                  placeholder="Client Secret"
-                  type="password"
-                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-[13px] text-gray-800 placeholder:text-gray-400"
-                />
+                <input value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder="Client ID" className="w-full rounded-lg border border-gray-200 px-3 py-2 text-[13px] text-gray-800 placeholder:text-gray-400" />
+                <input value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} placeholder="Client Secret" type="password" className="w-full rounded-lg border border-gray-200 px-3 py-2 text-[13px] text-gray-800 placeholder:text-gray-400" />
               </div>
-              <button
-                onClick={handleSaveClientCreds}
-                disabled={busy}
-                className="rounded-lg bg-[#111111] px-3 py-1.5 text-[13px] font-medium text-white hover:bg-black disabled:opacity-50"
-              >
+              <button onClick={handleSaveClientCreds} disabled={busy} className="rounded-lg bg-[#111111] px-3 py-1.5 text-[13px] font-medium text-white hover:bg-black disabled:opacity-50">
                 {busy ? "Saving..." : "Save to .env.local"}
               </button>
             </div>
@@ -177,10 +204,7 @@ export default function GmailCard() {
               </button>
             </div>
           ) : (
-            <a
-              href="/api/auth/gmail/connect"
-              className="inline-flex items-center gap-1.5 rounded-lg bg-[#111111] px-3 py-2 text-[13px] font-medium text-white hover:bg-black"
-            >
+            <a href="/api/auth/gmail/connect" className="inline-flex items-center gap-1.5 rounded-lg bg-[#111111] px-3 py-2 text-[13px] font-medium text-white hover:bg-black">
               Connect Gmail
             </a>
           )}
