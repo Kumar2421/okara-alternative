@@ -76,8 +76,11 @@ export default function FindingActionsSection({
                 <div className="mt-1 text-[11px] leading-4 text-gray-600">{recommendation.summary}</div>
               </div>
               {action ? (
-                <span className={"shrink-0 rounded-full border px-2 py-0.5 text-[9px] font-semibold uppercase " + STATUS_CLASS[action.status]}>
+                <span className="flex shrink-0 items-center gap-1.5">
+                  <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[9px] font-semibold uppercase text-gray-500">{recommendation.priority}</span>
+                  <span className={"rounded-full border px-2 py-0.5 text-[9px] font-semibold uppercase " + STATUS_CLASS[action.status]}>
                   {STATUS_LABEL[action.status]}
+                  </span>
                 </span>
               ) : (
                 <button
