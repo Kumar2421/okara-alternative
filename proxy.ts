@@ -3,23 +3,19 @@ import { updateSession } from "@/utils/supabase/middleware";
 import { getPlatformRuntimeConfig } from "@/lib/platform/runtimeConfig";
 
 export async function proxy(request: NextRequest) {
-  const hasSupabaseConfig = Boolean(
-    process.env.NEXT_PUBLIC_SUPABASE_URL &&
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-  );
+  const runtime = getPlatformRuntimeConfig();
 
-  // Hosted/platform mode must fail closed when its authentication backend is
-  // not configured. Falling through to an unauthenticated app would expose
-  // protected routes with no session enforcement.
-  if (FEATURES.PLATFORM_MODE && !hasSupabaseConfig) {
-    return new NextResponse("Platform authentication is not configured.", {
+  // Hosted/platform mode must fail closed when its runtime contract is not
+  // configured. This prevents auth/database requests from falling through to
+  // an incomplete deployment.
+  if (runtime.platformMode && runtime.missing.length > 0) {
+    return new NextResponse("Platform runtime is not configured.", {
       status: 503,
       headers: { "Cache-Control": "no-store" },
     });
   }
 
-  // Self-host mode intentionally has no Supabase dependency.
-  if (!hasSupabaseConfig) {
+  if (!runtime.platformMode) {
     return NextResponse.next();
   }
 
@@ -28,6 +24,6 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|lottie)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|.*\.(?:svg|png|jpg|jpeg|gif|webp|lottie)$).*)",
   ],
 };
