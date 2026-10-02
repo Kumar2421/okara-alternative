@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getDriver } from "@/lib/llm";
-import { LeadsAgent, type ExtractedLead } from "@/lib/domain/leads/LeadsAgent";
-import { guessAndVerifyEmail } from "@/lib/domain/leads/emailVerify";
+import { LeadsAgent } from "@/lib/domain/leads/LeadsAgent";
+import { verifyMissingEmails } from "@/lib/domain/leads/verifyMissingEmails";
 import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
 import { FEATURES } from "@/lib/features";
 import { createClient } from "@/utils/supabase/server";
@@ -26,29 +26,6 @@ async function getActiveProjectIdSupabase(db: SupabaseClient, userId: string): P
     .eq("key", "active_project_id")
     .maybeSingle();
   return data?.value ?? null;
-}
-
-const SMTP_VERIFY_CONCURRENCY = 5;
-
-/** Runs guessAndVerifyEmail only for leads search extraction left with no
- * email — bounded concurrency so we're not opening dozens of SMTP sockets
- * at once. Mutates nothing; returns which leads got a verified email. */
-async function verifyMissingEmails(leads: ExtractedLead[]): Promise<Map<number, string>> {
-  const verified = new Map<number, string>();
-  const candidates = leads
-    .map((lead, index) => ({ lead, index }))
-    .filter(({ lead }) => !lead.email && lead.company && lead.name.trim().split(/\s+/).length >= 2);
-
-  for (let i = 0; i < candidates.length; i += SMTP_VERIFY_CONCURRENCY) {
-    const batch = candidates.slice(i, i + SMTP_VERIFY_CONCURRENCY);
-    const results = await Promise.all(
-      batch.map(({ lead }) => guessAndVerifyEmail(lead.name, lead.company).catch(() => null))
-    );
-    results.forEach((email, j) => {
-      if (email) verified.set(batch[j].index, email);
-    });
-  }
-  return verified;
 }
 
 export async function GET() {
