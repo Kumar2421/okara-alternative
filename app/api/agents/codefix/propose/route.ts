@@ -9,6 +9,7 @@ import { FEATURES } from "@/lib/features";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
 import { chargeCredits, InsufficientCreditsError } from "@/lib/credits";
+import { PLATFORM_PROVIDER_KEYS } from "@/lib/llm/platformKeys";
 
 // Vercel: LLM/crawl calls can run past the 10s default — allow up to the
 // platform max for this route (Hobby plan caps at 60s; Pro allows more).
@@ -167,14 +168,13 @@ export async function POST(req: NextRequest) {
         .eq("user_id", user.id)
         .eq("provider_id", providerId)
         .maybeSingle();
-      if (!llmConn?.api_key_secret_id) {
-        return NextResponse.json(
-          { error: `${providerId} isn't connected yet. Connect it in Settings → LLM Providers.` },
-          { status: 422 }
-        );
+
+      let llmApiKey = "";
+      if (llmConn?.api_key_secret_id) {
+        const { data: llmSecret } = await db.rpc("vault_get_secret", { p_id: llmConn.api_key_secret_id });
+        llmApiKey = (llmSecret as string) ?? "";
       }
-      const { data: llmSecret } = await db.rpc("vault_get_secret", { p_id: llmConn.api_key_secret_id });
-      const llmApiKey = (llmSecret as string) ?? "";
+      if (!llmApiKey) llmApiKey = PLATFORM_PROVIDER_KEYS[providerId] ?? "";
       if (!llmApiKey) {
         return NextResponse.json(
           { error: `${providerId} isn't connected yet. Connect it in Settings → LLM Providers.` },
@@ -193,7 +193,7 @@ export async function POST(req: NextRequest) {
         throw err;
       }
 
-      const provider = getCodeFixProvider("contents-api", driver, llmApiKey, model, llmConn.base_url ?? undefined);
+      const provider = getCodeFixProvider("contents-api", driver, llmApiKey, model, llmConn?.base_url ?? undefined);
       const proposed = await provider.proposeFix(finding, ctx);
 
       return NextResponse.json({ finding, proposed });

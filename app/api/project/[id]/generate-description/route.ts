@@ -5,6 +5,7 @@ import type { SEOAuditPayload } from "@/lib/domain/seo/SEOAgent";
 import { FEATURES } from "@/lib/features";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
+import { PLATFORM_PROVIDER_KEYS } from "@/lib/llm/platformKeys";
 
 // Vercel: LLM/crawl calls can run past the 10s default — allow up to the
 // platform max for this route (Hobby plan caps at 60s; Pro allows more).
@@ -67,12 +68,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       .eq("user_id", user.id)
       .eq("provider_id", providerId)
       .maybeSingle();
-    if (!conn?.api_key_secret_id) {
+
+    let apiKey = "";
+    const baseUrl = conn?.base_url ?? undefined;
+    if (conn?.api_key_secret_id) {
+      const { data: secret } = await db.rpc("vault_get_secret", { p_id: conn.api_key_secret_id });
+      apiKey = (secret as string) ?? "";
+    }
+    if (!apiKey) apiKey = PLATFORM_PROVIDER_KEYS[providerId] ?? "";
+    if (!apiKey) {
       return NextResponse.json({ error: `${providerId} isn't connected yet.` }, { status: 422 });
     }
-    const { data: secret } = await db.rpc("vault_get_secret", { p_id: conn.api_key_secret_id });
-    const apiKey = (secret as string) ?? "";
-    const baseUrl = conn.base_url ?? undefined;
 
     const system = `You write a short, factual one-to-two-sentence product description from real crawled page content. Ground it only in what's actually there — never invent features, pricing, or claims the page doesn't make. Output the description text only, nothing else (no quotes, no preamble).`;
     const prompt = `Product: ${project.name} (${project.url})
