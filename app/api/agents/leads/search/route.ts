@@ -8,6 +8,7 @@ import { FEATURES } from "@/lib/features";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
 import { chargeCredits, InsufficientCreditsError } from "@/lib/credits";
+import { PLATFORM_PROVIDER_KEYS } from "@/lib/llm/platformKeys";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 // Vercel: LLM/crawl calls can run past the 10s default — allow up to the
@@ -114,19 +115,27 @@ export async function POST(req: NextRequest) {
 
     const tavilyKey = process.env.TAVILY_API_KEY?.trim() || "";
 
-    // LLM provider key — BYOK only for this route (no platform-provided
-    // fallback specified for lead search).
+    // LLM provider key — BYOK first, falling back to the operator's own
+    // platform-managed key (same pattern every other agent route uses).
+    // Previously BYOK-only here; lifted now that it's confirmed this route
+    // already meters cost via chargeCredits("lead_search") below, same
+    // protection the other platform-fallback routes rely on.
     const { data: providerConn } = await db
       .from("provider_connections")
       .select("api_key_secret_id, base_url")
       .eq("user_id", user.id)
       .eq("provider_id", providerId)
       .maybeSingle();
-    if (!providerConn?.api_key_secret_id) {
+
+    let providerApiKey = "";
+    if (providerConn?.api_key_secret_id) {
+      const { data: providerSecret } = await db.rpc("vault_get_secret", { p_id: providerConn.api_key_secret_id });
+      providerApiKey = (providerSecret as string) ?? "";
+    }
+    if (!providerApiKey) providerApiKey = PLATFORM_PROVIDER_KEYS[providerId] ?? "";
+    if (!providerApiKey) {
       return NextResponse.json({ error: `${providerId} isn't connected yet.` }, { status: 422 });
     }
-    const { data: providerSecret } = await db.rpc("vault_get_secret", { p_id: providerConn.api_key_secret_id });
-    const providerApiKey = (providerSecret as string) ?? "";
 
     const googleApiKey = process.env.GOOGLE_CLOUD_API_KEY?.trim();
     const googleCx = process.env.GOOGLE_CSE_ID?.trim();
@@ -147,7 +156,7 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-      const agent = new LeadsAgent(driver, providerApiKey, providerConn.base_url ?? undefined);
+      const agent = new LeadsAgent(driver, providerApiKey, providerConn?.base_url ?? undefined);
       const query = `${role} ${companyOrIndustry} ${location}`.trim();
       const leads = await agent.search({ role, companyOrIndustry, location }, tavilyKey, model, google);
 
