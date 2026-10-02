@@ -30,7 +30,7 @@ type ConnectionRow = {
   project_id: string | null;
   provider: string;
   external_email: string | null;
-  connected_at: string;
+  created_at: string;
   updated_at: string;
 };
 
@@ -42,7 +42,7 @@ function mapIntegration(row: ConnectionRow): ProjectIntegration {
     integrationType: integrationTypeFor(row.provider),
     status: "connected",
     accountIdentifier: row.external_email,
-    connectedAt: row.connected_at,
+    connectedAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
@@ -55,7 +55,7 @@ export async function getProjectIntegration(
 ): Promise<ProjectIntegration | null> {
   const { data } = await db
     .from("integration_connections")
-    .select("id, project_id, provider, external_email, connected_at, updated_at")
+    .select("id, project_id, provider, external_email, created_at, updated_at")
     .eq("user_id", userId)
     .eq("project_id", projectId)
     .eq("provider", providerFor(integrationType))
@@ -70,7 +70,7 @@ export async function listProjectIntegrations(
 ): Promise<ProjectIntegration[]> {
   const { data } = await db
     .from("integration_connections")
-    .select("id, project_id, provider, external_email, connected_at, updated_at")
+    .select("id, project_id, provider, external_email, created_at, updated_at")
     .eq("user_id", userId)
     .eq("project_id", projectId)
     .in("provider", ["ga4", "gsc"]);
@@ -96,12 +96,12 @@ export async function upsertProjectIntegration(
         project_id: input.projectId,
         provider: providerFor(input.integrationType),
         external_email: input.accountIdentifier ?? null,
-        connected_at: input.connectedAt ?? now,
+        created_at: input.connectedAt ?? now,
         updated_at: now,
       },
       { onConflict: "user_id,project_id,provider" }
     )
-    .select("id, project_id, provider, external_email, connected_at, updated_at")
+    .select("id, project_id, provider, external_email, created_at, updated_at")
     .single();
   if (error) throw new Error(error.message);
   return mapIntegration(data as ConnectionRow);
