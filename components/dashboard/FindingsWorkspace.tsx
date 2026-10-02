@@ -254,7 +254,7 @@ export default function FindingsWorkspace() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="@container space-y-4">
       <div>
         <h3 className="text-sm font-semibold text-gray-900">Audit findings</h3>
         <p className="mt-0.5 text-[11px] text-gray-500">Your audit turns measured SEO problems into clear explanations and recommended next steps.</p>
@@ -267,7 +267,7 @@ export default function FindingsWorkspace() {
         </div>
       </div>
 
-      <div className="grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-2 gap-2 @lg:grid-cols-4">
         {[
           ["Needs attention", counts.active],
           ["Critical", counts.critical],
@@ -288,7 +288,7 @@ export default function FindingsWorkspace() {
           <p className="mt-1 text-[12px] text-gray-500">Run an SEO audit first. Detected on-page and Lighthouse issues will appear here automatically with evidence and recommendations.</p>
         </div>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.35fr)]">
+        <div className="grid gap-4 @3xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.35fr)]">
           <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
             {findings.map((finding) => (
               <button
@@ -303,7 +303,7 @@ export default function FindingsWorkspace() {
                       <span className={`rounded-full border px-1.5 py-0.5 text-[9px] font-semibold uppercase ${severityClass(finding.severity)}`}>{finding.severity}</span>
                       <span className={`rounded-full border px-1.5 py-0.5 text-[9px] font-medium ${statusClass(finding.status)}`}>{STATUS_LABEL[finding.status]}</span>
                     </div>
-                    <div className="truncate text-[13px] font-medium text-gray-900">{finding.evidence.label ? String(finding.evidence.label) : finding.recommendation.split(".")[0]}</div>
+                    <div className="line-clamp-2 text-[13px] font-medium leading-5 text-gray-900">{finding.evidence.label ? String(finding.evidence.label) : finding.recommendation.split(".")[0]}</div>
                     <div className="mt-1 truncate text-[11px] text-gray-500">{finding.category === "lighthouse" ? "Lighthouse audit" : "SEO audit"} · {finding.url ?? "No page URL"}</div>
                   </div>
                   <ChevronRight size={14} className="mt-1 shrink-0 text-gray-300" />
