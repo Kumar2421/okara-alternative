@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import type { AuditFunnelPayload } from "@/lib/analytics/auditFunnel";
+import { MarloMark } from "@/components/shared/MarloMark";
 
 /** Same bounds as the server's own check (lib/domain/seo/SEOAgent.ts
  * assertPublicHttpUrl) -- this is just a client-side pre-filter so a
@@ -159,8 +160,9 @@ export default function AuditPage() {
             href="https://marlo.mlforge.in"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-sm font-bold tracking-tight"
+            className="flex items-center gap-2 text-sm font-bold tracking-tight"
           >
+            <MarloMark className="h-6 w-6" />
             Marlo
           </a>
           <Link href="/login" className="text-sm text-black/60 hover:text-black">Sign in</Link>
