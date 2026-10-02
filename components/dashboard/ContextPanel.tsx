@@ -17,6 +17,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { DOC_TYPES } from "@/lib/document-types";
+import { FEATURES } from "@/lib/features";
 import CollapsedRail, { RailButton } from "./CollapsedRail";
 import { useToast } from "./Toast";
 import { useProject } from "@/lib/project-store";
@@ -406,8 +407,10 @@ export default function ContextPanel({
               <p className="text-[12px] text-gray-400">Loading...</p>
             ) : competitors.length === 0 ? (
               <p className="text-[12px] leading-5 text-gray-400">
-                No competitors added yet. Add one manually above, or use &ldquo;Find competitors automatically&rdquo; —
-                works best with a Tavily API key connected (Settings → API Credentials).
+                No competitors added yet. Add one manually above, or use &ldquo;Find competitors automatically&rdquo;
+                {FEATURES.PLATFORM_MODE
+                  ? "."
+                  : " — works best with a Tavily API key connected (Settings → API Credentials)."}
               </p>
             ) : (
               <div className="space-y-1.5 text-[13px] text-gray-700">
