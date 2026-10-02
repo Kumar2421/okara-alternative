@@ -94,6 +94,7 @@ export default function FindingsWorkspace() {
 
   useEffect(() => {
     if (!selectedId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setActions([]);
       setActionsLoading(false);
       return;
