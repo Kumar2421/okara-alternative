@@ -3,7 +3,7 @@ import { getDb } from "@/lib/db";
 import { FEATURES } from "@/lib/features";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
-import { PLATFORM_PROVIDER_KEYS } from "@/lib/llm/platformKeys";
+import { PLATFORM_PROVIDER_KEYS, PLATFORM_DEFAULT_MODELS } from "@/lib/llm/platformKeys";
 
 /**
  * Provider connection registry (BYOK LLM keys).
@@ -12,11 +12,6 @@ import { PLATFORM_PROVIDER_KEYS } from "@/lib/llm/platformKeys";
  * in Vault (see migration 08_vault_secrets) — this table only ever holds a
  * masked preview, never the plaintext key.
  */
-
-const PLATFORM_DEFAULT_MODELS: Record<string, string> = {
-  groq: "openai/gpt-oss-120b",
-  mistral: "mistral-large-latest",
-};
 
 function maskKey(apiKey: string): string {
   return apiKey ? `${apiKey.slice(0, 4)}••••${apiKey.slice(-2)}` : "";

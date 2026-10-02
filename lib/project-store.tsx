@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { useTerminalLog } from "./terminal-log-store";
 import { useProviders, findProviderForModel } from "./providers-store";
+import { FEATURES } from "./features";
 
 export type ActiveProject = {
   id: string;
@@ -49,6 +50,10 @@ type Ctx = {
    * the dashboard's refresh() — without this signal the documents would sit
    * in the database unseen until a manual reload. */
   documentsVersion: number;
+  /** Bumped once the free, platform-only post-creation lead auto-generation
+   * finishes — LeadsPanel watches this to refresh without polling. Always 0
+   * on self-host (the feature never runs there). */
+  leadsVersion: number;
 };
 
 /** Runs right after a successful crawl during project creation — real
@@ -309,6 +314,7 @@ export default function ProjectProvider({ children }: { children: React.ReactNod
   const [competitorsVersion, setCompetitorsVersion] = useState(0);
   const [auditVersion, setAuditVersion] = useState(0);
   const [documentsVersion, setDocumentsVersion] = useState(0);
+  const [leadsVersion, setLeadsVersion] = useState(0);
   const { log, logDone } = useTerminalLog();
   const { primaryModel } = useProviders();
 
@@ -412,6 +418,28 @@ export default function ProjectProvider({ children }: { children: React.ReactNod
           () => setCompetitorsVersion((v) => v + 1)
         );
 
+        // Free, platform-only baseline (up to 10 leads) -- runs on the
+        // platform's own Groq key, not whatever LLM the user has connected,
+        // so it works even before they've set up LLM Providers at all.
+        // Self-host has no equivalent; this never runs there.
+        if (FEATURES.PLATFORM_MODE) {
+          try {
+            log("Finding real leads to kick off outreach...");
+            const leadsRes = await fetch(`/api/project/${data.project.id}/generate-leads`, { method: "POST" });
+            if (leadsRes.ok) {
+              const { added } = await leadsRes.json();
+              if (added > 0) {
+                logDone(`Found ${added} real lead${added === 1 ? "" : "s"} — check the Leads panel.`);
+                setLeadsVersion((v) => v + 1);
+              } else {
+                log("No confident leads found yet — search manually in the Leads panel, or check back tomorrow.");
+              }
+            }
+          } catch {
+            // non-fatal -- leads can always be found manually in the Leads panel
+          }
+        }
+
         // Deliberately NOT awaited. Six documents generate sequentially and
         // each route allows up to 60s (maxDuration), so awaiting here can
         // hold OnboardingModal's spinner for minutes before the user ever
@@ -498,7 +526,7 @@ export default function ProjectProvider({ children }: { children: React.ReactNod
 
   return (
     <ProjectCtx.Provider
-      value={{ project, projects, loading, createProject, switchProject, updateProject, deleteProject, competitorsVersion, auditVersion, documentsVersion }}
+      value={{ project, projects, loading, createProject, switchProject, updateProject, deleteProject, competitorsVersion, auditVersion, documentsVersion, leadsVersion }}
     >
       {children}
     </ProjectCtx.Provider>
