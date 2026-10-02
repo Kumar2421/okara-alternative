@@ -1388,9 +1388,24 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
                   </div>
                 ) : (
                   <div className="overflow-hidden rounded-xl border border-gray-200">
+                    <div className="border-b border-gray-100 bg-gray-50 px-3 py-2.5 text-[12px] leading-5 text-gray-600">
+                      <span className="font-semibold text-gray-800">
+                        {geoResult.rows.filter((r) => r.found).length} of {geoResult.rows.length} searches find you.
+                      </span>{" "}
+                      Each row below is a real search phrase someone around your product might type. &ldquo;Cited&rdquo;
+                      means your site showed up in the results for it — &ldquo;Gap&rdquo; means it didn&apos;t, which is a
+                      real opportunity to create content that answers that search.
+                    </div>
                     {geoResult.rows.map((row, i) => (
-                      <div key={i} className="flex items-center justify-between gap-2 border-t border-gray-100 px-3 py-2.5 text-[13px] first:border-t-0">
-                        <span className="text-gray-700">&ldquo;{row.query}&rdquo;</span>
+                      <div key={i} className="flex items-start justify-between gap-2 border-t border-gray-100 px-3 py-2.5 text-[13px] first:border-t-0">
+                        <div className="min-w-0">
+                          <div className="text-gray-700">&ldquo;{row.query}&rdquo;</div>
+                          {!row.found && (
+                            <div className="mt-0.5 text-[11px] text-gray-400">
+                              Not showing up for this search — consider writing a page that targets it.
+                            </div>
+                          )}
+                        </div>
                         {row.found ? (
                           <a
                             href={row.matchedUrl}

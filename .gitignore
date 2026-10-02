@@ -43,3 +43,6 @@ next-env.d.ts
 # graphify tool cache
 .graphify
 graphify-out
+
+.vercel
+.env*
