@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Check, ChevronRight, CircleDot, Loader2, RefreshCw } from "lucide-react";
 import type { Finding, FindingStatus } from "@/lib/domain/findings/findingTypes";
 import type { Recommendation } from "@/lib/domain/recommendations/recommendationTypes";
+import type { Action } from "@/lib/domain/actions/actionTypes";
+import FindingActionsSection from "./FindingActionsSection";
 import { evidenceRowsForFinding, whyItMattersForFinding } from "@/lib/domain/findings/evidenceDisplay";
 
 const STATUS_ORDER: FindingStatus[] = ["new", "acknowledged", "fixing", "fixed", "verified"];
@@ -58,7 +60,9 @@ export default function FindingsWorkspace() {
   const [verification, setVerification] = useState<"verified" | "failed" | null>(null);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [recommendationsLoading, setRecommendationsLoading] = useState(false);
-
+  const [actions, setActions] = useState<Action[]>([]);
+  const [actionsLoading, setActionsLoading] = useState(false);
+  const [actionBusy, setActionBusy] = useState<string | null>(null);
 
   const selected = findings.find((finding) => finding.id === selectedId) ?? null;
 
@@ -87,6 +91,82 @@ export default function FindingsWorkspace() {
       });
     return () => { active = false; };
   }, [selectedId]);
+
+  useEffect(() => {
+    if (!selectedId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setActions([]);
+      setActionsLoading(false);
+      return;
+    }
+
+    let active = true;
+    setActionsLoading(true);
+    fetch(`/api/agents/actions?findingId=${encodeURIComponent(selectedId)}`, { cache: "no-store" })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Failed to load actions.");
+        if (active) setActions(Array.isArray(data.actions) ? data.actions : []);
+      })
+      .catch(() => {
+        if (active) setActions([]);
+      })
+      .finally(() => {
+        if (active) setActionsLoading(false);
+      });
+
+    return () => { active = false; };
+  }, [selectedId]);
+
+  const createTrackedAction = async (recommendation: Recommendation) => {
+    if (!selected) return;
+    setActionBusy(recommendation.id);
+    setError(null);
+    try {
+      const response = await fetch("/api/agents/actions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          findingId: selected.id,
+          recommendationId: recommendation.id,
+          title: recommendation.title,
+          target: recommendation.target,
+          parameters: {
+            implementation: recommendation.implementation,
+            evidence: recommendation.evidence,
+          },
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to create action.");
+      if (data.action) setActions((current) => [data.action, ...current]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create action.");
+    } finally {
+      setActionBusy(null);
+    }
+  };
+
+  const cancelTrackedAction = async (action: Action) => {
+    setActionBusy(action.recommendationId ?? action.id);
+    setError(null);
+    try {
+      const response = await fetch("/api/agents/actions", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: action.id, status: "cancelled" }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to cancel action.");
+      if (data.action) {
+        setActions((current) => current.map((item) => item.id === data.action.id ? data.action : item));
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to cancel action.");
+    } finally {
+      setActionBusy(null);
+    }
+  };
 
   const counts = useMemo(() => ({
     active: findings.filter((f) => !["verified"].includes(f.status)).length,
@@ -285,23 +365,15 @@ export default function FindingsWorkspace() {
                     <div className="flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 p-3 text-[12px] text-gray-500">
                       <Loader2 size={13} className="animate-spin" /> Generating recommendations...
                     </div>
-                  ) : recommendations.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 p-3 text-[12px] text-gray-500">No structured recommendations for the current evidence.</div>
                   ) : (
-                    <div className="space-y-2">
-                      {recommendations.map((item) => (
-                        <div key={item.id} className="rounded-xl border border-gray-200 p-3">
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <div className="text-[12px] font-semibold text-gray-900">{item.title}</div>
-                              <div className="mt-1 text-[11px] leading-4 text-gray-600">{item.summary}</div>
-                            </div>
-                            <span className="shrink-0 rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[9px] font-semibold uppercase text-gray-500">{item.priority}</span>
-                          </div>
-                          <div className="mt-2 text-[10px] text-gray-500"><span className="font-medium text-gray-700">{item.implementation.kind}</span> · {item.implementation.description}</div>
-                        </div>
-                      ))}
-                    </div>
+                    <FindingActionsSection
+                      recommendations={recommendations}
+                      actions={actions}
+                      loading={actionsLoading}
+                      busyRecommendationId={actionBusy}
+                      onCreate={createTrackedAction}
+                      onCancel={cancelTrackedAction}
+                    />
                   )}
                 </section>
 
