@@ -636,9 +636,15 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
               <div className="rounded-xl border border-dashed border-gray-200 p-6 text-center text-[13px] text-gray-500">
                 <TrendingUp className="mx-auto mb-2 text-gray-300" size={28} />
                 {trafficError}
-                <div className="mt-3">
+                <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+                  <a
+                    href="/api/auth/google-analytics/connect?return=dashboard"
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-[#111111] px-3 py-1.5 text-[12px] font-medium text-white hover:bg-black"
+                  >
+                    Connect Google Search Console
+                  </a>
                   <a href="/settings/api-credentials" className="text-[12px] font-medium text-[#00846f] hover:underline">
-                    Go to Settings → API Credentials
+                    Settings → API Credentials
                   </a>
                 </div>
               </div>
@@ -1363,8 +1369,15 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
                   <div className="rounded-xl border border-dashed border-gray-200 p-6 text-center text-[13px] text-gray-500">
                     <Globe2 className="mx-auto mb-2 text-gray-300" size={28} />
                     Searches the live web for real queries around your product and checks whether your own
-                    domain actually shows up — a real citation gap, not a guess. Requires a Tavily API key
-                    (Settings → API Credentials).
+                    domain actually shows up — a real citation gap, not a guess. Requires a Tavily API key.
+                    <div className="mt-3">
+                      <a
+                        href="/settings/api-credentials"
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-[#111111] px-3 py-1.5 text-[12px] font-medium text-white hover:bg-black"
+                      >
+                        Connect Tavily API key
+                      </a>
+                    </div>
                   </div>
                 ) : (
                   <div className="overflow-hidden rounded-xl border border-gray-200">
