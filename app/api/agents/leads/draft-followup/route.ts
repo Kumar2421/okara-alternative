@@ -7,6 +7,7 @@ import { FEATURES } from "@/lib/features";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
 import { chargeCredits, InsufficientCreditsError } from "@/lib/credits";
+import { PLATFORM_PROVIDER_KEYS } from "@/lib/llm/platformKeys";
 
 // Vercel: LLM/crawl calls can run past the 10s default — allow up to the
 // platform max for this route (Hobby plan caps at 60s; Pro allows more).
@@ -67,11 +68,16 @@ export async function POST(req: NextRequest) {
       .eq("user_id", user.id)
       .eq("provider_id", providerId)
       .maybeSingle();
-    if (!conn?.api_key_secret_id) {
+
+    let apiKey = "";
+    if (conn?.api_key_secret_id) {
+      const { data: secret } = await db.rpc("vault_get_secret", { p_id: conn.api_key_secret_id });
+      apiKey = (secret as string) ?? "";
+    }
+    if (!apiKey) apiKey = PLATFORM_PROVIDER_KEYS[providerId] ?? "";
+    if (!apiKey) {
       return NextResponse.json({ error: `${providerId} isn't connected yet.` }, { status: 422 });
     }
-    const { data: secret } = await db.rpc("vault_get_secret", { p_id: conn.api_key_secret_id });
-    const apiKey = (secret as string) ?? "";
 
     try {
       await chargeCredits(user.id, "email_draft", { projectId: activeId ?? undefined, model });
@@ -90,7 +96,7 @@ export async function POST(req: NextRequest) {
         projectName ?? "this product",
         lead.name,
         lead.last_reply_snippet,
-        conn.base_url ?? undefined
+        conn?.base_url ?? undefined
       );
       return NextResponse.json(draft);
     } catch (err) {

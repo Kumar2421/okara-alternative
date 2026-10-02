@@ -6,6 +6,7 @@ import { FEATURES } from "@/lib/features";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
 import { chargeCredits, InsufficientCreditsError } from "@/lib/credits";
+import { PLATFORM_PROVIDER_KEYS } from "@/lib/llm/platformKeys";
 
 // Vercel: LLM/crawl calls can run past the 10s default — allow up to the
 // platform max for this route (Hobby plan caps at 60s; Pro allows more).
@@ -69,11 +70,16 @@ export async function POST(req: NextRequest) {
         .eq("user_id", user.id)
         .eq("provider_id", providerId)
         .maybeSingle();
-      if (!conn?.api_key_secret_id) {
+
+      let apiKey = "";
+      if (conn?.api_key_secret_id) {
+        const { data: secret } = await db.rpc("vault_get_secret", { p_id: conn.api_key_secret_id });
+        apiKey = (secret as string) ?? "";
+      }
+      if (!apiKey) apiKey = PLATFORM_PROVIDER_KEYS[providerId] ?? "";
+      if (!apiKey) {
         return NextResponse.json({ error: "LLM provider not connected" }, { status: 422 });
       }
-      const { data: secret } = await db.rpc("vault_get_secret", { p_id: conn.api_key_secret_id });
-      const apiKey = (secret as string) ?? "";
 
       const { data: leads, error: leadsError } = await db
         .from("leads")
@@ -113,7 +119,7 @@ Respond with ONLY valid JSON:
       const draftRes = await driver({
         apiKey,
         model,
-        baseUrl: conn.base_url || undefined,
+        baseUrl: conn?.base_url || undefined,
         messages: [{ role: "user", content: draftPrompt }],
       });
 
