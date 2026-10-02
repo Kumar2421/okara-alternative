@@ -16,6 +16,7 @@ import {
   Zap,
   Puzzle,
 } from "lucide-react";
+import { FEATURES } from "@/lib/features";
 
 const AI_CMO_ITEMS = [
   { href: "/settings/websites", label: "Websites", icon: Globe },
@@ -27,6 +28,13 @@ const AI_CMO_ITEMS = [
   { href: "/settings/skills-mcp", label: "Skills & MCP", icon: Puzzle, dot: true },
   { href: "/settings/team", label: "Team", icon: Users, dot: true },
 ];
+
+// API Credentials and Skills & MCP are self-host-only concerns -- platform
+// mode manages its own keys (see resolvePlatformApiKey.ts) and has no local
+// skill/MCP filesystem to configure, so both nav entries are noise there.
+const VISIBLE_AI_CMO_ITEMS = FEATURES.PLATFORM_MODE
+  ? AI_CMO_ITEMS.filter((item) => item.href !== "/settings/api-credentials" && item.href !== "/settings/skills-mcp")
+  : AI_CMO_ITEMS;
 
 const CHAT_ITEMS = [{ href: "/settings/personalization", label: "Personalization", icon: UserCircle }];
 
@@ -83,7 +91,7 @@ export default function SettingsNav() {
         <ChevronLeft size={20} />
         Settings
       </button>
-      <NavGroup title="AI CMO" items={AI_CMO_ITEMS} pathname={pathname} />
+      <NavGroup title="AI CMO" items={VISIBLE_AI_CMO_ITEMS} pathname={pathname} />
       <NavGroup title="CHAT" items={CHAT_ITEMS} pathname={pathname} />
       <NavGroup title="GENERAL" items={GENERAL_ITEMS} pathname={pathname} />
     </div>
