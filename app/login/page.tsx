@@ -2,13 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Mail, Lock } from "lucide-react";
+import { Mail, Lock, KeyRound, ArrowLeft } from "lucide-react";
 import { DotLottieReact } from "@lottiefiles/dotlottie-react";
 import { createClient } from "@/utils/supabase/client";
 import { FEATURES } from "@/lib/features";
 import { GOOGLE_ANALYTICS_SCOPES } from "@/lib/googleOAuthScopes";
 import type { AuditFunnelPayload } from "@/lib/analytics/auditFunnel";
-import { MarloMark } from "@/components/shared/MarloMark";
 import {
   GoogleSearchConsoleIcon,
   GoogleAnalyticsIcon,
@@ -56,7 +55,7 @@ const INTEGRATIONS: { label: string; icon: typeof GmailIcon; soon?: boolean }[] 
   { label: "Slack", icon: SlackIcon, soon: true },
 ];
 
-type Mode = "signin" | "signup";
+type Mode = "signin" | "signup" | "verify-signup" | "forgot" | "verify-reset";
 
 function GoogleIcon() {
   return (
@@ -119,6 +118,8 @@ export default function LoginPage() {
   }, [searchParams]);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+  const [newPassword, setNewPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -156,9 +157,9 @@ export default function LoginPage() {
       if (authError) {
         setError(authError.message);
       } else if (!data.session) {
-        trackSignupCompleted();
-        setNotice("Check your email to confirm your account, then sign in.");
-        setMode("signin");
+        setOtpCode("");
+        setMode("verify-signup");
+        setNotice(`Enter the 6-digit code we sent to ${email}.`);
       } else {
         trackSignupCompleted();
         router.push("/dashboard");
@@ -176,6 +177,89 @@ export default function LoginPage() {
     }
 
     setIsLoading(false);
+  };
+
+  // Email OTP verification — the same confirmation token Supabase always
+  // generates on signUp(), just entered as a 6-digit code instead of
+  // followed as a link. Requires the "Confirm signup" email template in
+  // Supabase Dashboard -> Authentication -> Email Templates to include
+  // {{ .Token }} -- otherwise the email still only shows the old link and
+  // there's no code for the user to type here.
+  const handleVerifySignupOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError(null);
+    const supabase = createClient();
+    const { error: otpError } = await supabase.auth.verifyOtp({ email, token: otpCode, type: "signup" });
+    if (otpError) {
+      setError(otpError.message);
+      setIsLoading(false);
+      return;
+    }
+    trackSignupCompleted();
+    router.push("/dashboard");
+    router.refresh();
+  };
+
+  const handleResendSignupOtp = async () => {
+    setError(null);
+    setNotice(null);
+    const supabase = createClient();
+    const { error: resendError } = await supabase.auth.resend({ type: "signup", email });
+    if (resendError) setError(resendError.message);
+    else setNotice("Code resent — check your inbox.");
+  };
+
+  // Password reset, same OTP pattern: resetPasswordForEmail() sends the
+  // recovery email (needs {{ .Token }} in the "Reset Password" template too),
+  // verifyOtp(type: "recovery") exchanges the code for a real session, then
+  // updateUser() sets the new password on that session.
+  const handleRequestPasswordReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError(null);
+    setNotice(null);
+    const supabase = createClient();
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email);
+    if (resetError) {
+      setError(resetError.message);
+      setIsLoading(false);
+      return;
+    }
+    setOtpCode("");
+    setNewPassword("");
+    setMode("verify-reset");
+    setNotice(`Enter the 6-digit code we sent to ${email}.`);
+    setIsLoading(false);
+  };
+
+  const handleVerifyResetOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError(null);
+    const supabase = createClient();
+    const { error: otpError } = await supabase.auth.verifyOtp({ email, token: otpCode, type: "recovery" });
+    if (otpError) {
+      setError(otpError.message);
+      setIsLoading(false);
+      return;
+    }
+    const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+    if (updateError) {
+      setError(updateError.message);
+      setIsLoading(false);
+      return;
+    }
+    router.push("/dashboard");
+    router.refresh();
+  };
+
+  const backToSignIn = () => {
+    setMode("signin");
+    setOtpCode("");
+    setNewPassword("");
+    setError(null);
+    setNotice(null);
   };
 
   // Enable once Google/Apple are turned on in the Supabase project's Auth
@@ -209,125 +293,258 @@ export default function LoginPage() {
         <div className="flex items-center justify-center overflow-y-auto rounded-md border border-black/10 bg-white px-6 py-6 sm:px-10 lg:px-14 xl:px-16">
           <div className="w-full max-w-[420px]">
             <div className="mb-2 flex items-center gap-2">
-              <MarloMark className="h-[24px] w-[24px]" />
+              <DotLottieReact src="/ghost-loader.lottie" autoplay loop className="h-6 w-6" />
               <span className="text-sm font-bold tracking-tight">Marlo</span>
             </div>
 
-            <h1 className="text-2xl font-medium tracking-[-0.04em] sm:text-3xl">
-              {isSignUp ? "Create your account" : "Welcome back"}
-            </h1>
-            <p className="mt-1.5 text-sm leading-snug text-black/60">
-              Your AI CMO — SEO, leads, and outreach on autopilot.
-            </p>
-
-            <div className="mt-5 grid gap-2.5 sm:grid-cols-2">
-              <button
-                type="button"
-                onClick={() => handleOAuth("google")}
-                disabled={!oauthAvailable.google}
-                title={oauthAvailable.google ? undefined : "Enable Google in Supabase Auth settings"}
-                className="flex h-9 items-center justify-center gap-2 rounded-lg border border-gray-200 text-sm font-medium hover:bg-gray-50 disabled:opacity-40"
-              >
-                <GoogleIcon />
-                Google
-              </button>
-              <button
-                type="button"
-                onClick={() => handleOAuth("apple")}
-                disabled={!oauthAvailable.apple}
-                title="Coming soon"
-                className="flex h-9 items-center justify-center gap-2 rounded-lg border border-gray-200 text-sm font-medium hover:bg-gray-50 disabled:opacity-40"
-              >
-                <AppleIcon />
-                Apple
-              </button>
-            </div>
-
-            <div className="my-4 flex items-center gap-3 text-xs text-black/40">
-              <div className="h-px flex-1 bg-black/10" />
-              or
-              <div className="h-px flex-1 bg-black/10" />
-            </div>
-
-            <form className="flex flex-col gap-3.5" onSubmit={handleSubmit}>
-              <div className="flex flex-col gap-1.5">
-                <label htmlFor="email" className="text-[13px] font-medium text-gray-700">
-                  Email
-                </label>
-                <div className="flex h-10 items-center gap-2 rounded-lg border border-gray-200 px-3 focus-within:border-gray-900">
-                  <Mail className="h-4 w-4 shrink-0 text-gray-400" />
-                  <input
-                    id="email"
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@example.com"
-                    required
-                    className="h-full w-full text-sm outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-1.5">
-                <label htmlFor="password" className="text-[13px] font-medium text-gray-700">
-                  Password
-                </label>
-                <div className="flex h-10 items-center gap-2 rounded-lg border border-gray-200 px-3 focus-within:border-gray-900">
-                  <Lock className="h-4 w-4 shrink-0 text-gray-400" />
-                  <input
-                    id="password"
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder={isSignUp ? "Create a password" : "Enter your password"}
-                    required
-                    className="h-full w-full text-sm outline-none"
-                  />
-                </div>
-              </div>
-
-              {error && <div className="text-sm text-red-600">{error}</div>}
-              {notice && <div className="text-sm text-green-600">{notice}</div>}
-
-              {isSignUp ? (
-                <p className="text-xs leading-5 text-black/40">
-                  By creating an account, you agree to our{" "}
-                  <a href="/terms" className="font-medium underline underline-offset-2">
-                    Terms of Service
-                  </a>{" "}
-                  and{" "}
-                  <a href="/privacy" className="font-medium underline underline-offset-2">
-                    Privacy Policy
-                  </a>
+            {mode === "verify-signup" || mode === "verify-reset" ? (
+              <>
+                <h1 className="text-2xl font-medium tracking-[-0.04em] sm:text-3xl">
+                  {mode === "verify-signup" ? "Verify your email" : "Reset your password"}
+                </h1>
+                <p className="mt-1.5 text-sm leading-snug text-black/60">
+                  Enter the 6-digit code we sent to {email}.
                 </p>
-              ) : (
-                <div className="flex items-center justify-between">
-                  <label className="flex items-center gap-2 text-sm font-normal text-black/60">
-                    <input type="checkbox" className="h-4 w-4 rounded border-gray-300" />
-                    Remember me
-                  </label>
-                  <button type="button" className="text-sm font-medium text-gray-900 hover:underline">
-                    Forgot password?
+
+                <form
+                  className="mt-5 flex flex-col gap-3.5"
+                  onSubmit={mode === "verify-signup" ? handleVerifySignupOtp : handleVerifyResetOtp}
+                >
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="otp" className="text-[13px] font-medium text-gray-700">
+                      6-digit code
+                    </label>
+                    <div className="flex h-10 items-center gap-2 rounded-lg border border-gray-200 px-3 focus-within:border-gray-900">
+                      <KeyRound className="h-4 w-4 shrink-0 text-gray-400" />
+                      <input
+                        id="otp"
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        maxLength={6}
+                        value={otpCode}
+                        onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ""))}
+                        placeholder="123456"
+                        required
+                        className="h-full w-full text-sm tracking-[0.3em] outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {mode === "verify-reset" && (
+                    <div className="flex flex-col gap-1.5">
+                      <label htmlFor="newPassword" className="text-[13px] font-medium text-gray-700">
+                        New password
+                      </label>
+                      <div className="flex h-10 items-center gap-2 rounded-lg border border-gray-200 px-3 focus-within:border-gray-900">
+                        <Lock className="h-4 w-4 shrink-0 text-gray-400" />
+                        <input
+                          id="newPassword"
+                          type="password"
+                          value={newPassword}
+                          onChange={(e) => setNewPassword(e.target.value)}
+                          placeholder="Create a new password"
+                          required
+                          minLength={6}
+                          className="h-full w-full text-sm outline-none"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {error && <div className="text-sm text-red-600">{error}</div>}
+
+                  <button
+                    type="submit"
+                    disabled={isLoading}
+                    className="mt-1 flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[#111111] text-sm font-medium text-white hover:bg-black disabled:opacity-50"
+                  >
+                    {isLoading ? <DotLottieReact src="/ghost-loader.lottie" autoplay loop className="h-4 w-4" /> : null}
+                    {isLoading ? "Verifying..." : mode === "verify-signup" ? "Verify & continue" : "Reset password"}
+                  </button>
+                </form>
+
+                <div className="mt-4 flex items-center justify-between text-sm">
+                  {mode === "verify-signup" ? (
+                    <button type="button" onClick={handleResendSignupOtp} className="font-medium text-gray-900 hover:underline">
+                      Resend code
+                    </button>
+                  ) : (
+                    <span />
+                  )}
+                  <button type="button" onClick={backToSignIn} className="flex items-center gap-1 font-medium text-gray-600 hover:underline">
+                    <ArrowLeft className="h-3.5 w-3.5" /> Back to sign in
                   </button>
                 </div>
-              )}
+              </>
+            ) : mode === "forgot" ? (
+              <>
+                <h1 className="text-2xl font-medium tracking-[-0.04em] sm:text-3xl">Reset your password</h1>
+                <p className="mt-1.5 text-sm leading-snug text-black/60">
+                  Enter your email and we&apos;ll send you a 6-digit code.
+                </p>
 
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="mt-1 flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[#111111] text-sm font-medium text-white hover:bg-black disabled:opacity-50"
-              >
-                {isLoading ? <DotLottieReact src="/ghost-loader.lottie" autoplay loop className="h-4 w-4" /> : null}
-                {isLoading ? "Loading..." : isSignUp ? "Create Account" : "Sign In"}
-              </button>
-            </form>
+                <form className="mt-5 flex flex-col gap-3.5" onSubmit={handleRequestPasswordReset}>
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="email" className="text-[13px] font-medium text-gray-700">
+                      Email
+                    </label>
+                    <div className="flex h-10 items-center gap-2 rounded-lg border border-gray-200 px-3 focus-within:border-gray-900">
+                      <Mail className="h-4 w-4 shrink-0 text-gray-400" />
+                      <input
+                        id="email"
+                        type="email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="you@example.com"
+                        required
+                        className="h-full w-full text-sm outline-none"
+                      />
+                    </div>
+                  </div>
 
-            <p className="mt-4 text-center text-sm text-black/50">
-              {isSignUp ? "Already have an account?" : "Don't have an account?"}{" "}
-              <button type="button" onClick={toggleMode} className="font-medium text-gray-900 hover:underline">
-                {isSignUp ? "Sign In" : "Sign Up"}
-              </button>
-            </p>
+                  {error && <div className="text-sm text-red-600">{error}</div>}
+
+                  <button
+                    type="submit"
+                    disabled={isLoading}
+                    className="mt-1 flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[#111111] text-sm font-medium text-white hover:bg-black disabled:opacity-50"
+                  >
+                    {isLoading ? <DotLottieReact src="/ghost-loader.lottie" autoplay loop className="h-4 w-4" /> : null}
+                    {isLoading ? "Sending..." : "Send code"}
+                  </button>
+                </form>
+
+                <button type="button" onClick={backToSignIn} className="mt-4 flex items-center gap-1 text-sm font-medium text-gray-600 hover:underline">
+                  <ArrowLeft className="h-3.5 w-3.5" /> Back to sign in
+                </button>
+              </>
+            ) : (
+              <>
+                <h1 className="text-2xl font-medium tracking-[-0.04em] sm:text-3xl">
+                  {isSignUp ? "Create your account" : "Welcome back"}
+                </h1>
+                <p className="mt-1.5 text-sm leading-snug text-black/60">
+                  Your AI CMO — SEO, leads, and outreach on autopilot.
+                </p>
+
+                <div className="mt-5 grid gap-2.5 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => handleOAuth("google")}
+                    disabled={!oauthAvailable.google}
+                    title={oauthAvailable.google ? undefined : "Enable Google in Supabase Auth settings"}
+                    className="flex h-9 items-center justify-center gap-2 rounded-lg border border-gray-200 text-sm font-medium hover:bg-gray-50 disabled:opacity-40"
+                  >
+                    <GoogleIcon />
+                    Google
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleOAuth("apple")}
+                    disabled={!oauthAvailable.apple}
+                    title="Coming soon"
+                    className="flex h-9 items-center justify-center gap-2 rounded-lg border border-gray-200 text-sm font-medium hover:bg-gray-50 disabled:opacity-40"
+                  >
+                    <AppleIcon />
+                    Apple
+                  </button>
+                </div>
+
+                <div className="my-4 flex items-center gap-3 text-xs text-black/40">
+                  <div className="h-px flex-1 bg-black/10" />
+                  or
+                  <div className="h-px flex-1 bg-black/10" />
+                </div>
+
+                <form className="flex flex-col gap-3.5" onSubmit={handleSubmit}>
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="email" className="text-[13px] font-medium text-gray-700">
+                      Email
+                    </label>
+                    <div className="flex h-10 items-center gap-2 rounded-lg border border-gray-200 px-3 focus-within:border-gray-900">
+                      <Mail className="h-4 w-4 shrink-0 text-gray-400" />
+                      <input
+                        id="email"
+                        type="email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="you@example.com"
+                        required
+                        className="h-full w-full text-sm outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="password" className="text-[13px] font-medium text-gray-700">
+                      Password
+                    </label>
+                    <div className="flex h-10 items-center gap-2 rounded-lg border border-gray-200 px-3 focus-within:border-gray-900">
+                      <Lock className="h-4 w-4 shrink-0 text-gray-400" />
+                      <input
+                        id="password"
+                        type="password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder={isSignUp ? "Create a password" : "Enter your password"}
+                        required
+                        className="h-full w-full text-sm outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {error && <div className="text-sm text-red-600">{error}</div>}
+                  {notice && <div className="text-sm text-green-600">{notice}</div>}
+
+                  {isSignUp ? (
+                    <p className="text-xs leading-5 text-black/40">
+                      By creating an account, you agree to our{" "}
+                      <a href="/terms" className="font-medium underline underline-offset-2">
+                        Terms of Service
+                      </a>{" "}
+                      and{" "}
+                      <a href="/privacy" className="font-medium underline underline-offset-2">
+                        Privacy Policy
+                      </a>
+                    </p>
+                  ) : (
+                    <div className="flex items-center justify-between">
+                      <label className="flex items-center gap-2 text-sm font-normal text-black/60">
+                        <input type="checkbox" className="h-4 w-4 rounded border-gray-300" />
+                        Remember me
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMode("forgot");
+                          setError(null);
+                          setNotice(null);
+                        }}
+                        className="text-sm font-medium text-gray-900 hover:underline"
+                      >
+                        Forgot password?
+                      </button>
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={isLoading}
+                    className="mt-1 flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[#111111] text-sm font-medium text-white hover:bg-black disabled:opacity-50"
+                  >
+                    {isLoading ? <DotLottieReact src="/ghost-loader.lottie" autoplay loop className="h-4 w-4" /> : null}
+                    {isLoading ? "Loading..." : isSignUp ? "Create Account" : "Sign In"}
+                  </button>
+                </form>
+
+                <p className="mt-4 text-center text-sm text-black/50">
+                  {isSignUp ? "Already have an account?" : "Don't have an account?"}{" "}
+                  <button type="button" onClick={toggleMode} className="font-medium text-gray-900 hover:underline">
+                    {isSignUp ? "Sign In" : "Sign Up"}
+                  </button>
+                </p>
+              </>
+            )}
           </div>
         </div>
 
