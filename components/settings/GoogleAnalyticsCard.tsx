@@ -60,25 +60,6 @@ export default function GoogleAnalyticsCard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project]);
 
-  async function selectResource(integrationType: IntegrationResources["integrationType"], resourceId: string) {
-    setBusy(true);
-    try {
-      const res = await fetch("/api/project/integrations/google/resources", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ integrationType, resourceId }),
-      });
-      if (!res.ok) throw new Error();
-      await load();
-      show("Google resource selected for this project.");
-    } catch {
-      show("Failed to select Google resource.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-
   async function handlePlatformConnect() {
     setBusy(true);
     const supabase = createClient();
@@ -144,16 +125,12 @@ export default function GoogleAnalyticsCard() {
         </div>
       ) : !loaded ? null : connected ? (
         <div className="space-y-3">
-          {gsc?.resources.length ? (
-            <ResourcePicker title="Search Console site" integrationType="google-search-console" resources={gsc.resources} disabled={busy} onSelect={selectResource} />
-          ) : (
-            <div className="text-[11px] text-amber-600">No Search Console properties were found on this Google account.</div>
-          )}
-          {ga4?.resources.length ? (
-            <ResourcePicker title="GA4 property" integrationType="google-analytics" resources={ga4.resources} disabled={busy} onSelect={selectResource} />
-          ) : (
-            <div className="text-[11px] text-amber-600">No GA4 properties were found on this Google account.</div>
-          )}
+          <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-[12px] text-gray-600">
+            {[gsc, ga4].map((i) => i?.resources.find((r) => r.selected)?.resourceName).filter(Boolean).join(" · ") ||
+              "No site or property chosen yet."}{" "}
+            Choose which Search Console site and Analytics property this project uses from the{" "}
+            <a href="/dashboard" className="font-medium text-gray-900 underline">SEO tab</a>.
+          </div>
           <button onClick={handleDisconnect} disabled={busy} className="text-[11px] font-medium text-red-600 hover:underline disabled:opacity-50">
             Disconnect Google from this project
           </button>
@@ -175,37 +152,5 @@ export default function GoogleAnalyticsCard() {
         </a>
       )}
     </div>
-  );
-}
-
-function ResourcePicker({
-  title,
-  integrationType,
-  resources,
-  disabled,
-  onSelect,
-}: {
-  title: string;
-  integrationType: IntegrationResources["integrationType"];
-  resources: Resource[];
-  disabled: boolean;
-  onSelect: (type: IntegrationResources["integrationType"], resourceId: string) => Promise<void>;
-}) {
-  return (
-    <label className="block text-[11px] text-gray-500">
-      <span className="mb-1 block">{title}</span>
-      <select
-        value={resources.find((resource) => resource.selected)?.resourceId ?? ""}
-        disabled={disabled}
-        onChange={(e) => onSelect(integrationType, e.target.value)}
-        className="w-full rounded-lg border border-gray-200 bg-white px-2.5 py-2 text-[12px] text-gray-700 disabled:opacity-50"
-      >
-        {resources.map((resource) => (
-          <option key={resource.resourceId} value={resource.resourceId}>
-            {resource.resourceName}
-          </option>
-        ))}
-      </select>
-    </label>
   );
 }

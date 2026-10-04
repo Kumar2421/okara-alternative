@@ -1,0 +1,290 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Check, ChevronDown, Search } from "lucide-react";
+import { useProject } from "@/lib/project-store";
+
+/** Dispatched after the user's Google connection or property choice changes, so data views reload. */
+export const GOOGLE_UPDATED_EVENT = "marlo:google-updated";
+
+type IntegrationType = "google-search-console" | "google-analytics";
+type Resource = { resourceId: string; resourceName: string; selected: boolean; usedBy?: string[] };
+type Integration = { integrationType: IntegrationType; integrationId: string | null; suggestedResourceId?: string | null; resources: Resource[] };
+type Account = { connectedHere: boolean; canReuse: boolean; email: string | null };
+type Loaded = { account: Account; integrations: Integration[] };
+
+const COPY: Record<IntegrationType, { title: string; empty: string; noun: string }> = {
+  "google-search-console": {
+    title: "Search Console site",
+    empty: "No Search Console sites were found on this Google account.",
+    noun: "site",
+  },
+  "google-analytics": {
+    title: "Analytics property",
+    empty: "No Analytics (GA4) properties were found on this Google account.",
+    noun: "property",
+  },
+};
+
+function Skeleton() {
+  return (
+    <div className="mb-5 animate-pulse rounded-xl border border-gray-200 bg-white p-4" aria-hidden="true">
+      <div className="mb-3 h-3 w-40 rounded bg-gray-200" />
+      <div className="mb-2 h-9 rounded-lg bg-gray-100" />
+      <div className="h-9 rounded-lg bg-gray-100" />
+    </div>
+  );
+}
+
+export function PropertyPicker({
+  type,
+  integration,
+  busy,
+  onSelect,
+}: {
+  type: IntegrationType;
+  integration: Integration;
+  busy: boolean;
+  onSelect: (type: IntegrationType, resourceId: string) => void;
+}) {
+  const copy = COPY[type];
+  const selected = integration.resources.find((r) => r.selected);
+  const suggested = integration.resources.find((r) => r.resourceId === integration.suggestedResourceId);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+
+  const visible = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return integration.resources.filter(
+      (r) => !needle || r.resourceName.toLowerCase().includes(needle) || r.resourceId.toLowerCase().includes(needle),
+    );
+  }, [integration.resources, query]);
+
+  if (integration.resources.length === 0) {
+    return <div className="text-[12px] text-amber-600">{copy.empty}</div>;
+  }
+
+  const choose = (resourceId: string) => {
+    setOpen(false);
+    setQuery("");
+    onSelect(type, resourceId);
+  };
+
+  const needsConfirm = !selected && suggested;
+  const showList = open || (!selected && !suggested);
+
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between">
+        <span className="text-[11px] font-medium uppercase tracking-wide text-gray-500">{copy.title}</span>
+        {selected && !open && (
+          <button type="button" onClick={() => setOpen(true)} className="text-[11px] text-gray-500 hover:text-gray-800 hover:underline">
+            Change
+          </button>
+        )}
+      </div>
+
+      {selected && !open && (
+        <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-[13px] text-gray-900">
+          <Check size={14} className="shrink-0 text-emerald-600" />
+          <span className="min-w-0 truncate" title={selected.resourceName}>{selected.resourceName}</span>
+        </div>
+      )}
+
+      {needsConfirm && !open && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5">
+          <div className="text-[12px] text-blue-900">
+            This looks like your {copy.noun}: <strong className="break-all">{suggested.resourceName}</strong>
+          </div>
+          <div className="mt-2 flex items-center gap-3">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => choose(suggested.resourceId)}
+              className="rounded-md bg-gray-900 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-black disabled:opacity-50"
+            >
+              Use this {copy.noun}
+            </button>
+            <button type="button" onClick={() => setOpen(true)} className="text-[12px] text-blue-800 hover:underline">
+              Choose another
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showList && (
+        <div className="rounded-lg border border-gray-200 bg-white">
+          {integration.resources.length > 6 && (
+            <label className="flex items-center gap-2 border-b border-gray-100 px-3 py-2">
+              <Search size={13} className="text-gray-400" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={`Search your ${integration.resources.length} ${copy.noun}s`}
+                className="w-full bg-transparent text-[12px] outline-none placeholder:text-gray-400"
+                aria-label={`Search ${copy.noun}s`}
+              />
+            </label>
+          )}
+          <ul role="listbox" aria-label={copy.title} className="max-h-56 overflow-y-auto py-1">
+            {visible.length === 0 && <li className="px-3 py-2 text-[12px] text-gray-500">No match.</li>}
+            {visible.map((r) => (
+              <li key={r.resourceId} role="option" aria-selected={r.selected}>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => choose(r.resourceId)}
+                  className="flex w-full items-start justify-between gap-3 px-3 py-2 text-left text-[12px] hover:bg-gray-50 disabled:opacity-50"
+                >
+                  <span className="min-w-0">
+                    <span className="block break-all text-gray-900">{r.resourceName}</span>
+                    {r.usedBy && r.usedBy.length > 0 && (
+                      <span className="block text-[11px] text-gray-500">Also used by {r.usedBy.join(", ")}</span>
+                    )}
+                  </span>
+                  <span className="flex shrink-0 items-center gap-1.5">
+                    {r.resourceId === integration.suggestedResourceId && (
+                      <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">Suggested</span>
+                    )}
+                    {r.selected && <Check size={13} className="text-emerald-600" />}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export type GoogleReadiness = { ready: boolean };
+
+/**
+ * Platform mode, SEO tab: connect Google once per account, then choose which
+ * Search Console site and Analytics property belong to THIS project. A new
+ * project reuses the connected account (no second consent screen) and picks
+ * its own site from the account's list. The match for the project's website
+ * is pre-suggested but never applied without the user's confirmation.
+ */
+export default function GoogleSourcesCard({ onReadyChange }: { onReadyChange?: (ready: boolean) => void }) {
+  const { project } = useProject();
+  const projectId = project?.id;
+  const [data, setData] = useState<Loaded | null | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    fetch("/api/project/integrations/google/resources", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("failed"))))
+      .then((json: Loaded & { account?: Account }) => {
+        setData({ account: json.account ?? { connectedHere: false, canReuse: false, email: null }, integrations: json.integrations ?? [] });
+      })
+      .catch(() => setData(null));
+  }, []);
+
+  // The dashboard remounts the panel per project, so this always starts from a clean slate.
+  useEffect(() => {
+    if (projectId) load();
+  }, [projectId, load]);
+
+  const ready = Boolean(data && data.integrations.length > 0 && data.integrations.every((i) => i.resources.length === 0 || i.resources.some((r) => r.selected)) && data.integrations.some((i) => i.resources.some((r) => r.selected)));
+  useEffect(() => {
+    onReadyChange?.(ready);
+  }, [ready, onReadyChange]);
+
+  const notify = () => window.dispatchEvent(new Event(GOOGLE_UPDATED_EVENT));
+
+  async function post(url: string, body?: unknown) {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error ?? "Something went wrong.");
+      load();
+      notify();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!projectId) return null;
+  if (data === undefined) return <Skeleton />;
+  if (data === null) {
+    return (
+      <div className="mb-5 flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] text-amber-800">
+        <span>Couldn&apos;t load your Google connection.</span>
+        <button type="button" onClick={() => { setData(undefined); load(); }} className="font-medium underline">
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  const { account, integrations } = data;
+
+  if (!account.connectedHere) {
+    return (
+      <div className="mb-5 rounded-xl border border-gray-200 bg-white p-4">
+        <h4 className="text-[13px] font-semibold text-gray-900">Add your Google data</h4>
+        <p className="mt-0.5 text-[12px] text-gray-500">
+          See real Search Console rankings and Analytics traffic for this project, right here.
+        </p>
+        {account.canReuse ? (
+          <div className="mt-3 space-y-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => post("/api/project/integrations/google/use-account")}
+              className="w-full rounded-lg bg-gray-900 px-3 py-2 text-[13px] font-medium text-white hover:bg-black disabled:opacity-50"
+            >
+              {busy ? "Connecting…" : `Use ${account.email ?? "your connected Google account"}`}
+            </button>
+            <a href="/api/auth/google-analytics/connect?return=dashboard" className="block text-center text-[12px] text-gray-500 hover:text-gray-800 hover:underline">
+              Connect a different Google account
+            </a>
+          </div>
+        ) : (
+          <a
+            href="/api/auth/google-analytics/connect?return=dashboard"
+            className="mt-3 flex w-full items-center justify-center rounded-lg bg-gray-900 px-3 py-2 text-[13px] font-medium text-white hover:bg-black"
+          >
+            Connect with Google
+          </a>
+        )}
+        {error && <p className="mt-2 text-[12px] text-red-600">{error}</p>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-5 rounded-xl border border-gray-200 bg-white p-4">
+      <div className="mb-3 flex items-baseline justify-between gap-3">
+        <h4 className="text-[13px] font-semibold text-gray-900">Google data for {project?.name ?? "this project"}</h4>
+        {account.email && <span className="truncate text-[11px] text-gray-500">{account.email}</span>}
+      </div>
+      <div className="space-y-4">
+        {integrations.map((integration) => (
+          <PropertyPicker
+            key={integration.integrationType}
+            type={integration.integrationType}
+            integration={integration}
+            busy={busy}
+            onSelect={(type, resourceId) => post("/api/project/integrations/google/resources", { integrationType: type, resourceId })}
+          />
+        ))}
+      </div>
+      {error && <p className="mt-3 text-[12px] text-red-600">{error}</p>}
+      <p className="mt-3 flex items-center gap-1 text-[11px] text-gray-400">
+        <ChevronDown size={11} className="rotate-[-90deg]" /> Each project can use a different site and property from the same Google account.
+      </p>
+    </div>
+  );
+}

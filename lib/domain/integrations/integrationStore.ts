@@ -230,3 +230,28 @@ export function deleteProjectIntegration(projectId: string, integrationType: Int
   });
   transaction();
 }
+
+/** Other projects' connections of this type, most recently updated first (used to reuse a Google account). */
+export function listSiblingIntegrations(projectId: string, integrationType: IntegrationType): ProjectIntegration[] {
+  const rows = getDb()
+    .prepare(
+      "SELECT * FROM project_integrations WHERE integration_type = ? AND project_id != ? ORDER BY updated_at DESC"
+    )
+    .all(integrationType, projectId) as IntegrationRow[];
+  return rows.map(mapIntegration);
+}
+
+export type ResourceUsage = { resourceId: string; projectId: string; projectName: string };
+
+/** Which other projects have already selected which Google resources. */
+export function listResourceUsage(excludeProjectId: string): ResourceUsage[] {
+  return getDb()
+    .prepare(
+      `SELECT r.resource_id AS resourceId, i.project_id AS projectId, p.name AS projectName
+       FROM integration_resources r
+       JOIN project_integrations i ON i.id = r.integration_id
+       JOIN projects p ON p.id = i.project_id
+       WHERE r.selected = 1 AND i.project_id != ?`
+    )
+    .all(excludeProjectId) as ResourceUsage[];
+}

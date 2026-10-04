@@ -3,7 +3,8 @@
 import { useState, useEffect, Suspense } from "react";
 import TerminalLog from "@/components/dashboard/TerminalLog";
 import ContextPanel from "@/components/dashboard/ContextPanel";
-import AnalyticsPanel from "@/components/dashboard/AnalyticsPanel";
+import AnalyticsPanelBase from "@/components/dashboard/AnalyticsPanel";
+import { useProject } from "@/lib/project-store";
 import LeadsPanel from "@/components/dashboard/LeadsPanel";
 // AgentsFeedPanel hidden (not deleted) — replaced by LeadsPanel in the same
 // column slot. Re-import "@/components/dashboard/AgentsFeedPanel" to restore.
@@ -52,6 +53,12 @@ function OnboardingGate({ children }: { children: React.ReactNode }) {
       {needsOnboarding && <OnboardingModal onDone={refresh} />}
     </>
   );
+}
+
+/** Keyed by project: switching projects remounts the panel, so every tab starts clean instead of showing the previous project's data. */
+function AnalyticsPanel(props: React.ComponentProps<typeof AnalyticsPanelBase>) {
+  const { project } = useProject();
+  return <AnalyticsPanelBase key={project?.id ?? "none"} {...props} />;
 }
 
 export default function DashboardPage() {

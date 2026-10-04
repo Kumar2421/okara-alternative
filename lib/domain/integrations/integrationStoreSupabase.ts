@@ -301,3 +301,51 @@ export async function getSelectedGA4Property(db: SupabaseClient, userId: string,
   const resource = await getSelectedIntegrationResource(db, userId, integration.id, "ga4_property");
   return resource ? { id: resource.resourceId, name: resource.resourceName } : null;
 }
+
+/** Other projects' connections of this type, most recently updated first (used to reuse a Google account). */
+export async function listSiblingIntegrations(
+  db: SupabaseClient,
+  userId: string,
+  projectId: string,
+  integrationType: IntegrationType
+): Promise<ProjectIntegration[]> {
+  const { data } = await db
+    .from("integration_connections")
+    .select("id, project_id, provider, external_email, created_at, updated_at")
+    .eq("user_id", userId)
+    .eq("provider", providerFor(integrationType))
+    .not("project_id", "is", null)
+    .neq("project_id", projectId)
+    .order("updated_at", { ascending: false });
+  return (data ?? []).map((row) => mapIntegration(row as ConnectionRow));
+}
+
+export type ResourceUsage = { resourceId: string; projectId: string; projectName: string };
+
+/** Which other projects have already selected which Google resources. */
+export async function listResourceUsage(db: SupabaseClient, userId: string, excludeProjectId: string): Promise<ResourceUsage[]> {
+  const { data: selected } = await db
+    .from("integration_resources")
+    .select("resource_id, connection_id")
+    .eq("user_id", userId)
+    .eq("selected", true);
+  if (!selected?.length) return [];
+
+  const { data: connections } = await db
+    .from("integration_connections")
+    .select("id, project_id")
+    .eq("user_id", userId)
+    .in("id", [...new Set(selected.map((r) => r.connection_id as string))])
+    .neq("project_id", excludeProjectId);
+  const projectByConnection = new Map((connections ?? []).map((c) => [c.id as string, c.project_id as string]));
+  const projectIds = [...new Set(projectByConnection.values())];
+  if (projectIds.length === 0) return [];
+
+  const { data: projects } = await db.from("projects").select("id, name").eq("owner_id", userId).in("id", projectIds);
+  const nameById = new Map((projects ?? []).map((p) => [p.id as string, p.name as string]));
+
+  return selected.flatMap((r) => {
+    const projectId = projectByConnection.get(r.connection_id as string);
+    return projectId ? [{ resourceId: r.resource_id as string, projectId, projectName: nameById.get(projectId) ?? "another project" }] : [];
+  });
+}
