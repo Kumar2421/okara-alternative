@@ -5,8 +5,8 @@ import type { QueryRow } from "./types.ts";
 const GSC_LAG_DAYS = 3;
 
 /** The 28-day window is the main one; the others are kept leaner. */
-const TOP_QUERIES_MAIN = 500;
-const TOP_QUERIES_OTHER = 200;
+export const TOP_QUERIES_MAIN = 500;
+export const TOP_QUERIES_OTHER = 200;
 
 export const SNAPSHOT_RETENTION_DAYS = 120;
 
