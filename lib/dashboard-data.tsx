@@ -1,6 +1,10 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { fetchJson } from "@/lib/query/fetchJson";
+import { qk } from "@/lib/query/keys";
+import { useProject } from "@/lib/project-store";
 
 export const DASHBOARD_DATASETS = [
   "project_documents",
@@ -26,6 +30,7 @@ export type DashboardData = {
 
 type DashboardDataState = {
   data: DashboardData | null;
+  /** True only while there is nothing to show yet; a background refresh never sets it. */
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -35,12 +40,7 @@ const DashboardDataContext = createContext<DashboardDataState | null>(null);
 
 export async function fetchDashboardData(projectId?: string | null): Promise<DashboardData> {
   const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
-  const response = await fetch(`/api/project/data${query}`, { cache: "no-store" });
-  const payload = (await response.json().catch(() => ({}))) as { error?: string } & Partial<DashboardData>;
-
-  if (!response.ok) {
-    throw new Error(payload.error ?? "Failed to load dashboard data");
-  }
+  const payload = await fetchJson<Partial<DashboardData>>(`/api/project/data${query}`);
 
   if (!payload.project || !payload.projectId || !payload.data) {
     throw new Error("Dashboard data response is incomplete");
@@ -49,45 +49,37 @@ export async function fetchDashboardData(projectId?: string | null): Promise<Das
   return payload as DashboardData;
 }
 
+/**
+ * Dashboard rows, cached per project. Switching project selects a different
+ * cache entry (never the previous project's data), refreshing keeps the old
+ * data on screen while the new data loads, and the same entry is shared by
+ * every panel that reads it.
+ */
 export function DashboardDataProvider({ children }: { children: React.ReactNode }) {
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { project, loading: projectLoading } = useProject();
+  const projectId = project?.id;
 
+  const query = useQuery({
+    queryKey: qk.dashboardData(projectId),
+    queryFn: () => fetchDashboardData(),
+    // Wait for the project store so we don't fetch twice (once before the active project is known).
+    enabled: !projectLoading,
+  });
+
+  const { refetch } = query;
   const refresh = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      setData(await fetchDashboardData());
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Failed to load dashboard data");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    await refetch();
+  }, [refetch]);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    void fetchDashboardData()
-      .then((nextData) => {
-        if (!cancelled) setData(nextData);
-      })
-      .catch((cause) => {
-        if (!cancelled) {
-          setError(cause instanceof Error ? cause.message : "Failed to load dashboard data");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const value = useMemo(() => ({ data, loading, error, refresh }), [data, loading, error, refresh]);
+  const value = useMemo<DashboardDataState>(
+    () => ({
+      data: query.data ?? null,
+      loading: projectLoading || query.isPending,
+      error: query.error instanceof Error ? query.error.message : null,
+      refresh,
+    }),
+    [query.data, query.isPending, query.error, projectLoading, refresh],
+  );
   return <DashboardDataContext.Provider value={value}>{children}</DashboardDataContext.Provider>;
 }
 

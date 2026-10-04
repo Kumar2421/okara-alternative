@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { DM_Sans, JetBrains_Mono } from "next/font/google";
 import ToastProvider from "@/components/dashboard/Toast";
+import QueryProvider from "@/lib/query/QueryProvider";
 import ProvidersProvider from "@/lib/providers-store";
 import TerminalLogProvider from "@/lib/terminal-log-store";
 import ProjectProvider from "@/lib/project-store";
@@ -28,6 +29,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${dmSans.variable} ${jetbrainsMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col font-sans">
+        <QueryProvider>
         <ToastProvider>
           <ProvidersProvider>
             <TerminalLogProvider>
@@ -35,6 +37,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             </TerminalLogProvider>
           </ProvidersProvider>
         </ToastProvider>
+        </QueryProvider>
       </body>
     </html>
   );

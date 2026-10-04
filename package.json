@@ -15,6 +15,7 @@
     "@lottiefiles/dotlottie-react": "^0.19.16",
     "@supabase/ssr": "^0.7.0",
     "@supabase/supabase-js": "^2.58.0",
+    "@tanstack/react-query": "^5.104.1",
     "better-sqlite3": "^13.0.3",
     "cheerio": "^1.2.0",
     "lucide-react": "^1.38.0",

@@ -1,59 +1,56 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { fetchJson } from "@/lib/query/fetchJson";
+import { qk } from "@/lib/query/keys";
+import { useProject } from "@/lib/project-store";
 import { timeAgo } from "./intentLabels";
-import { SEARCH_REFRESHED_EVENT } from "./useSearchOpportunities";
 
-type Meta = { capturedAt: string; days: number } | null;
+type Meta = { snapshot: { capturedAt: string; days: number } | null };
 
 /** Shows how fresh the saved search history is and lets the user capture a new snapshot now. */
 export default function SearchHistoryBar() {
-  const [meta, setMeta] = useState<Meta | undefined>(undefined);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { project } = useProject();
+  const queryClient = useQueryClient();
+  const projectId = project?.id;
 
-  const load = useCallback(() => {
-    fetch("/api/agents/analytics/search/refresh")
-      .then((r) => (r.ok ? r.json() : { snapshot: null }))
-      .then((data) => setMeta(data.snapshot ?? null))
-      .catch(() => setMeta(null));
-  }, []);
-  useEffect(load, [load]);
+  const history = useQuery({
+    queryKey: qk.searchHistory(projectId),
+    queryFn: () => fetchJson<Meta>("/api/agents/analytics/search/refresh"),
+    enabled: Boolean(project),
+  });
 
-  const refresh = () => {
-    setBusy(true);
-    setError(null);
-    fetch("/api/agents/analytics/search/refresh", { method: "POST" })
-      .then(async (r) => {
-        const data = await r.json().catch(() => ({}));
-        if (!r.ok) {
-          setError(data.error ?? "Could not refresh search data.");
-        } else {
-          load();
-          window.dispatchEvent(new Event(SEARCH_REFRESHED_EVENT));
-        }
-      })
-      .catch(() => setError("Could not refresh search data."))
-      .finally(() => setBusy(false));
-  };
+  const refresh = useMutation({
+    mutationFn: () => fetchJson("/api/agents/analytics/search/refresh", { method: "POST" }),
+    onSuccess: () =>
+      // Everything derived from the snapshot (and the live traffic numbers) is now out of date.
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: qk.searchHistory(projectId) }),
+        queryClient.invalidateQueries({ queryKey: qk.searchOpportunities(projectId) }),
+        queryClient.invalidateQueries({ queryKey: qk.traffic(projectId) }),
+      ]),
+  });
+
+  const meta = history.data?.snapshot;
+  let status: string;
+  if (history.isPending) status = "Checking saved history…";
+  else if (history.isError) status = "Couldn't check saved history.";
+  else if (meta) status = `Updated ${timeAgo(meta.capturedAt)} · ${meta.days} ${meta.days === 1 ? "day" : "days"} of history`;
+  else status = "No search history yet. Refresh to start tracking changes over time.";
 
   return (
     <div className="mb-4 flex items-center justify-between gap-3 text-[11px] text-gray-500">
       <span>
-        {meta === undefined
-          ? "Checking saved history…"
-          : meta
-            ? `Updated ${timeAgo(meta.capturedAt)} · ${meta.days} ${meta.days === 1 ? "day" : "days"} of history`
-            : "No search history yet. Refresh to start tracking changes over time."}
-        {error && <span className="ml-2 text-amber-600">⚠ {error}</span>}
+        {status}
+        {refresh.isError && <span className="ml-2 text-amber-600">⚠ {refresh.error.message}</span>}
       </span>
       <button
         type="button"
-        onClick={refresh}
-        disabled={busy}
+        onClick={() => refresh.mutate()}
+        disabled={refresh.isPending}
         className="shrink-0 rounded-md border border-gray-200 px-2 py-1 text-[11px] font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
       >
-        {busy ? "Refreshing…" : "Refresh now"}
+        {refresh.isPending ? "Refreshing…" : "Refresh now"}
       </button>
     </div>
   );

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { SkeletonCard } from "@/components/shared/Skeleton";
 import {
   Layers,
   ChevronLeft,
@@ -219,7 +220,10 @@ export default function ContextPanel({
 
       <div className="okara-scroll flex-1 overflow-y-auto px-4 py-4">
         {loading || (project && contextLoading && documents.length === 0 && contextCompetitors.length === 0) ? (
-          <p className="text-[13px] text-gray-400">Loading...</p>
+          <div className="space-y-4" aria-busy="true">
+            <SkeletonCard rows={3} />
+            <SkeletonCard rows={2} />
+          </div>
         ) : !project ? (
           <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-gray-200 px-4 py-8 text-center">
             <Link2 size={18} className="text-gray-300" />

@@ -66,14 +66,9 @@ export default function DashboardPage() {
   const [analyticsOpen, setAnalyticsOpen] = useState(true);
   const [agentsOpen, setAgentsOpen] = useState(true);
   const [chatOpen, setChatOpen] = useState(true);
-  const [booting, setBooting] = useState(true);
   const [mobileTab, setMobileTab] = useState<MobileTab>("context");
   const isMobile = useIsMobile();
-
-  useEffect(() => {
-    const t = setTimeout(() => setBooting(false), 900);
-    return () => clearTimeout(t);
-  }, []);
+  const { loading: projectLoading } = useProject();
 
   const cols = [
     contextOpen ? "22%" : RAIL,
@@ -82,7 +77,8 @@ export default function DashboardPage() {
     chatOpen ? "1fr" : RAIL,
   ].join(" ");
 
-  if (booting) return <Loading />;
+  // Wait for the real signal (the project store has answered), not a fixed delay.
+  if (projectLoading) return <Loading />;
 
   if (isMobile) {
     return (
