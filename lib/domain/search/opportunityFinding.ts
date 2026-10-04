@@ -1,6 +1,6 @@
-import { expectedCtr, type OpportunityGroups, type OpportunityMetrics, type OpportunityType, type SearchOpportunity } from "./searchOpportunities.ts";
+import { buildOpportunities, expectedCtr, type OpportunityGroups, type OpportunityMetrics, type OpportunityType, type SearchOpportunity } from "./searchOpportunities.ts";
 import { normalizeQuery } from "./searchIntent.ts";
-import type { SnapshotQuery } from "./searchSnapshot.ts";
+import type { SearchSnapshotPayload, SnapshotQuery } from "./searchSnapshot.ts";
 
 export const OPPORTUNITY_TYPES: readonly OpportunityType[] = ["ranking", "ctr", "declining", "new_query", "lost_query"];
 
@@ -137,4 +137,96 @@ export function evaluateOpportunity(evidence: OpportunityEvidence, current: Snap
         ? { resolved: true, reason: `Showing again: ${Math.round(current.impressions).toLocaleString("en-US")} views.` }
         : { resolved: false, reason: "Still barely showing for this search." };
   }
+}
+
+// ───────── Helpers the routes use ─────────
+
+export type CreateFromSnapshot =
+  | { ok: true; input: ReturnType<typeof findingForOpportunity> }
+  | { ok: false; status: number; error: string };
+
+function sameHost(a: string, b: string): boolean {
+  try {
+    return new URL(a).hostname.replace(/^www\./, "") === new URL(b).hostname.replace(/^www\./, "");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Build the finding for an opportunity the user clicked, from the stored
+ * snapshot. The numbers come from the snapshot, never from the client, so
+ * evidence cannot be forged and always matches what the panel showed.
+ */
+export function opportunityFindingFromSnapshot(args: {
+  type: OpportunityType;
+  query: string;
+  payload: SearchSnapshotPayload | null;
+  projectId: string;
+  brand: string | null;
+  projectUrl: string | null;
+}): CreateFromSnapshot {
+  if (!args.payload) {
+    return { ok: false, status: 409, error: "No saved search data yet. Use Refresh now first." };
+  }
+  const found = findOpportunity(buildOpportunities(args.payload), args.type, args.query);
+  if (!found) {
+    return { ok: false, status: 409, error: "This opportunity is no longer current. Refresh your search data and try again." };
+  }
+  // Only keep a page link that belongs to this project's own site.
+  const pageUrl = found.pageUrl && args.projectUrl && sameHost(found.pageUrl, args.projectUrl) ? found.pageUrl : null;
+  return {
+    ok: true,
+    input: findingForOpportunity({ ...found, pageUrl }, { projectId: args.projectId, brand: args.brand, capturedAt: args.payload.capturedAt }),
+  };
+}
+
+/** Re-check an opportunity finding against the latest snapshot, in the shape the finding service expects. */
+export function recheckOpportunityFinding(
+  finding: { severity: "info" | "warning" | "critical"; recommendation: string; evidence: Record<string, unknown> },
+  snapshot: { snapshotDate: string; payload: SearchSnapshotPayload } | null,
+  now: Date = new Date(),
+) {
+  const evidence = opportunityEvidenceOf(finding.evidence);
+  const wanted = evidence ? normalizeQuery(evidence.query) : "";
+  const current = snapshot?.payload.windows.d28.queries.find((q) => normalizeQuery(q.query) === wanted) ?? null;
+  const verdict = evidence
+    ? evaluateOpportunity(evidence, current)
+    : { resolved: false, reason: "This finding has no search data to compare." };
+
+  return {
+    issueDetected: !verdict.resolved,
+    severity: finding.severity,
+    recommendation: finding.recommendation,
+    evidence: {
+      ...finding.evidence,
+      lastCheck: {
+        at: now.toISOString(),
+        resolved: verdict.resolved,
+        reason: verdict.reason,
+        snapshotDate: snapshot?.snapshotDate ?? null,
+        current: current ? { impressions: current.impressions, clicks: current.clicks, ctr: current.ctr, position: current.position } : null,
+      },
+    },
+  };
+}
+
+type IdentityLike = { source: string; category: string; entityType: string; entityId: string; url: string | null };
+
+/**
+ * The finding that already tracks this exact issue, if any. Checked in
+ * application code because a database unique key treats two empty page URLs
+ * as different, which would otherwise allow (or fail on) a duplicate.
+ */
+export function findExistingFinding<T extends IdentityLike>(findings: T[], input: IdentityLike): T | null {
+  return (
+    findings.find(
+      (f) =>
+        f.source === input.source &&
+        f.category === input.category &&
+        f.entityType === input.entityType &&
+        f.entityId === input.entityId &&
+        (f.url ?? null) === (input.url ?? null),
+    ) ?? null
+  );
 }

@@ -66,6 +66,7 @@ export default function FindingDetail({
   const evidenceRows = evidenceRowsForFinding(finding);
   const why = whyItMattersForFinding(finding);
   const currentIndex = STATUS_ORDER.indexOf(finding.status);
+  const lastCheckReason = (finding.evidence.lastCheck as { reason?: string } | undefined)?.reason;
   const loadError = work.recommendations.isError ? "Couldn't generate recommendations for this finding." : null;
 
   return (
@@ -84,9 +85,10 @@ export default function FindingDetail({
           <div>
             <div className="font-semibold">{verification === "verified" ? "Verified" : "Verification failed"}</div>
             <div className="mt-0.5">
-              {verification === "verified"
-                ? "The issue is no longer detected on this page."
-                : "The issue is still detected. Keep fixing it and re-check again."}
+              {lastCheckReason ??
+                (verification === "verified"
+                  ? "The issue is no longer detected on this page."
+                  : "The issue is still detected. Keep fixing it and re-check again.")}
             </div>
           </div>
         </div>

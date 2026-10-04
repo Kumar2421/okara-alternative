@@ -47,6 +47,7 @@ export function evidenceRowsForFinding(finding: { source: string; evidence: Reco
       { key: "ctr", label: "Click rate", value: typeof e.ctr === "number" ? `${(e.ctr * 100).toFixed(1)}%` : e.ctr },
       { key: "position", label: "Average position", value: typeof e.position === "number" && e.position > 0 ? e.position.toFixed(1) : null },
       { key: "previousPosition", label: "Position before", value: typeof previous?.position === "number" ? previous.position.toFixed(1) : null },
+      { key: "lastCheck", label: "Latest check", value: (e.lastCheck as { reason?: string } | undefined)?.reason ?? null },
       { key: "previousImpressions", label: "Views before", value: typeof previous?.impressions === "number" ? Math.round(previous.impressions).toLocaleString("en-US") : null },
     ];
   }

@@ -178,3 +178,89 @@ test("evidence rows for an opportunity finding show search, type, views and the 
   assert.equal("canonical" in rows, false, "no page-audit rows");
   assert.match(whyItMattersForFinding({ source: f.source, evidence: f.evidence }) ?? "", /Reason one\. Reason two\./);
 });
+
+import { snapshotRanges, type SearchSnapshotPayload } from "../lib/domain/search/searchSnapshot.ts";
+import { opportunityFindingFromSnapshot, recheckOpportunityFinding } from "../lib/domain/search/opportunityFinding.ts";
+
+function snapshot(queries: Array<ReturnType<typeof metrics> & { query: string; rankingPages?: Array<{ url: string }> }>): SearchSnapshotPayload {
+  const r = snapshotRanges(new Date("2026-10-10T00:00:00Z"));
+  return {
+    version: 1,
+    capturedAt: "2026-10-10T00:00:00.000Z",
+    siteUrl: "sc-domain:example.com",
+    windows: {
+      d7: { ...r.d7, queries: [] },
+      d28: { ...r.d28, queries: queries.map((q) => ({ ...q, rankingPages: q.rankingPages ?? [] })) },
+      d90: { ...r.d90, queries: [] },
+      prev28: { ...r.prev28, queries: [] },
+    },
+  } as unknown as SearchSnapshotPayload;
+}
+
+const args = { type: "ctr" as OpportunityType, query: "Marlo Pricing", projectId: "p1", brand: "Marlo", projectUrl: "https://example.com" };
+
+test("opportunityFindingFromSnapshot uses the snapshot's numbers and keeps only the project's own page", () => {
+  const payload = snapshot([{ query: "marlo pricing", ...metrics(900, 2.1, 11), rankingPages: [{ url: "https://www.example.com/pricing" }] }]);
+  const result = opportunityFindingFromSnapshot({ ...args, payload });
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.input.entityId, "ctr:marlo pricing");
+    assert.equal(result.input.url, "https://www.example.com/pricing");
+    assert.equal((result.input.evidence as { impressions: number }).impressions, 900);
+  }
+});
+
+test("opportunityFindingFromSnapshot drops a page link from another site", () => {
+  const payload = snapshot([{ query: "marlo pricing", ...metrics(900, 2.1, 11), rankingPages: [{ url: "https://evil.example.org/x" }] }]);
+  const result = opportunityFindingFromSnapshot({ ...args, payload });
+  assert.equal(result.ok && result.input.url, null);
+});
+
+test("opportunityFindingFromSnapshot refuses without data or when the opportunity is stale", () => {
+  const none = opportunityFindingFromSnapshot({ ...args, payload: null });
+  assert.deepEqual(none, { ok: false, status: 409, error: "No saved search data yet. Use Refresh now first." });
+  const stale = opportunityFindingFromSnapshot({ ...args, payload: snapshot([{ query: "marlo pricing", ...metrics(900, 2.1, 400) }]) });
+  assert.equal(stale.ok, false);
+  assert.equal(stale.ok === false && stale.status, 409);
+});
+
+test("recheckOpportunityFinding verifies when the problem is gone and records why", () => {
+  const found = opportunityFindingFromSnapshot({ ...args, payload: snapshot([{ query: "marlo pricing", ...metrics(900, 2.1, 11) }]) });
+  assert.ok(found.ok);
+  if (!found.ok) return;
+  const finding = { severity: found.input.severity, recommendation: found.input.recommendation, evidence: found.input.evidence };
+
+  const fixed = recheckOpportunityFinding(finding, { snapshotDate: "2026-10-24", payload: snapshot([{ query: "Marlo Pricing", ...metrics(1000, 2, 150) }]) }, new Date("2026-10-24T00:00:00Z"));
+  assert.equal(fixed.issueDetected, false);
+  assert.equal((fixed.evidence.lastCheck as { resolved: boolean }).resolved, true);
+  assert.equal((fixed.evidence.lastCheck as { snapshotDate: string }).snapshotDate, "2026-10-24");
+  assert.equal((fixed.evidence as Record<string, unknown>).query, finding.evidence.query, "original evidence is kept");
+
+  const still = recheckOpportunityFinding(finding, { snapshotDate: "2026-10-24", payload: snapshot([{ query: "marlo pricing", ...metrics(1000, 2, 10) }]) });
+  assert.equal(still.issueDetected, true);
+
+  const noData = recheckOpportunityFinding(finding, null);
+  assert.equal(noData.issueDetected, true);
+  assert.match((noData.evidence.lastCheck as { reason: string }).reason, /no recent data/i);
+});
+
+import { findExistingFinding } from "../lib/domain/search/opportunityFinding.ts";
+
+test("findExistingFinding matches the same issue, including when there is no page URL", () => {
+  const input = findingForOpportunity(opp("lost_query", "free seo audit", metrics(0, 0, 0), { pageUrl: null }), NOW);
+  const stored = [
+    { id: "a", ...findingForOpportunity(opp("ranking", "free seo audit"), NOW) },
+    { id: "b", ...input },
+  ];
+  assert.equal(findExistingFinding(stored, input)?.id, "b");
+  assert.equal(input.url, null);
+});
+
+test("findExistingFinding distinguishes type, query and page", () => {
+  const base = findingForOpportunity(opp("ctr", "marlo pricing"), NOW);
+  const stored = [{ id: "a", ...base }];
+  assert.equal(findExistingFinding(stored, findingForOpportunity(opp("ranking", "marlo pricing"), NOW)), null, "other type");
+  assert.equal(findExistingFinding(stored, findingForOpportunity(opp("ctr", "other query"), NOW)), null, "other query");
+  assert.equal(findExistingFinding(stored, findingForOpportunity(opp("ctr", "marlo pricing", metrics(1, 1), { pageUrl: "https://example.com/x" }), NOW)), null, "other page");
+  assert.equal(findExistingFinding(stored, findingForOpportunity(opp("ctr", "  Marlo   Pricing "), NOW))?.id, "a", "case and spacing do not matter");
+});
