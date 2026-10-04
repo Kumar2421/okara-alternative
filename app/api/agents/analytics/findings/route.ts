@@ -1,19 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import {
-  getProjectFinding,
-  listProjectFindings,
-  refreshFinding,
-  updateFindingStatus,
-  upsertFinding,
-} from "@/lib/domain/findings/findingStore";
-import {
-  getProjectFinding as getProjectFindingSupabase,
-  listProjectFindings as listProjectFindingsSupabase,
-  refreshFinding as refreshFindingSupabase,
-  updateFindingStatus as updateFindingStatusSupabase,
-  upsertFinding as upsertFindingSupabase,
-} from "@/lib/domain/findings/findingStoreSupabase";
+import { upsertFinding } from "@/lib/domain/findings/findingStore";
+import { upsertFinding as upsertFindingSupabase } from "@/lib/domain/findings/findingStoreSupabase";
+import { sqliteFindingRepository, supabaseFindingRepository } from "@/lib/domain/findings/findingRepositories";
 import { deriveSearchFinding } from "@/lib/domain/findings/findingRules";
 import { applyRecheck, getFinding, listFindings, transitionFinding } from "@/lib/domain/findings/findingService";
 import { SEOAgent } from "@/lib/domain/seo/SEOAgent";
@@ -105,19 +94,19 @@ export async function GET(req: NextRequest) {
     const projectId = setting?.value;
     if (!projectId) return NextResponse.json({ error: "No active project." }, { status: 422 });
     if (id) {
-      const finding = await getFinding({ get: (p, findingId) => getProjectFindingSupabase(db, user.id, p, findingId), list: (p) => listProjectFindingsSupabase(db, user.id, p), transition: (p, findingId, nextStatus) => updateFindingStatusSupabase(db, user.id, p, findingId, nextStatus), refresh: (p, findingId, input) => refreshFindingSupabase(db, user.id, p, findingId, input) }, projectId, id);
+      const finding = await getFinding(supabaseFindingRepository(db, user.id), projectId, id);
       return finding ? NextResponse.json({ finding }) : NextResponse.json({ error: "Finding not found." }, { status: 404 });
     }
-    return NextResponse.json({ findings: await listFindings({ get: (p, findingId) => getProjectFindingSupabase(db, user.id, p, findingId), list: (p) => listProjectFindingsSupabase(db, user.id, p), transition: (p, findingId, nextStatus) => updateFindingStatusSupabase(db, user.id, p, findingId, nextStatus), refresh: (p, findingId, input) => refreshFindingSupabase(db, user.id, p, findingId, input) }, projectId) });
+    return NextResponse.json({ findings: await listFindings(supabaseFindingRepository(db, user.id), projectId) });
   }
 
   const projectId = getActiveProjectId();
   if (!projectId) return NextResponse.json({ error: "No active project." }, { status: 422 });
   if (id) {
-    const finding = await getFinding({ get: (p, findingId) => getProjectFinding(p, findingId), list: (p) => listProjectFindings(p), transition: (p, findingId, nextStatus) => updateFindingStatus(p, findingId, nextStatus), refresh: (p, findingId, input) => refreshFinding(p, findingId, input) }, projectId, id);
+    const finding = await getFinding(sqliteFindingRepository(), projectId, id);
     return finding ? NextResponse.json({ finding }) : NextResponse.json({ error: "Finding not found." }, { status: 404 });
   }
-  return NextResponse.json({ findings: await listFindings({ get: (p, findingId) => getProjectFinding(p, findingId), list: (p) => listProjectFindings(p), transition: (p, findingId, nextStatus) => updateFindingStatus(p, findingId, nextStatus), refresh: (p, findingId, input) => refreshFinding(p, findingId, input) }, projectId) });
+  return NextResponse.json({ findings: await listFindings(sqliteFindingRepository(), projectId) });
 }
 
 export async function POST(req: NextRequest) {
@@ -197,7 +186,7 @@ export async function PUT(req: NextRequest) {
       const { data: setting } = await db.from("user_settings").select("value").eq("user_id", user.id).eq("key", "active_project_id").maybeSingle();
       const projectId = setting?.value;
       if (!projectId) return NextResponse.json({ error: "No active project." }, { status: 422 });
-      const finding = await getFinding({ get: (p, findingId) => getProjectFindingSupabase(db, user.id, p, findingId), list: (p) => listProjectFindingsSupabase(db, user.id, p), transition: (p, findingId, nextStatus) => updateFindingStatusSupabase(db, user.id, p, findingId, nextStatus), refresh: (p, findingId, input) => refreshFindingSupabase(db, user.id, p, findingId, input) }, projectId, id);
+      const finding = await getFinding(supabaseFindingRepository(db, user.id), projectId, id);
       if (!finding) return NextResponse.json({ error: "Finding not found." }, { status: 404 });
 
       if (action === "recheck") {
@@ -211,25 +200,20 @@ export async function PUT(req: NextRequest) {
               evidence: r.evidence,
             }));
         const nextStatus = result.issueDetected ? "failed" : "verified";
-        const updated = await applyRecheck({
-          get: (p, findingId) => getProjectFindingSupabase(db, user.id, p, findingId),
-          list: (p) => listProjectFindingsSupabase(db, user.id, p),
-          transition: (p, findingId, nextStatus) => updateFindingStatusSupabase(db, user.id, p, findingId, nextStatus),
-          refresh: (p, findingId, input) => refreshFindingSupabase(db, user.id, p, findingId, input),
-        }, projectId, id, result);
+        const updated = await applyRecheck(supabaseFindingRepository(db, user.id), projectId, id, result);
         return NextResponse.json({ finding: updated, verification: { status: nextStatus, changed: nextStatus === "verified" } });
       }
 
       if (!["new", "acknowledged", "fixing", "fixed", "verified", "failed"].includes(status)) {
         return NextResponse.json({ error: "Invalid finding status." }, { status: 400 });
       }
-      const updated = await transitionFinding({ get: (p, findingId) => getProjectFindingSupabase(db, user.id, p, findingId), list: (p) => listProjectFindingsSupabase(db, user.id, p), transition: (p, findingId, nextStatus) => updateFindingStatusSupabase(db, user.id, p, findingId, nextStatus), refresh: (p, findingId, input) => refreshFindingSupabase(db, user.id, p, findingId, input) }, projectId, id, status as typeof finding.status);
+      const updated = await transitionFinding(supabaseFindingRepository(db, user.id), projectId, id, status as typeof finding.status);
       return NextResponse.json({ finding: updated });
     }
 
     const projectId = getActiveProjectId();
     if (!projectId) return NextResponse.json({ error: "No active project." }, { status: 422 });
-    const finding = await getFinding({ get: (p, findingId) => getProjectFinding(p, findingId), list: (p) => listProjectFindings(p), transition: (p, findingId, nextStatus) => updateFindingStatus(p, findingId, nextStatus), refresh: (p, findingId, input) => refreshFinding(p, findingId, input) }, projectId, id);
+    const finding = await getFinding(sqliteFindingRepository(), projectId, id);
     if (!finding) return NextResponse.json({ error: "Finding not found." }, { status: 404 });
 
     if (action === "recheck") {
@@ -244,19 +228,14 @@ export async function PUT(req: NextRequest) {
             evidence: r.evidence,
           }));
       const nextStatus = result.issueDetected ? "failed" : "verified";
-      const updated = await applyRecheck({
-        get: (p, findingId) => getProjectFinding(p, findingId),
-        list: (p) => listProjectFindings(p),
-        transition: (p, findingId, nextStatus) => updateFindingStatus(p, findingId, nextStatus),
-        refresh: (p, findingId, input) => refreshFinding(p, findingId, input),
-      }, projectId, id, result);
+      const updated = await applyRecheck(sqliteFindingRepository(), projectId, id, result);
       return NextResponse.json({ finding: updated, verification: { status: nextStatus, changed: nextStatus === "verified" } });
     }
 
     if (!["new", "acknowledged", "fixing", "fixed", "verified", "failed"].includes(status)) {
       return NextResponse.json({ error: "Invalid finding status." }, { status: 400 });
     }
-    return NextResponse.json({ finding: await transitionFinding({ get: (p, findingId) => getProjectFinding(p, findingId), list: (p) => listProjectFindings(p), transition: (p, findingId, nextStatus) => updateFindingStatus(p, findingId, nextStatus), refresh: (p, findingId, input) => refreshFinding(p, findingId, input) }, projectId, id, status as typeof finding.status) });
+    return NextResponse.json({ finding: await transitionFinding(sqliteFindingRepository(), projectId, id, status as typeof finding.status) });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const statusCode = message.startsWith("Invalid finding status transition") ? 409 : 502;
