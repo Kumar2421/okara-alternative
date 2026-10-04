@@ -25,17 +25,9 @@ export async function POST(req: NextRequest) {
   const model: string | undefined = body?.model;
   const requestedProjectId: string | undefined = body?.projectId;
 
-  if (!model || !providerId) {
-    return NextResponse.json(
-      { error: "No model selected. Connect a provider in Settings → LLM Providers." },
-      { status: 422 }
-    );
-  }
-
-  const driver = getDriver(providerId);
-  if (!driver) {
-    return NextResponse.json({ error: `${providerId} isn't wired to a real model yet.` }, { status: 501 });
-  }
+  // A model is optional: Tavily web search finds competitors on its own, and
+  // a connected model only refines the result (see CompetitorDiscoveryAgent).
+  const driver = providerId ? getDriver(providerId) : null;
 
   if (FEATURES.PLATFORM_MODE) {
     const supabase = await createClient();
@@ -49,7 +41,7 @@ export async function POST(req: NextRequest) {
       .from("provider_connections")
       .select("api_key_secret_id, base_url")
       .eq("user_id", user.id)
-      .eq("provider_id", providerId)
+      .eq("provider_id", providerId ?? "")
       .maybeSingle();
 
     let apiKey = "";
@@ -59,19 +51,15 @@ export async function POST(req: NextRequest) {
       const { data: secret } = await db.rpc("vault_get_secret", { p_id: conn.api_key_secret_id });
       apiKey = (secret as string) ?? "";
       baseUrl = conn.base_url ?? undefined;
-    } else if (PLATFORM_PROVIDER_KEYS[providerId]) {
+    } else if (providerId && PLATFORM_PROVIDER_KEYS[providerId]) {
       // Same operator-managed free-tier key every other document generator
       // (competitor-analysis, content-strategy, etc.) already falls back to
       // — this route was the one place still requiring a BYOK connection
       // even for the platform's own default model, which made it fail for
       // every hosted user who hadn't manually connected Groq themselves.
       apiKey = PLATFORM_PROVIDER_KEYS[providerId]!;
-    } else {
-      return NextResponse.json(
-        { error: `${providerId} isn't properly connected. Check Settings → LLM Providers.` },
-        { status: 422 }
-      );
     }
+    // No model credentials is fine: discovery then runs from web search alone.
 
     let activeId = requestedProjectId;
     if (!activeId) {
@@ -112,10 +100,11 @@ export async function POST(req: NextRequest) {
     const productInfo = groundingDocs?.find((d) => d.doc_type === "product_info")?.content;
     const marketingStrategy = groundingDocs?.find((d) => d.doc_type === "marketing_strategy")?.content;
 
-    const tavilyApiKey = providerSupportsTools(providerId) ? process.env.TAVILY_API_KEY?.trim() || undefined : undefined;
+    // Tavily is queried directly (no model needed), so it no longer depends on the provider's tool support.
+    const tavilyApiKey = process.env.TAVILY_API_KEY?.trim() || undefined;
 
     try {
-      const agent = new CompetitorDiscoveryAgent(driver, apiKey, baseUrl);
+      const agent = new CompetitorDiscoveryAgent(driver && model && apiKey ? driver : null, apiKey, baseUrl);
       const { candidates, usedWebSearch } = await agent.discover({
         projectName: project.name,
         url: project.url,
@@ -126,6 +115,7 @@ export async function POST(req: NextRequest) {
         marketingStrategy,
         model,
         tavilyApiKey,
+        llmSupportsTools: providerId ? providerSupportsTools(providerId) : false,
       });
 
       if (candidates.length === 0) {
@@ -171,10 +161,9 @@ export async function POST(req: NextRequest) {
 
   const keyRow = db
     .prepare("SELECT api_key, base_url FROM provider_connections WHERE provider_id = ?")
-    .get(providerId) as { api_key: string | null; base_url: string | null } | undefined;
-  if (!keyRow || (!keyRow.api_key?.trim() && !keyRow.base_url?.trim())) {
-    return NextResponse.json({ error: `${providerId} isn't properly connected. Check Settings → LLM Providers.` }, { status: 422 });
-  }
+    .get(providerId ?? "") as { api_key: string | null; base_url: string | null } | undefined;
+  // No model credentials is fine: discovery then runs from web search alone.
+  const llmConfigured = Boolean(keyRow && (keyRow.api_key?.trim() || keyRow.base_url?.trim()));
 
   // Explicit projectId (passed by the post-creation background discovery
   // call) wins over "whatever's active right now" — pins this write to the
@@ -213,13 +202,11 @@ export async function POST(req: NextRequest) {
   const tavilyKeyRow = db.prepare("SELECT value FROM settings WHERE key = 'tavily_api_key'").get() as
     | { value: string }
     | undefined;
-  // Only pass the key through when this provider's driver actually implements
-  // tool-calling — otherwise the system prompt would claim search access the
-  // model never really gets.
-  const tavilyApiKey = tavilyKeyRow?.value && providerSupportsTools(providerId) ? tavilyKeyRow.value : undefined;
+  // Tavily is queried directly (no model needed), so it no longer depends on the provider's tool support.
+  const tavilyApiKey = tavilyKeyRow?.value || undefined;
 
   try {
-    const agent = new CompetitorDiscoveryAgent(driver, keyRow.api_key || "", keyRow.base_url ?? undefined);
+    const agent = new CompetitorDiscoveryAgent(driver && model && llmConfigured ? driver : null, keyRow?.api_key || "", keyRow?.base_url ?? undefined);
     const { candidates, usedWebSearch } = await agent.discover({
       projectName: project.name,
       url: project.url,
@@ -230,6 +217,7 @@ export async function POST(req: NextRequest) {
       marketingStrategy,
       model,
       tavilyApiKey,
+      llmSupportsTools: providerId ? providerSupportsTools(providerId) : false,
     });
 
     if (candidates.length === 0) {
