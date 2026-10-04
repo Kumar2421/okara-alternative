@@ -73,12 +73,9 @@ async function maybeDiscoverCompetitors(
     const toggle = settingsData.settings?.find((s: { key: string; value: string }) => s.key === "auto_discover_competitors");
     if (toggle?.value === "0") return false;
 
-    if (!primaryModel) {
-      log("Skipping competitor discovery — connect a model in Settings to enable it.");
-      return false;
-    }
-    const providerId = findProviderForModel(primaryModel);
-    if (!providerId) return false;
+    // A model is optional: a small web search based on the product finds the
+    // competitors on its own, and a connected model only refines the result.
+    const providerId = primaryModel ? findProviderForModel(primaryModel) : null;
 
     log("Looking for real competitors...");
     // Explicit projectId — this runs as a background continuation after
@@ -90,7 +87,7 @@ async function maybeDiscoverCompetitors(
     const res = await fetch("/api/project/competitors/discover", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: primaryModel, providerId, projectId }),
+      body: JSON.stringify({ model: primaryModel ?? undefined, providerId: providerId ?? undefined, projectId }),
     });
 
     if (!res.ok) {

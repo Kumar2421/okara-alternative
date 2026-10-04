@@ -1,0 +1,133 @@
+export type SearchHit = { title: string; url: string; content: string };
+
+export type CompetitorCandidate = { domain: string; reason: string };
+
+/** Review sites, marketplaces, social, news and dev platforms: they list competitors, they are not competitors. */
+const NOT_COMPETITORS = new Set([
+  "g2.com", "capterra.com", "getapp.com", "softwareadvice.com", "trustradius.com", "trustpilot.com",
+  "sourceforge.net", "alternativeto.net", "producthunt.com", "saasworthy.com", "slashdot.org",
+  "reddit.com", "quora.com", "medium.com", "substack.com", "youtube.com", "linkedin.com",
+  "facebook.com", "instagram.com", "twitter.com", "x.com", "tiktok.com", "pinterest.com",
+  "wikipedia.org", "github.com", "gitlab.com", "stackoverflow.com", "news.ycombinator.com",
+  "forbes.com", "techcrunch.com", "techradar.com", "pcmag.com", "zdnet.com", "cnet.com",
+  "gartner.com", "crunchbase.com", "similarweb.com", "appsumo.com", "zapier.com",
+  "google.com", "apple.com", "amazon.com", "play.google.com", "apps.apple.com", "chromewebstore.google.com",
+  "blogspot.com", "wordpress.com", "wixsite.com", "notion.site", "ghost.io",
+]);
+
+const COMPARISON_PATH = /alternative|compar|\bvs\b|versus|competitor/i;
+const DOMAIN_IN_TEXT = /\b((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:com|io|ai|co|app|dev|net|org|so|xyz))\b/gi;
+
+const MAX_CANDIDATES = 12;
+const MIN_SCORE = 2;
+
+export function normalizeHost(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .replace(/[/?#].*$/, "")
+    .replace(/:\d+$/, "");
+}
+
+function isExcluded(host: string, ownHost: string): boolean {
+  if (!host || !host.includes(".") || host === ownHost || host.endsWith(`.${ownHost}`)) return true;
+  for (const blocked of NOT_COMPETITORS) {
+    if (host === blocked || host.endsWith(`.${blocked}`)) return true;
+  }
+  return false;
+}
+
+/** The queries that surface real competitors: comparison and "alternatives" searches for the product. */
+export function buildDiscoveryQueries(projectName: string, metaTitle: string): string[] {
+  const name = projectName.trim();
+  const queries = [`${name} alternatives`, `${name} competitors`, `${name} vs`, `alternatives to ${name}`];
+  // A tagline like "Marlo - AI SEO platform" carries the category; drop the brand to get "AI SEO platform".
+  const category = metaTitle
+    .replace(new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "ig"), "")
+    .replace(/[|\-–—:·•]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (category.length >= 6 && category.length <= 80) queries.push(`best ${category} alternatives`);
+  return queries.filter((q) => q.length > 0);
+}
+
+type Signal = { score: number; queries: Set<number>; mentionedIn: Set<number>; comparisonPage: boolean };
+
+/**
+ * Turn raw web-search results into competitor candidates with no AI.
+ *
+ * Two signals, both from real results:
+ * - a company's own site appearing for "<product> alternatives/vs" searches
+ *   (extra weight when the page itself is a comparison page);
+ * - a company's domain written inside review/listicle snippets (which
+ *   themselves are never candidates).
+ * A domain must be supported by at least two signals, so a single stray
+ * result is not enough. Every candidate is still fetched and verified by the
+ * caller before it is saved.
+ */
+export function extractCompetitorCandidates(resultSets: SearchHit[][], ownDomain: string): CompetitorCandidate[] {
+  const own = normalizeHost(ownDomain);
+  const signals = new Map<string, Signal>();
+  const bump = (host: string): Signal => {
+    let s = signals.get(host);
+    if (!s) {
+      s = { score: 0, queries: new Set(), mentionedIn: new Set(), comparisonPage: false };
+      signals.set(host, s);
+    }
+    return s;
+  };
+
+  let hitId = 0;
+  resultSets.forEach((hits, queryIndex) => {
+    for (const hit of hits) {
+      hitId += 1;
+      const host = normalizeHost(hit.url);
+
+      if (!isExcluded(host, own)) {
+        const s = bump(host);
+        if (!s.queries.has(queryIndex)) {
+          s.queries.add(queryIndex);
+          s.score += 1;
+        }
+        if (!s.comparisonPage && COMPARISON_PATH.test(`${hit.url} ${hit.title}`)) {
+          s.comparisonPage = true;
+          s.score += 1;
+        }
+      }
+
+      // Domains named in the text of the result (typical for listicle / review snippets).
+      const seenInHit = new Set<string>();
+      for (const match of hit.content.matchAll(DOMAIN_IN_TEXT)) {
+        const mentioned = normalizeHost(match[1]);
+        if (mentioned === host || seenInHit.has(mentioned) || isExcluded(mentioned, own)) continue;
+        seenInHit.add(mentioned);
+        const s = bump(mentioned);
+        if (!s.mentionedIn.has(hitId)) {
+          s.mentionedIn.add(hitId);
+          s.score += 1;
+        }
+      }
+    }
+  });
+
+  return [...signals.entries()]
+    .filter(([, s]) => s.score >= MIN_SCORE)
+    .sort((a, b) => b[1].score - a[1].score || a[0].localeCompare(b[0]))
+    .slice(0, MAX_CANDIDATES)
+    .map(([domain, s]) => ({ domain, reason: describe(s) }));
+}
+
+function describe(s: Signal): string {
+  const parts: string[] = [];
+  if (s.queries.size > 0) {
+    parts.push(`appeared in ${s.queries.size} competitor-style search${s.queries.size === 1 ? "" : "es"}`);
+  }
+  if (s.comparisonPage) parts.push("has a comparison page");
+  if (s.mentionedIn.size > 0) {
+    parts.push(`named in ${s.mentionedIn.size} review or comparison result${s.mentionedIn.size === 1 ? "" : "s"}`);
+  }
+  const text = parts.join(", ");
+  return text.charAt(0).toUpperCase() + text.slice(1) + ".";
+}

@@ -124,15 +124,8 @@ export default function ContextPanel({
   }
 
   async function handleDiscoverCompetitors() {
-    if (!primaryModel) {
-      show("No primary model selected. Configure LLM Providers in Settings.");
-      return;
-    }
-    const providerId = findProviderForModel(primaryModel);
-    if (!providerId) {
-      show("Could not determine provider for the selected model.");
-      return;
-    }
+    // A model is optional: web search finds competitors on its own, a model only refines them.
+    const providerId = primaryModel ? findProviderForModel(primaryModel) : null;
 
     setDiscovering(true);
     log("Looking for real competitors...");
@@ -140,7 +133,7 @@ export default function ContextPanel({
       const res = await fetch("/api/project/competitors/discover", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: primaryModel, providerId }),
+        body: JSON.stringify({ model: primaryModel ?? undefined, providerId: providerId ?? undefined }),
       });
       const data = await res.json();
       if (!res.ok) {
