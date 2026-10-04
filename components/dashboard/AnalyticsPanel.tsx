@@ -29,6 +29,66 @@ const INTENT_LABELS: Record<SearchIntent, string> = {
   informational: "General questions",
 };
 
+type SearchHistoryMeta = { capturedAt: string; days: number } | null;
+
+function timeAgo(iso: string): string {
+  const minutes = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  if (minutes < 2) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours}h ago`;
+  return `${Math.round(hours / 24)} days ago`;
+}
+
+/** Shows how fresh the saved search history is and lets the user capture a new snapshot now. */
+function SearchHistoryBar() {
+  const [meta, setMeta] = useState<SearchHistoryMeta | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    fetch("/api/agents/analytics/search/refresh")
+      .then((r) => (r.ok ? r.json() : { snapshot: null }))
+      .then((data) => setMeta(data.snapshot ?? null))
+      .catch(() => setMeta(null));
+  }, []);
+  useEffect(load, [load]);
+
+  const refresh = () => {
+    setBusy(true);
+    setError(null);
+    fetch("/api/agents/analytics/search/refresh", { method: "POST" })
+      .then(async (r) => {
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) setError(data.error ?? "Could not refresh search data.");
+        else load();
+      })
+      .catch(() => setError("Could not refresh search data."))
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <div className="mb-4 flex items-center justify-between gap-3 text-[11px] text-gray-500">
+      <span>
+        {meta === undefined
+          ? "Checking saved history…"
+          : meta
+            ? `Search history saved ${timeAgo(meta.capturedAt)} · ${meta.days} ${meta.days === 1 ? "day" : "days"} of history`
+            : "No search history saved yet. Refresh to start tracking changes over time."}
+        {error && <span className="ml-2 text-amber-600">⚠ {error}</span>}
+      </span>
+      <button
+        type="button"
+        onClick={refresh}
+        disabled={busy}
+        className="shrink-0 rounded-md border border-gray-200 px-2 py-1 text-[11px] font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+      >
+        {busy ? "Refreshing…" : "Refresh now"}
+      </button>
+    </div>
+  );
+}
+
 function SearchThemesCard({ search }: { search: SearchInsights }) {
   if (search.analysedQueries === 0) return null;
   return (
@@ -720,6 +780,8 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
                     </div>
                   </div>
                 )}
+
+                <SearchHistoryBar />
 
                 <div className="mb-5 grid grid-cols-3 gap-3">
                   <div className="rounded-lg border border-gray-200 bg-white p-3">

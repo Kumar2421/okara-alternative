@@ -174,6 +174,17 @@ function init(): Database.Database {
       checked_at TEXT NOT NULL
     );
 
+    -- One compact Search Console snapshot per project per day (see
+    -- lib/domain/search/searchSnapshot.ts). History is what trends and
+    -- before/after impact are computed from; pruned on every save.
+    CREATE TABLE IF NOT EXISTS search_snapshots (
+      project_id    TEXT NOT NULL,
+      snapshot_date TEXT NOT NULL,
+      payload       TEXT NOT NULL,
+      captured_at   TEXT NOT NULL,
+      PRIMARY KEY (project_id, snapshot_date)
+    );
+
     -- Real leads (outreach prospects) — row-per-lead, not a JSON blob, since
     -- per-row state (email sent/not, notes) is coming in a later phase. Every
     -- row must carry a real source_url it was extracted from; email is
