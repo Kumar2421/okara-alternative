@@ -10,6 +10,11 @@ import { useTerminalLog } from "@/lib/terminal-log-store";
 import ComposeEmailModal from "./ComposeEmailModal";
 import GmailOutreachBar from "./leads/GmailOutreachBar";
 import { useGmailStatus } from "./leads/useGmailStatus";
+import { useLeadProfile } from "./leads/useLeadProfile";
+import LeadProfileWizard from "./leads/LeadProfileWizard";
+import LeadProfileSearch from "./leads/LeadProfileSearch";
+import { SkeletonCard } from "@/components/shared/Skeleton";
+import type { LeadSearchTarget } from "@/lib/domain/leads/leadProfile";
 
 type Lead = {
   id: string;
@@ -44,6 +49,9 @@ export default function LeadsPanel({ open, onToggle }: { open: boolean; onToggle
   const [category, setCategory] = useState("");
   const [bizLocation, setBizLocation] = useState("");
   const gmail = useGmailStatus();
+  const leadProfile = useLeadProfile();
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [wizardDismissed, setWizardDismissed] = useState(false);
   const [googleCloudConnected, setGoogleCloudConnected] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
   const [checkingReplies, setCheckingReplies] = useState(false);
@@ -143,8 +151,9 @@ export default function LeadsPanel({ open, onToggle }: { open: boolean; onToggle
     }
   }
 
-  async function handleSearch() {
-    if (!role.trim() && !companyOrIndustry.trim()) {
+  async function handleSearch(override?: LeadSearchTarget & { useProfile?: boolean }) {
+    const q = override ?? { role, companyOrIndustry, location };
+    if (!q.role.trim() && !q.companyOrIndustry.trim()) {
       show("Enter at least a role or a company/industry to search for.");
       return;
     }
@@ -159,7 +168,7 @@ export default function LeadsPanel({ open, onToggle }: { open: boolean; onToggle
     }
 
     setSearching(true);
-    const filters = [role, companyOrIndustry, location].filter(Boolean).join(" · ") || "(no filters)";
+    const filters = [q.role, q.companyOrIndustry, q.location].filter(Boolean).join(" · ") || "(no filters)";
     log(`Searching leads: ${filters}...`);
     log("Running real web searches (Tavily) and extracting real people from the results...");
     log("Then SMTP-verifying a guessed email for any lead search didn't find one for — this can take a minute...");
@@ -167,7 +176,7 @@ export default function LeadsPanel({ open, onToggle }: { open: boolean; onToggle
       const res = await fetch("/api/agents/leads/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role, companyOrIndustry, location, model: primaryModel, providerId }),
+        body: JSON.stringify({ role: q.role, companyOrIndustry: q.companyOrIndustry, location: q.location, model: primaryModel, providerId, useProfile: override?.useProfile === true }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -191,6 +200,27 @@ export default function LeadsPanel({ open, onToggle }: { open: boolean; onToggle
     } finally {
       setSearching(false);
     }
+  }
+
+  /** Open the guided setup once, automatically, when a project has no confirmed profile. */
+  const needsProfile = !leadProfile.isLoading && !leadProfile.isError && !leadProfile.confirmed && Boolean(project);
+  const showWizard = wizardOpen || (needsProfile && mode === "person" && !wizardDismissed);
+
+  function closeWizard() {
+    setWizardOpen(false);
+    setWizardDismissed(true);
+  }
+
+  function confirmProfile(profile: NonNullable<typeof leadProfile.profile>) {
+    leadProfile.save.mutate(
+      { profile, confirm: true },
+      {
+        onSuccess: ({ profile: saved }) => {
+          closeWizard();
+          void handleSearch({ role: saved.roles[0] ?? "", companyOrIndustry: saved.industries[0] ?? "", location: saved.locations[0] ?? "", useProfile: true });
+        },
+      },
+    );
   }
 
   async function handleBizSearch() {
@@ -288,35 +318,72 @@ export default function LeadsPanel({ open, onToggle }: { open: boolean; onToggle
 
         {mode === "person" ? (
           <>
-            <input
-              value={role}
-              onChange={(e) => setRole(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-              placeholder="Role — e.g. VP Marketing"
-              className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-[12px] text-gray-800 placeholder:text-gray-400"
-            />
-            <input
-              value={companyOrIndustry}
-              onChange={(e) => setCompanyOrIndustry(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-              placeholder="Company or industry — e.g. B2B SaaS"
-              className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-[12px] text-gray-800 placeholder:text-gray-400"
-            />
-            <input
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-              placeholder="Location — e.g. Austin, TX"
-              className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-[12px] text-gray-800 placeholder:text-gray-400"
-            />
-            <button
-              onClick={handleSearch}
-              disabled={searching || !project}
-              className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#111111] py-1.5 text-[13px] font-medium text-white hover:bg-black disabled:opacity-50"
-            >
-              {searching ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
-              {searching ? "Searching..." : "Search Leads"}
-            </button>
+            {leadProfile.isLoading ? (
+              <SkeletonCard rows={3} />
+            ) : leadProfile.isError ? (
+              <p className="text-[11px] text-amber-600">⚠ Couldn&apos;t load your lead profile. Try again in a moment.</p>
+            ) : leadProfile.confirmed && leadProfile.profile ? (
+              <>
+                <LeadProfileSearch
+                  key={leadProfile.profile.confirmedAt}
+                  profile={leadProfile.profile}
+                  searching={searching}
+                  disabled={!project}
+                  onEdit={() => setWizardOpen(true)}
+                  onSearch={(target) => handleSearch({ ...target, useProfile: true })}
+                />
+                <details className="group rounded-lg border border-gray-100 px-2.5 py-1.5">
+                  <summary className="cursor-pointer text-[11px] text-gray-500 hover:text-gray-800">Custom search</summary>
+                  <div className="mt-2 space-y-2">
+                <input
+                  value={role}
+                  onChange={(e) => setRole(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                  placeholder="Role — e.g. VP Marketing"
+                  className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-[12px] text-gray-800 placeholder:text-gray-400"
+                />
+                <input
+                  value={companyOrIndustry}
+                  onChange={(e) => setCompanyOrIndustry(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                  placeholder="Company or industry — e.g. B2B SaaS"
+                  className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-[12px] text-gray-800 placeholder:text-gray-400"
+                />
+                <input
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                  placeholder="Location — e.g. Austin, TX"
+                  className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-[12px] text-gray-800 placeholder:text-gray-400"
+                />
+                <button
+                  onClick={() => handleSearch()}
+                  disabled={searching || !project}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#111111] py-1.5 text-[13px] font-medium text-white hover:bg-black disabled:opacity-50"
+                >
+                  {searching ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
+                  {searching ? "Searching..." : "Search Leads"}
+                </button>
+                  </div>
+                </details>
+              </>
+            ) : (
+              <div className="rounded-xl border border-dashed border-gray-300 p-4 text-center">
+                <Users size={18} className="mx-auto mb-2 text-gray-300" />
+                <p className="text-[13px] font-semibold text-gray-900">Tell us who you sell to</p>
+                <p className="mx-auto mt-1 max-w-[240px] text-[12px] leading-4 text-gray-500">
+                  A two-minute profile so every lead fits your product, not just a job title.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setWizardOpen(true)}
+                  disabled={!project}
+                  className="mt-3 rounded-lg bg-[#111111] px-4 py-1.5 text-[12px] font-medium text-white hover:bg-black disabled:opacity-50"
+                >
+                  Set up lead profile
+                </button>
+              </div>
+            )}
           </>
         ) : (
           <>
@@ -359,6 +426,18 @@ export default function LeadsPanel({ open, onToggle }: { open: boolean; onToggle
       </div>
 
       <GmailOutreachBar />
+
+      {showWizard && mode === "person" && (
+        <LeadProfileWizard
+          key={leadProfile.profile ? "edit" : "new"}
+          open
+          onClose={closeWizard}
+          initial={leadProfile.profile ?? leadProfile.suggestion}
+          saving={leadProfile.save.isPending}
+          error={leadProfile.save.error instanceof Error ? leadProfile.save.error.message : null}
+          onConfirm={confirmProfile}
+        />
+      )}
 
       {selected.size > 0 && (
         <div className="flex shrink-0 items-center justify-between border-b border-gray-200 bg-gray-50 px-3 py-2">

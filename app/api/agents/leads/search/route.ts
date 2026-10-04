@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getDriver } from "@/lib/llm";
 import { LeadsAgent } from "@/lib/domain/leads/LeadsAgent";
+import { getLeadProfile } from "@/lib/domain/leads/leadProfileStore";
+import { getLeadProfile as getLeadProfileSupabase } from "@/lib/domain/leads/leadProfileStoreSupabase";
 import { verifyMissingEmails } from "@/lib/domain/leads/verifyMissingEmails";
 import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
 import { FEATURES } from "@/lib/features";
@@ -135,7 +137,8 @@ export async function POST(req: NextRequest) {
     try {
       const agent = new LeadsAgent(driver, providerApiKey, providerConn?.base_url ?? undefined);
       const query = `${role} ${companyOrIndustry} ${location}`.trim();
-      const leads = await agent.search({ role, companyOrIndustry, location }, tavilyKey, model, google);
+      const profile = body?.useProfile === true ? await getLeadProfileSupabase(db, user.id, activeId) : null;
+      const leads = await agent.search({ role, companyOrIndustry, location }, tavilyKey, model, google, profile ?? undefined);
 
       const verifiedEmails = await verifyMissingEmails(leads);
 
@@ -204,7 +207,8 @@ export async function POST(req: NextRequest) {
   try {
     const agent = new LeadsAgent(driver, keyRow.api_key, keyRow.base_url ?? undefined);
     const query = `${role} ${companyOrIndustry} ${location}`.trim();
-    const leads = await agent.search({ role, companyOrIndustry, location }, tavilyKeyRow.value, model, google);
+    const profile = body?.useProfile === true ? getLeadProfile(db, activeId) : null;
+    const leads = await agent.search({ role, companyOrIndustry, location }, tavilyKeyRow.value, model, google, profile ?? undefined);
 
     // Tier 1: for leads search left with no email, try a real SMTP-verified
     // guess (see emailVerify.ts) — never overrides an email search already
