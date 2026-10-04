@@ -149,3 +149,40 @@ test("buildOpportunities on an empty snapshot returns empty groups", () => {
   const result = buildOpportunities(payload([], []));
   assert.deepEqual(result, { ranking: [], ctr: [], declining: [], newQueries: [], lostQueries: [], changes: { up: 0, down: 0, new: 0, lost: 0 } });
 });
+
+import { pickHighlights } from "../lib/domain/search/highlights.ts";
+import type { OpportunityGroups, SearchOpportunity } from "../lib/domain/search/searchOpportunities.ts";
+
+function opp(type: SearchOpportunity["type"], query: string): SearchOpportunity {
+  return { type, query, pageUrl: null, score: 1, reasons: ["r"], metrics: { clicks: 0, impressions: 1, ctr: 0, position: 1 }, previous: null };
+}
+
+const noChanges = { up: 0, down: 0, new: 0, lost: 0 };
+
+test("pickHighlights puts getting-worse first, then snippet wins, then closest to page one", () => {
+  const groups: OpportunityGroups = {
+    ranking: [opp("ranking", "r1"), opp("ranking", "r2")],
+    ctr: [opp("ctr", "c1")],
+    declining: [opp("declining", "d1")],
+    newQueries: [opp("new_query", "n1")],
+    lostQueries: [opp("lost_query", "l1")],
+    changes: noChanges,
+  };
+  assert.deepEqual(pickHighlights(groups).map((o) => o.query), ["d1", "c1", "r1"]);
+});
+
+test("pickHighlights never repeats a query and fills from ranking on a quiet month", () => {
+  const groups: OpportunityGroups = {
+    ranking: [opp("ranking", "same"), opp("ranking", "r2"), opp("ranking", "r3")],
+    ctr: [opp("ctr", "same")],
+    declining: [],
+    newQueries: [],
+    lostQueries: [],
+    changes: noChanges,
+  };
+  assert.deepEqual(pickHighlights(groups).map((o) => o.query), ["same", "r2", "r3"]);
+});
+
+test("pickHighlights returns nothing when there is nothing to show", () => {
+  assert.deepEqual(pickHighlights({ ranking: [], ctr: [], declining: [], newQueries: [], lostQueries: [], changes: noChanges }), []);
+});
