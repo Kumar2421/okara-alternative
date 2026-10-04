@@ -75,3 +75,14 @@ body {
 .okara-scroll-dark::-webkit-scrollbar-track {
   background: transparent;
 }
+
+@keyframes slideIn {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}

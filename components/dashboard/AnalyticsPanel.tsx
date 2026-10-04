@@ -13,130 +13,9 @@ import type { GeoCitationRow } from "@/lib/domain/geo/GEOAgent";
 import { useProject } from "@/lib/project-store";
 import { useTerminalLog } from "@/lib/terminal-log-store";
 import { FEATURES } from "@/lib/features";
-import type { SearchInsights, SearchIntent } from "@/lib/domain/search/types";
-import { SEARCH_REFRESHED_EVENT, SearchOpportunitiesCard } from "@/components/dashboard/SearchOpportunitiesCard";
-
-const INTENT_LABELS: Record<SearchIntent, string> = {
-  recommendation: "Looking for the best option",
-  alternative: "Looking for alternatives",
-  comparison: "Comparing options",
-  pricing: "Asking about price",
-  review: "Reading reviews",
-  how_to: "Learning how to do something",
-  problem: "Trying to fix a problem",
-  audience: "Searching for their kind of business",
-  commercial: "Shopping for a tool or service",
-  brand: "Looking for you by name",
-  informational: "General questions",
-};
-
-type SearchHistoryMeta = { capturedAt: string; days: number } | null;
-
-function timeAgo(iso: string): string {
-  const minutes = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
-  if (minutes < 2) return "just now";
-  if (minutes < 60) return `${minutes} min ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 48) return `${hours}h ago`;
-  return `${Math.round(hours / 24)} days ago`;
-}
-
-/** Shows how fresh the saved search history is and lets the user capture a new snapshot now. */
-function SearchHistoryBar() {
-  const [meta, setMeta] = useState<SearchHistoryMeta | undefined>(undefined);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(() => {
-    fetch("/api/agents/analytics/search/refresh")
-      .then((r) => (r.ok ? r.json() : { snapshot: null }))
-      .then((data) => setMeta(data.snapshot ?? null))
-      .catch(() => setMeta(null));
-  }, []);
-  useEffect(load, [load]);
-
-  const refresh = () => {
-    setBusy(true);
-    setError(null);
-    fetch("/api/agents/analytics/search/refresh", { method: "POST" })
-      .then(async (r) => {
-        const data = await r.json().catch(() => ({}));
-        if (!r.ok) setError(data.error ?? "Could not refresh search data.");
-        else {
-          load();
-          window.dispatchEvent(new Event(SEARCH_REFRESHED_EVENT));
-        }
-      })
-      .catch(() => setError("Could not refresh search data."))
-      .finally(() => setBusy(false));
-  };
-
-  return (
-    <div className="mb-4 flex items-center justify-between gap-3 text-[11px] text-gray-500">
-      <span>
-        {meta === undefined
-          ? "Checking saved history…"
-          : meta
-            ? `Search history saved ${timeAgo(meta.capturedAt)} · ${meta.days} ${meta.days === 1 ? "day" : "days"} of history`
-            : "No search history saved yet. Refresh to start tracking changes over time."}
-        {error && <span className="ml-2 text-amber-600">⚠ {error}</span>}
-      </span>
-      <button
-        type="button"
-        onClick={refresh}
-        disabled={busy}
-        className="shrink-0 rounded-md border border-gray-200 px-2 py-1 text-[11px] font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-      >
-        {busy ? "Refreshing…" : "Refresh now"}
-      </button>
-    </div>
-  );
-}
-
-function SearchThemesCard({ search }: { search: SearchInsights }) {
-  if (search.analysedQueries === 0) return null;
-  return (
-    <div className="mb-5 rounded-xl border border-gray-200 bg-white p-4">
-      <h4 className="text-[12px] font-semibold text-gray-700">What people search for</h4>
-      <p className="mb-3 text-[11px] text-gray-500">
-        Grouped by what the searcher is trying to do, from your top {search.analysedQueries.toLocaleString()} searches.
-      </p>
-      <div className="space-y-2">
-        {search.intents.slice(0, 6).map((intent) => (
-          <div key={intent.intent}>
-            <div className="flex justify-between text-[12px] text-gray-700">
-              <span>{INTENT_LABELS[intent.intent]}</span>
-              <span className="text-gray-500">
-                {Math.round(intent.share * 100)}% · {intent.impressions.toLocaleString()} views
-              </span>
-            </div>
-            <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-gray-100">
-              <div className="h-full rounded-full bg-gray-800" style={{ width: `${Math.max(intent.share * 100, 2)}%` }} />
-            </div>
-          </div>
-        ))}
-      </div>
-      {search.themes.length > 0 && (
-        <>
-          <h5 className="mb-1 mt-4 text-[12px] font-semibold text-gray-700">Topics people ask about</h5>
-          <ul className="divide-y divide-gray-100">
-            {search.themes.slice(0, 5).map((theme) => (
-              <li key={theme.label} className="flex items-baseline justify-between gap-3 py-1.5 text-[12px]">
-                <span className="min-w-0 truncate text-gray-800" title={theme.examples.join(" · ")}>
-                  {theme.label}
-                  {theme.queries > 1 && <span className="ml-1 text-gray-400">+{theme.queries - 1} similar</span>}
-                </span>
-                <span className="shrink-0 text-gray-500">
-                  {theme.impressions.toLocaleString()} views · you rank ~{theme.position.toFixed(1)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-    </div>
-  );
-}
+import type { SearchInsights } from "@/lib/domain/search/types";
+import SearchHistoryBar from "@/components/dashboard/search/SearchHistoryBar";
+import SearchInsightsSection from "@/components/dashboard/search/SearchInsightsSection";
 
 const TABS = ["SEO", "Links", "Technical", "GEO", "Traffic", "Findings"] as const;
 type Tab = (typeof TABS)[number];
@@ -822,9 +701,7 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
                   <div className="mb-5 text-[11px] text-amber-600">⚠ Google Analytics: {trafficResult.ga4Error}</div>
                 )}
 
-                {trafficResult.search && <SearchThemesCard search={trafficResult.search} />}
-
-                <SearchOpportunitiesCard />
+                <SearchInsightsSection search={trafficResult.search ?? null} topQueries={trafficResult.topQueries} />
 
                 <h4 className="mb-2 text-[12px] font-semibold text-gray-700">Top Queries</h4>
                 <div className="mt-6">
