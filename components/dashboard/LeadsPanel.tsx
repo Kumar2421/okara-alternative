@@ -8,6 +8,8 @@ import { useProject } from "@/lib/project-store";
 import { useProviders, findProviderForModel } from "@/lib/providers-store";
 import { useTerminalLog } from "@/lib/terminal-log-store";
 import ComposeEmailModal from "./ComposeEmailModal";
+import GmailOutreachBar from "./leads/GmailOutreachBar";
+import { useGmailStatus } from "./leads/useGmailStatus";
 
 type Lead = {
   id: string;
@@ -41,7 +43,7 @@ export default function LeadsPanel({ open, onToggle }: { open: boolean; onToggle
   const [location, setLocation] = useState("");
   const [category, setCategory] = useState("");
   const [bizLocation, setBizLocation] = useState("");
-  const [gmailConnected, setGmailConnected] = useState(false);
+  const gmail = useGmailStatus();
   const [googleCloudConnected, setGoogleCloudConnected] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
   const [checkingReplies, setCheckingReplies] = useState(false);
@@ -76,7 +78,6 @@ export default function LeadsPanel({ open, onToggle }: { open: boolean; onToggle
     fetch("/api/settings")
       .then((r) => r.json())
       .then((data: { settings: { key: string; value: string }[] }) => {
-        setGmailConnected(!!data.settings?.find((s) => s.key === "gmail_email")?.value);
         setGoogleCloudConnected(!!data.settings?.find((s) => s.key === "google_cloud_api_key")?.value);
       })
       .catch(() => {});
@@ -357,15 +358,17 @@ export default function LeadsPanel({ open, onToggle }: { open: boolean; onToggle
         )}
       </div>
 
+      <GmailOutreachBar />
+
       {selected.size > 0 && (
         <div className="flex shrink-0 items-center justify-between border-b border-gray-200 bg-gray-50 px-3 py-2">
           <span className="text-[12px] text-gray-600">{selected.size} selected</span>
           <button
             onClick={() => setComposeOpen(true)}
-            disabled={!gmailConnected}
-            title={gmailConnected ? "Compose an outreach email" : "Connect Gmail in Settings → API Credentials first"}
+            disabled={!gmail.canSend}
+            title={gmail.canSend ? "Compose an outreach email" : "Connect Gmail above first"}
             className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-medium ${
-              gmailConnected ? "border-gray-200 text-gray-700 hover:bg-gray-100" : "border-gray-200 text-gray-400"
+              gmail.canSend ? "border-gray-200 text-gray-700 hover:bg-gray-100" : "border-gray-200 text-gray-400"
             }`}
           >
             <Mail size={11} /> Email Selected
@@ -516,7 +519,7 @@ export default function LeadsPanel({ open, onToggle }: { open: boolean; onToggle
       <div className="flex shrink-0 items-center justify-between border-t border-gray-200 px-4 py-2.5 text-[11px] text-gray-400">
         <span>Emails are found in real search results or SMTP-verified — never shown unverified.</span>
         <div className="flex items-center gap-3">
-          {gmailConnected && (
+          {gmail.canRead && (
             <button
               onClick={handleCheckReplies}
               disabled={checkingReplies}

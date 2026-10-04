@@ -23,7 +23,7 @@ async function getValidGmailAccessTokenSupabase(db: SupabaseClient, userId: stri
     .maybeSingle();
 
   if (!conn?.access_token_secret_id) {
-    throw new Error("Gmail isn't connected — connect it in Settings → API Credentials.");
+    throw new Error("Gmail isn't connected — use Connect Gmail at the top of the Leads panel.");
   }
 
   const expiresAt = conn.token_expiry ? new Date(conn.token_expiry).getTime() : 0;
@@ -33,11 +33,11 @@ async function getValidGmailAccessTokenSupabase(db: SupabaseClient, userId: stri
   }
 
   if (!conn.refresh_token_secret_id) {
-    throw new Error("Gmail isn't connected — connect it in Settings → API Credentials.");
+    throw new Error("Gmail isn't connected — use Connect Gmail at the top of the Leads panel.");
   }
   const { data: refreshSecret } = await db.rpc("vault_get_secret", { p_id: conn.refresh_token_secret_id });
   const refreshToken = refreshSecret as string;
-  if (!refreshToken) throw new Error("Gmail isn't connected — connect it in Settings → API Credentials.");
+  if (!refreshToken) throw new Error("Gmail isn't connected — use Connect Gmail at the top of the Leads panel.");
 
   const clientId = process.env.GMAIL_CLIENT_ID;
   const clientSecret = process.env.GMAIL_CLIENT_SECRET;
@@ -80,7 +80,7 @@ async function listRepliesSupabase(accessToken: string, threadId: string, ourMes
   );
   if (!res.ok) {
     if (res.status === 403) {
-      throw new Error("Gmail rejected this — reconnect Gmail in Settings → API Credentials to enable reply tracking.");
+      throw new Error("Gmail rejected this — reconnect Gmail and allow reading replies to enable reply tracking.");
     }
     const detail = await res.text().catch(() => "");
     throw new Error(`Gmail thread read failed: HTTP ${res.status}${detail ? ` — ${detail.slice(0, 200)}` : ""}`);
