@@ -17,5 +17,10 @@ export const qk = {
   traffic: (projectId: string | undefined) => [...scope(projectId), "traffic"] as const,
   googleResources: (projectId: string | undefined) => [...scope(projectId), "google-resources"] as const,
   searchHistory: (projectId: string | undefined) => [...scope(projectId), "search-history"] as const,
+  findings: (projectId: string | undefined) => [...scope(projectId), "findings"] as const,
+  findingRecommendations: (projectId: string | undefined, findingId: string) =>
+    [...scope(projectId), "findings", findingId, "recommendations"] as const,
+  findingActions: (projectId: string | undefined, findingId: string) =>
+    [...scope(projectId), "findings", findingId, "actions"] as const,
   searchOpportunities: (projectId: string | undefined) => [...scope(projectId), "search-opportunities"] as const,
 };
