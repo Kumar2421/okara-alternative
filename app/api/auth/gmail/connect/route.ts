@@ -1,3 +1,4 @@
+import { CREDENTIALS_PATH } from "@/lib/settingsPaths";
 import { NextRequest, NextResponse } from "next/server";
 import { buildAuthUrl } from "@/lib/domain/shared/gmailOAuth";
 import { createOAuthState } from "@/lib/domain/integrations/oauthState";
@@ -6,11 +7,11 @@ import { FEATURES } from "@/lib/features";
 
 export async function GET(req: NextRequest) {
   const redirectUri = `${req.nextUrl.origin}/api/auth/gmail/callback`;
-  const settingsUrl = `${req.nextUrl.origin}/settings/api-credentials`;
+  const settingsUrl = `${req.nextUrl.origin}${CREDENTIALS_PATH}`;
 
   try {
     if (FEATURES.PLATFORM_MODE) {
-      return NextResponse.redirect(`${req.nextUrl.origin}/settings/api-credentials?gmail_error=${encodeURIComponent("Hosted Gmail uses the platform Google sign-in. Use Connect with Google.")}`);
+      return NextResponse.redirect(`${req.nextUrl.origin}${CREDENTIALS_PATH}?gmail_error=${encodeURIComponent("Hosted Gmail uses the platform Google sign-in. Use Connect with Google.")}`);
     }
 
     const projectId = getActiveProjectId();

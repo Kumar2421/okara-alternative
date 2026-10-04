@@ -1,3 +1,4 @@
+import { CREDENTIALS_PATH } from "@/lib/settingsPaths";
 import { NextRequest, NextResponse } from "next/server";
 import { FEATURES } from "@/lib/features";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
@@ -21,7 +22,7 @@ import {
 import { consumeOAuthState as consumeOAuthStateSupabase } from "@/lib/domain/integrations/oauthStateSupabase";
 
 function redirectUrl(req: NextRequest, returnTo: "dashboard" | "settings", params: Record<string, string>) {
-  const base = returnTo === "dashboard" ? req.nextUrl.origin + "/dashboard" : req.nextUrl.origin + "/settings/api-credentials";
+  const base = returnTo === "dashboard" ? req.nextUrl.origin + "/dashboard" : req.nextUrl.origin + CREDENTIALS_PATH;
   const url = new URL(base);
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
   return url.toString();
@@ -30,7 +31,7 @@ function redirectUrl(req: NextRequest, returnTo: "dashboard" | "settings", param
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code");
   const state = req.nextUrl.searchParams.get("state");
-  const fallback = req.nextUrl.origin + "/settings/api-credentials";
+  const fallback = req.nextUrl.origin + CREDENTIALS_PATH;
 
   if (!code || !state) {
     return NextResponse.redirect(fallback + "?ga_error=" + encodeURIComponent("Invalid Google authorization response."));

@@ -1,5 +1,6 @@
 "use client";
 
+import { CREDENTIALS_PATH } from "@/lib/settingsPaths";
 import { useEffect, useState } from "react";
 import { Check, ExternalLink, AlertTriangle } from "lucide-react";
 import { useSearchParams } from "next/navigation";
@@ -88,7 +89,7 @@ export default function GmailCard() {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/api/auth/callback?next=/settings/api-credentials`,
+        redirectTo: `${window.location.origin}/api/auth/callback?next=${CREDENTIALS_PATH}`,
         scopes: GOOGLE_ANALYTICS_SCOPES,
         queryParams: { access_type: "offline", prompt: "consent" },
       },

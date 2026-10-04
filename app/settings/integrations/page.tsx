@@ -1,9 +1,12 @@
+import { CREDENTIALS_PATH } from "@/lib/settingsPaths";
 import { Info } from "lucide-react";
 import ComingSoonCard from "@/components/settings/ComingSoonCard";
 import GitHubCodeFixCard from "@/components/settings/GitHubCodeFixCard";
 import WordPressCard from "@/components/settings/WordPressCard";
 import XConnectCard from "@/components/settings/XConnectCard";
 import GoogleAnalyticsCard from "@/components/settings/GoogleAnalyticsCard";
+import GmailCard from "@/components/settings/GmailCard";
+import { FEATURES } from "@/lib/features";
 import { cmsIntegrations, socialIntegrations, codeRepoIntegrations } from "@/lib/mock-integrations";
 
 // Real, secure connections exist for WordPress (self-hosted), GitHub, and X
@@ -46,6 +49,18 @@ export default function IntegrationsPage() {
           i.id === "github-seo" ? <GitHubCodeFixCard key={i.id} /> : <ComingSoonCard key={i.id} name={i.name} desc={i.desc} icon={i.icon} color={i.color} />
         )}
       </div>
+
+      {FEATURES.PLATFORM_MODE && (
+        <>
+          <h2 className="text-[15px] font-semibold text-gray-900">Email outreach</h2>
+          <p className="mb-4 text-[13px] text-gray-500">
+            Connect Gmail to send and follow up on lead outreach from your own address.
+          </p>
+          <div className="mb-8">
+            <GmailCard />
+          </div>
+        </>
+      )}
 
       <h2 className="text-[15px] font-semibold text-gray-900">Analytics</h2>
       <p className="mb-4 text-[13px] text-gray-500">
