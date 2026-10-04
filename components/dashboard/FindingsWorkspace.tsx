@@ -1,23 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Check, ChevronRight, CircleDot, Loader2, RefreshCw } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Check, ChevronRight, CircleDot, Loader2, RefreshCw } from "lucide-react";
 import type { Finding, FindingStatus } from "@/lib/domain/findings/findingTypes";
-import type { Recommendation } from "@/lib/domain/recommendations/recommendationTypes";
-import type { Action } from "@/lib/domain/actions/actionTypes";
-import FindingActionsSection from "./FindingActionsSection";
-import { evidenceRowsForFinding, whyItMattersForFinding } from "@/lib/domain/findings/evidenceDisplay";
-
-const STATUS_ORDER: FindingStatus[] = ["new", "acknowledged", "fixing", "fixed", "verified"];
-
-const STATUS_LABEL: Record<FindingStatus, string> = {
-  new: "New",
-  acknowledged: "Acknowledged",
-  fixing: "Fixing",
-  fixed: "Fixed",
-  verified: "Verified",
-  failed: "Verification failed",
-};
+import { countFindings, findingTitle, pagePath } from "@/lib/domain/findings/findingDisplay";
+import SidePanel from "@/components/shared/SidePanel";
+import { SkeletonCard, SkeletonStats } from "@/components/shared/Skeleton";
+import FindingDetail, { STATUS_LABEL, severityClass, statusClass } from "./findings/FindingDetail";
+import { useFindings } from "./findings/useFindings";
 
 const STATUS_ACTION: Partial<Record<FindingStatus, { next: FindingStatus; label: string }>> = {
   new: { next: "acknowledged", label: "Acknowledge" },
@@ -26,391 +16,196 @@ const STATUS_ACTION: Partial<Record<FindingStatus, { next: FindingStatus; label:
   failed: { next: "fixing", label: "Resume fixing" },
 };
 
-function severityClass(severity: Finding["severity"]) {
-  if (severity === "critical") return "bg-red-50 text-red-700 border-red-200";
-  if (severity === "warning") return "bg-amber-50 text-amber-700 border-amber-200";
-  return "bg-gray-50 text-gray-600 border-gray-200";
+const CAN_RECHECK = new Set<FindingStatus>(["fixing", "fixed", "failed"]);
+
+function dotClass(severity: Finding["severity"]) {
+  return severity === "critical" ? "text-red-500" : severity === "warning" ? "text-amber-500" : "text-gray-400";
 }
 
-function statusClass(status: FindingStatus) {
-  if (status === "verified") return "bg-emerald-50 text-emerald-700 border-emerald-200";
-  if (status === "failed") return "bg-red-50 text-red-700 border-red-200";
-  if (status === "fixing") return "bg-blue-50 text-blue-700 border-blue-200";
-  return "bg-gray-50 text-gray-600 border-gray-200";
-}
-
-function EvidenceValue({ label, value }: { label: string; value: unknown }) {
-  if (value === null || value === undefined || value === "") return null;
+function Stat({ label, value, tone }: { label: string; value: number; tone?: "bad" | "good" }) {
+  const color = tone === "bad" && value > 0 ? "text-red-600" : tone === "good" && value > 0 ? "text-emerald-600" : "text-gray-900";
   return (
-    <div className="flex items-center justify-between gap-3 border-t border-gray-100 px-3 py-2 text-[12px] first:border-t-0">
-      <span className="text-gray-500">{label}</span>
-      <span className="max-w-[65%] truncate font-medium text-gray-800">
-        {typeof value === "boolean" ? (value ? "Yes" : "No") : String(value)}
-      </span>
+    <div className="rounded-xl border border-gray-200 bg-white p-3">
+      <div className="text-[10px] uppercase tracking-wide text-gray-400">{label}</div>
+      <div className={`mt-1 text-lg font-semibold ${color}`}>{value}</div>
     </div>
   );
 }
 
+/**
+ * Findings: a compact, prioritized list in the dashboard column; the full
+ * detail (evidence, what to do, tracked actions, progress) opens in a
+ * slide-over so it has room, with the main actions pinned at the bottom.
+ */
 export default function FindingsWorkspace() {
-  const [findings, setFindings] = useState<Finding[]>([]);
+  const { list, update } = useFindings();
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [verification, setVerification] = useState<"verified" | "failed" | null>(null);
-  const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
-  const [recommendationsLoading, setRecommendationsLoading] = useState(false);
-  const [actions, setActions] = useState<Action[]>([]);
-  const [actionsLoading, setActionsLoading] = useState(false);
-  const [actionBusy, setActionBusy] = useState<string | null>(null);
 
-  const selected = findings.find((finding) => finding.id === selectedId) ?? null;
+  const findings = useMemo(() => list.data ?? [], [list.data]);
+  const counts = useMemo(() => countFindings(findings), [findings]);
+  const selected = findings.find((f) => f.id === selectedId) ?? null;
 
-
-
-
-
-  useEffect(() => {
-    // No reset-to-[] on deselect: same reasoning as the actions effect above
-    // — this section only renders inside `{selected && (...)}`.
-    if (!selectedId) return;
-    let active = true;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setRecommendationsLoading(true);
-    fetch(`/api/agents/analytics/findings/recommendations?id=${encodeURIComponent(selectedId)}`)
-      .then(async (response) => {
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || "Failed to load recommendations.");
-        if (active) setRecommendations(Array.isArray(data.recommendations) ? data.recommendations : []);
-      })
-      .catch(() => {
-        if (active) setRecommendations([]);
-      })
-      .finally(() => {
-        if (active) setRecommendationsLoading(false);
-      });
-    return () => { active = false; };
-  }, [selectedId]);
-
-  useEffect(() => {
-    if (!selectedId) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setActions([]);
-      setActionsLoading(false);
-      return;
-    }
-
-    let active = true;
-    setActionsLoading(true);
-    fetch(`/api/agents/actions?findingId=${encodeURIComponent(selectedId)}`, { cache: "no-store" })
-      .then(async (response) => {
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || "Failed to load actions.");
-        if (active) setActions(Array.isArray(data.actions) ? data.actions : []);
-      })
-      .catch(() => {
-        if (active) setActions([]);
-      })
-      .finally(() => {
-        if (active) setActionsLoading(false);
-      });
-
-    return () => { active = false; };
-  }, [selectedId]);
-
-  const createTrackedAction = async (recommendation: Recommendation) => {
-    if (!selected) return;
-    setActionBusy(recommendation.id);
-    setError(null);
-    try {
-      const response = await fetch("/api/agents/actions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          findingId: selected.id,
-          recommendationId: recommendation.id,
-          title: recommendation.title,
-          target: recommendation.target,
-          parameters: {
-            implementation: recommendation.implementation,
-            evidence: recommendation.evidence,
-          },
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Failed to create action.");
-      if (data.action) setActions((current) => [data.action, ...current]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create action.");
-    } finally {
-      setActionBusy(null);
-    }
-  };
-
-  const cancelTrackedAction = async (action: Action) => {
-    setActionBusy(action.recommendationId ?? action.id);
-    setError(null);
-    try {
-      const response = await fetch("/api/agents/actions", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: action.id, status: "cancelled" }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Failed to cancel action.");
-      if (data.action) {
-        setActions((current) => current.map((item) => item.id === data.action.id ? data.action : item));
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to cancel action.");
-    } finally {
-      setActionBusy(null);
-    }
-  };
-
-  const counts = useMemo(() => ({
-    active: findings.filter((f) => !["verified"].includes(f.status)).length,
-    critical: findings.filter((f) => f.severity === "critical" && f.status !== "verified").length,
-    warning: findings.filter((f) => f.severity === "warning" && f.status !== "verified").length,
-    verified: findings.filter((f) => f.status === "verified").length,
-  }), [findings]);
-
-  const load = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/agents/analytics/findings");
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Failed to load findings.");
-      setFindings(Array.isArray(data.findings) ? data.findings : []);
-      setSelectedId((current) => current && data.findings.some((f: Finding) => f.id === current) ? current : data.findings[0]?.id ?? null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load findings.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    const handleFindingsUpdated = () => { void load(); };
-    window.addEventListener("marlo:findings-updated", handleFindingsUpdated);
-    return () => window.removeEventListener("marlo:findings-updated", handleFindingsUpdated);
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    fetch("/api/agents/analytics/findings")
-      .then(async (response) => {
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || "Failed to load findings.");
-        if (!active) return;
-        const next = Array.isArray(data.findings) ? data.findings : [];
-        setFindings(next);
-        setSelectedId((current) => current && next.some((f: Finding) => f.id === current) ? current : next[0]?.id ?? null);
-      })
-      .catch((err) => {
-        if (active) setError(err instanceof Error ? err.message : "Failed to load findings.");
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => { active = false; };
-  }, []);
-
-  const mutate = async (body: Record<string, string>) => {
-    if (!selected) return;
-    setBusy(true);
-    setError(null);
+  const select = (id: string | null) => {
+    setSelectedId(id);
     setVerification(null);
-    try {
-      const response = await fetch("/api/agents/analytics/findings", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: selected.id, ...body }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Finding update failed.");
-      if (data.finding) {
-        setFindings((current) => current.map((finding) => finding.id === data.finding.id ? data.finding : finding));
-        setSelectedId(data.finding.id);
-      }
-      if (body.action === "recheck") setVerification(data.verification?.status ?? null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Finding update failed.");
-    } finally {
-      setBusy(false);
-    }
+    update.reset();
   };
 
-  const evidenceRows = selected ? evidenceRowsForFinding(selected) : [];
-  const whyItMatters = selected ? whyItMattersForFinding(selected) : null;
+  const run = (body: Record<string, string>) => {
+    if (!selected) return;
+    setVerification(null);
+    update.mutate(
+      { id: selected.id, body },
+      {
+        onSuccess: (data) => {
+          if (body.action === "recheck") setVerification(data.verification?.status ?? null);
+        },
+      },
+    );
+  };
 
-  if (loading) {
-    return <div className="flex items-center justify-center py-16 text-sm text-gray-500"><Loader2 size={18} className="mr-2 animate-spin" />Loading findings...</div>;
+  if (list.isPending) {
+    return (
+      <div className="space-y-4" aria-busy="true">
+        <SkeletonStats count={4} />
+        <SkeletonCard rows={3} />
+        <SkeletonCard rows={3} />
+      </div>
+    );
   }
 
-  if (error) {
-    return <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}<button onClick={() => void load()} className="ml-3 font-medium underline">Retry</button></div>;
+  if (list.isError) {
+    return (
+      <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        {list.error.message}
+        <button type="button" onClick={() => list.refetch()} className="ml-3 font-medium underline">
+          Retry
+        </button>
+      </div>
+    );
   }
+
+  const primary = selected ? STATUS_ACTION[selected.status] : undefined;
 
   return (
-    <div className="@container space-y-4">
-      <div>
-        <h3 className="text-sm font-semibold text-gray-900">Audit findings</h3>
-        <p className="mt-0.5 text-[11px] text-gray-500">Your audit turns measured SEO problems into clear explanations and recommended next steps.</p>
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] font-medium text-gray-500">
-          <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-1">1. Audit data</span>
-          <ChevronRight size={11} className="text-gray-300" />
-          <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-1">2. Findings</span>
-          <ChevronRight size={11} className="text-gray-300" />
-          <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-1">3. Recommendations</span>
+    <div className="space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-900">Findings</h3>
+          <p className="mt-0.5 text-[11px] text-gray-500">The most important problems first. Open one to see why it matters and what to do.</p>
         </div>
+        <button
+          type="button"
+          onClick={() => list.refetch()}
+          title="Refresh findings"
+          aria-label="Refresh findings"
+          className="shrink-0 rounded-lg border border-gray-200 p-2 text-gray-500 hover:bg-gray-50"
+        >
+          {list.isFetching ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+        </button>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 @lg:grid-cols-4">
-        {[
-          ["Needs attention", counts.active],
-          ["Critical", counts.critical],
-          ["Warnings", counts.warning],
-          ["Verified", counts.verified],
-        ].map(([label, value]) => (
-          <div key={label} className="rounded-xl border border-gray-200 bg-white p-3">
-            <div className="text-[10px] uppercase tracking-wide text-gray-400">{label}</div>
-            <div className="mt-1 text-lg font-semibold text-gray-900">{value}</div>
-          </div>
-        ))}
+      <div className="grid grid-cols-2 gap-2">
+        <Stat label="Needs attention" value={counts.needsAttention} />
+        <Stat label="Critical" value={counts.critical} tone="bad" />
+        <Stat label="Warnings" value={counts.warning} />
+        <Stat label="Verified" value={counts.verified} tone="good" />
       </div>
 
       {findings.length === 0 ? (
         <div className="rounded-xl border border-dashed border-gray-200 p-8 text-center">
           <Check className="mx-auto mb-2 text-emerald-500" size={22} />
           <p className="text-sm font-medium text-gray-800">No findings yet</p>
-          <p className="mt-1 text-[12px] text-gray-500">Run an SEO audit first. Detected on-page and Lighthouse issues will appear here automatically with evidence and recommendations.</p>
+          <p className="mt-1 text-[12px] text-gray-500">
+            Run an SEO audit first. Detected on-page and Lighthouse issues appear here with evidence and recommendations.
+          </p>
         </div>
       ) : (
-        <div className="grid gap-4 @3xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.35fr)]">
-          <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
-            {findings.map((finding) => (
+        <ul className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+          {findings.map((finding) => (
+            <li key={finding.id} className="border-t border-gray-100 first:border-t-0">
               <button
-                key={finding.id}
-                onClick={() => { setSelectedId(finding.id); setVerification(null); }}
-                className={`block w-full border-t border-gray-100 p-3 text-left first:border-t-0 hover:bg-gray-50 ${selected?.id === finding.id ? "bg-gray-50" : ""}`}
+                type="button"
+                onClick={() => select(finding.id)}
+                className="flex w-full items-start gap-2 px-3 py-3 text-left transition-colors hover:bg-gray-50"
               >
-                <div className="flex items-start gap-2">
-                  <CircleDot size={14} className={finding.severity === "critical" ? "mt-0.5 text-red-500" : finding.severity === "warning" ? "mt-0.5 text-amber-500" : "mt-0.5 text-gray-400"} />
-                  <div className="min-w-0 flex-1">
-                    <div className="mb-1 flex flex-wrap gap-1.5">
-                      <span className={`rounded-full border px-1.5 py-0.5 text-[9px] font-semibold uppercase ${severityClass(finding.severity)}`}>{finding.severity}</span>
-                      <span className={`rounded-full border px-1.5 py-0.5 text-[9px] font-medium ${statusClass(finding.status)}`}>{STATUS_LABEL[finding.status]}</span>
-                    </div>
-                    <div className="line-clamp-2 text-[13px] font-medium leading-5 text-gray-900">{finding.evidence.label ? String(finding.evidence.label) : finding.recommendation.split(".")[0]}</div>
-                    <div className="mt-1 truncate text-[11px] text-gray-500">{finding.category === "lighthouse" ? "Lighthouse audit" : "SEO audit"} · {finding.url ?? "No page URL"}</div>
-                  </div>
-                  <ChevronRight size={14} className="mt-1 shrink-0 text-gray-300" />
-                </div>
+                <CircleDot size={14} className={`mt-0.5 shrink-0 ${dotClass(finding.severity)}`} />
+                <span className="min-w-0 flex-1">
+                  <span className="line-clamp-2 block text-[13px] font-medium leading-5 text-gray-900">{findingTitle(finding)}</span>
+                  <span className="mt-1 flex items-center gap-2">
+                    <span className={`rounded-full border px-1.5 py-0.5 text-[9px] font-medium ${statusClass(finding.status)}`}>
+                      {STATUS_LABEL[finding.status]}
+                    </span>
+                    <span className="min-w-0 truncate text-[11px] text-gray-500" title={finding.url ?? undefined}>
+                      {pagePath(finding.url)}
+                    </span>
+                  </span>
+                </span>
+                <ChevronRight size={14} className="mt-1 shrink-0 text-gray-300" />
               </button>
-            ))}
-          </div>
-
-          {selected && (
-            <div className="rounded-xl border border-gray-200 bg-white">
-              <div className="border-b border-gray-200 p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="mb-2 flex flex-wrap gap-1.5">
-                      <span className={`rounded-full border px-2 py-1 text-[10px] font-semibold uppercase ${severityClass(selected.severity)}`}>{selected.severity}</span>
-                      <span className={`rounded-full border px-2 py-1 text-[10px] font-medium ${statusClass(selected.status)}`}>{STATUS_LABEL[selected.status]}</span>
-                    </div>
-                    <h4 className="text-base font-semibold text-gray-900">{selected.evidence.label ? String(selected.evidence.label) : selected.recommendation.split(".")[0]}</h4>
-                    <div className="mt-1 text-[11px] text-gray-500">{selected.category === "lighthouse" ? "Lighthouse audit" : "SEO audit"} · {selected.url ?? "Page URL unavailable"}</div>
-                    {selected.url && <a href={selected.url} target="_blank" rel="noreferrer" className="mt-0.5 block truncate text-[11px] text-[#00846f] hover:underline">{selected.url}</a>}
-                  </div>
-                  <button onClick={() => void load()} title="Refresh findings" className="rounded-lg border border-gray-200 p-2 text-gray-500 hover:bg-gray-50"><RefreshCw size={13} /></button>
-                </div>
-              </div>
-
-              <div className="space-y-4 p-4">
-                {verification && (
-                  <div className={`flex items-start gap-2 rounded-xl border p-3 text-[12px] ${verification === "verified" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-800"}`}>
-                    {verification === "verified" ? <Check size={15} className="mt-0.5" /> : <AlertTriangle size={15} className="mt-0.5" />}
-                    <div><div className="font-semibold">{verification === "verified" ? "VERIFIED" : "VERIFICATION FAILED"}</div><div className="mt-0.5">{verification === "verified" ? "The issue is no longer detected on this page." : "The issue is still detected. Keep fixing it and re-check again."}</div></div>
-                  </div>
-                )}
-
-                <section>
-                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Why this was flagged</div>
-                  {whyItMatters && (
-                    <p className="mb-2 rounded-xl border border-gray-200 bg-gray-50 p-3 text-[12px] leading-5 text-gray-700">{whyItMatters}</p>
-                  )}
-                  <div className="overflow-hidden rounded-xl border border-gray-200">
-                    {evidenceRows.map((row) => (
-                      <EvidenceValue key={row.key} label={row.label} value={row.value} />
-                    ))}
-                  </div>
-                </section>
-
-                <section>
-                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">What to do</div>
-                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-[12px] leading-5 text-gray-700">{selected.recommendation}</div>
-                </section>
-
-                <section>
-                  <div className="mb-2 flex items-center justify-between">
-                    <div>
-                      <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Recommended next steps</div>
-                      <div className="mt-0.5 text-[11px] text-gray-500">Prioritized from the evidence collected in this audit.</div>
-                    </div>
-                  </div>
-                  {recommendationsLoading ? (
-                    <div className="flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 p-3 text-[12px] text-gray-500">
-                      <Loader2 size={13} className="animate-spin" /> Generating recommendations...
-                    </div>
-                  ) : (
-                    <FindingActionsSection
-                      recommendations={recommendations}
-                      actions={actions}
-                      loading={actionsLoading}
-                      busyRecommendationId={actionBusy}
-                      onCreate={createTrackedAction}
-                      onCancel={cancelTrackedAction}
-                    />
-                  )}
-                </section>
-
-                <section>
-                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Lifecycle</div>
-                  <div className="flex items-center gap-1 overflow-x-auto pb-1">
-                    {STATUS_ORDER.map((status, index) => (
-                      <div key={status} className="flex shrink-0 items-center gap-1">
-                        <div className={`flex h-7 items-center rounded-full border px-2 text-[10px] font-medium ${selected.status === status ? statusClass(status) : index < STATUS_ORDER.indexOf(selected.status) ? "border-emerald-100 bg-emerald-50 text-emerald-700" : "border-gray-200 bg-white text-gray-400"}`}>
-                          {STATUS_LABEL[status]}
-                        </div>
-                        {index < STATUS_ORDER.length - 1 && <ChevronRight size={11} className="text-gray-300" />}
-                      </div>
-                    ))}
-                  </div>
-                </section>
-
-                <div className="flex flex-wrap gap-2">
-                  {STATUS_ACTION[selected.status] && (
-                    <button disabled={busy} onClick={() => void mutate({ status: STATUS_ACTION[selected.status]!.next })} className="rounded-lg bg-[#111111] px-3 py-2 text-[12px] font-medium text-white hover:bg-black disabled:opacity-50">
-                      {busy ? <Loader2 size={13} className="inline animate-spin" /> : STATUS_ACTION[selected.status]!.label}
-                    </button>
-                  )}
-                  {(selected.status === "fixing" || selected.status === "fixed" || selected.status === "failed") && (
-                    <button disabled={busy} onClick={() => void mutate({ action: "recheck" })} className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-2 text-[12px] font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50">
-                      {busy ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
-                      {busy ? "Checking..." : "Re-check"}
-                    </button>
-                  )}
-                </div>
-
-                <div className="text-[10px] text-gray-400">First seen {new Date(selected.firstSeen).toLocaleDateString()} · Last checked {new Date(selected.lastSeen).toLocaleString()}</div>
-              </div>
-            </div>
-          )}
-        </div>
+            </li>
+          ))}
+        </ul>
       )}
+
+      <SidePanel
+        open={Boolean(selected)}
+        onClose={() => select(null)}
+        title={selected ? findingTitle(selected) : "Finding"}
+        subtitle={
+          selected && (
+            <span className="flex flex-wrap items-center gap-1.5">
+              <span className={`rounded-full border px-1.5 py-0.5 text-[9px] font-semibold uppercase ${severityClass(selected.severity)}`}>
+                {selected.severity}
+              </span>
+              <span className={`rounded-full border px-1.5 py-0.5 text-[9px] font-medium ${statusClass(selected.status)}`}>
+                {STATUS_LABEL[selected.status]}
+              </span>
+              {selected.url && (
+                <a href={selected.url} target="_blank" rel="noreferrer" className="min-w-0 truncate text-[#00846f] hover:underline">
+                  {selected.url}
+                </a>
+              )}
+            </span>
+          )
+        }
+        footer={
+          selected && (primary || CAN_RECHECK.has(selected.status)) ? (
+            <div className="flex flex-wrap gap-2">
+              {primary && (
+                <button
+                  type="button"
+                  disabled={update.isPending}
+                  onClick={() => run({ status: primary.next })}
+                  className="rounded-lg bg-[#111111] px-3 py-2 text-[12px] font-medium text-white hover:bg-black disabled:opacity-50"
+                >
+                  {update.isPending && !update.variables?.body.action ? <Loader2 size={13} className="inline animate-spin" /> : primary.label}
+                </button>
+              )}
+              {CAN_RECHECK.has(selected.status) && (
+                <button
+                  type="button"
+                  disabled={update.isPending}
+                  onClick={() => run({ action: "recheck" })}
+                  className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-2 text-[12px] font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  {update.isPending && update.variables?.body.action === "recheck" ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+                  {update.isPending && update.variables?.body.action === "recheck" ? "Checking…" : "Re-check"}
+                </button>
+              )}
+            </div>
+          ) : undefined
+        }
+      >
+        {selected && (
+          <FindingDetail
+            finding={selected}
+            verification={verification}
+            error={update.error instanceof Error ? update.error.message : null}
+          />
+        )}
+      </SidePanel>
     </div>
   );
 }

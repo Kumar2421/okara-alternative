@@ -18,6 +18,8 @@ type SidePanelProps = {
   width?: keyof typeof WIDTHS;
   /** Sticky controls under the header, such as a tab bar. */
   toolbar?: ReactNode;
+  /** Pinned under the scrolling content, for the panel's primary actions. */
+  footer?: ReactNode;
   children: ReactNode;
 };
 
@@ -27,7 +29,7 @@ type SidePanelProps = {
  * shared: Esc and backdrop-click close it, focus moves in and returns to the
  * trigger, and it goes full-width on small screens.
  */
-export default function SidePanel({ open, onClose, title, subtitle, width = "lg", toolbar, children }: SidePanelProps) {
+export default function SidePanel({ open, onClose, title, subtitle, width = "lg", toolbar, footer, children }: SidePanelProps) {
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
@@ -78,6 +80,7 @@ export default function SidePanel({ open, onClose, title, subtitle, width = "lg"
         </header>
         {toolbar && <div className="border-b border-gray-100 px-5 py-2">{toolbar}</div>}
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>
+        {footer && <div className="border-t border-gray-100 bg-white px-5 py-3">{footer}</div>}
       </div>
     </div>
   );
