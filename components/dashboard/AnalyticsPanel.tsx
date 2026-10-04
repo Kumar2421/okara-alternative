@@ -14,6 +14,8 @@ import { useProject } from "@/lib/project-store";
 import { useTerminalLog } from "@/lib/terminal-log-store";
 import { FEATURES } from "@/lib/features";
 import type { SearchInsights } from "@/lib/domain/search/types";
+import GoogleSourcesCard, { GOOGLE_UPDATED_EVENT } from "@/components/dashboard/search/GoogleSourcesCard";
+import GoogleSummary from "@/components/dashboard/search/GoogleSummary";
 import SearchHistoryBar from "@/components/dashboard/search/SearchHistoryBar";
 import SearchInsightsSection from "@/components/dashboard/search/SearchInsightsSection";
 
@@ -72,138 +74,6 @@ type CrawledPage = {
   duplicateOfUrl?: string;
 };
 
-function ConnectGoogleServices({ onViewTraffic }: { onViewTraffic: () => void }) {
-  const [dismissed, setDismissed] = useState(false);
-  const [gaConnected, setGaConnected] = useState(false);
-  const [gscConnected, setGscConnected] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-  const [connecting, setConnecting] = useState(false);
-
-  useEffect(() => {
-    // Same real signal GoogleAnalyticsCard uses (integrationId presence),
-    // not the legacy ga_property_id/gsc_site_url settings keys — those only
-    // populate once a resource is explicitly selected, but a connection
-    // (manual "Connect", or "Sign in with Google" granting these scopes at
-    // login — see app/api/auth/callback/route.ts) is real before that
-    // selection happens. Checking the old keys meant this card kept
-    // showing "Connect" even for an account that had genuinely connected.
-    fetch("/api/project/integrations/google/resources")
-      .then((r) => r.json())
-      .then((data: { integrations?: { integrationType: string; integrationId: string | null }[] }) => {
-        const find = (type: string) => data.integrations?.find((i) => i.integrationType === type)?.integrationId;
-        setGaConnected(!!find("google-analytics"));
-        setGscConnected(!!find("google-search-console"));
-      })
-      .catch(() => {})
-      .finally(() => setLoaded(true));
-  }, []);
-
-  // Production: the operator already runs one shared Google OAuth client
-  // (used for login) with the GA4/Search Console scopes attached — reuse
-  // that instead of sending a hosted user to a manual "paste your own
-  // Google Cloud OAuth client id/secret" flow they don't have. Re-running
-  // Google sign-in with the same account just re-grants the extra scopes;
-  // app/api/auth/callback/route.ts turns that into a real connection the
-  // same way the original login did. Self-host mode has no shared operator
-  // identity to reuse, so it keeps the real manual-client-id OAuth flow
-  // (the plain <a href> below).
-  function handlePlatformConnect() {
-    setConnecting(true);
-    window.location.assign("/api/auth/google-analytics/connect?return=dashboard");
-  }
-
-  if (dismissed || !loaded) return null;
-
-  return (
-    <div className="mb-5 rounded-xl border border-gray-200 bg-gray-50 p-3">
-      <div className="mb-3 flex items-center justify-between">
-        <span className="text-[11px] font-semibold tracking-wide text-gray-500">
-          CONNECT GOOGLE SERVICES
-        </span>
-        <X size={13} className="cursor-pointer text-gray-400" onClick={() => setDismissed(true)} />
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        {/* GA Card */}
-        <div className="rounded-lg border border-gray-200 bg-white p-3">
-          <div className="mb-0.5 text-[13px] font-semibold text-gray-900">Google Analytics</div>
-          <div className="mb-3 text-[11px] text-gray-500">Traffic &amp; behavior</div>
-          <div className="relative mb-3 flex h-14 items-end gap-1.5">
-            {[10, 16, 12, 22, 34, 26, 42].map((h, i) => (
-              <div key={i} className={`flex-1 rounded-t ${gaConnected ? "bg-[#00ab92]" : "bg-[#f9d0ae]"}`} style={{ height: `${h}px` }} />
-            ))}
-            {!gaConnected && (
-              <div className="absolute left-1/2 top-1/2 flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-white shadow">
-                <Lock size={13} className="text-gray-500" />
-              </div>
-            )}
-          </div>
-          {gaConnected ? (
-            <button
-              onClick={onViewTraffic}
-              className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#e6f7f4] py-1.5 text-[13px] font-medium text-[#00846f] hover:bg-[#d7f0eb]"
-            >
-              <Check size={13} /> Connected
-            </button>
-          ) : FEATURES.PLATFORM_MODE ? (
-            <button
-              onClick={handlePlatformConnect}
-              disabled={connecting}
-              className="flex w-full items-center justify-center rounded-lg bg-[#111111] py-1.5 text-[13px] font-medium text-white hover:bg-black disabled:opacity-60"
-            >
-              {connecting ? "Redirecting..." : "Connect with Google"}
-            </button>
-          ) : (
-            <a
-              href="/api/auth/google-analytics/connect?return=dashboard"
-              className="flex w-full items-center justify-center rounded-lg bg-[#111111] py-1.5 text-[13px] font-medium text-white hover:bg-black"
-            >
-              Connect
-            </a>
-          )}
-        </div>
-        {/* GSC Card */}
-        <div className="rounded-lg border border-gray-200 bg-white p-3">
-          <div className="mb-0.5 text-[13px] font-semibold text-gray-900">Search Console</div>
-          <div className="mb-3 text-[11px] text-gray-500">Search rankings</div>
-          <div className="relative mb-3 flex h-14 items-center justify-center">
-            <svg viewBox="0 0 100 40" className="h-10 w-full">
-              <polyline points="0,32 15,26 30,28 45,14 60,18 75,6 100,10" fill="none" stroke={gscConnected ? "#00ab92" : "#93c5fd"} strokeWidth="3" />
-            </svg>
-            {!gscConnected && (
-              <div className="absolute left-1/2 top-1/2 flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-white shadow">
-                <Lock size={13} className="text-gray-500" />
-              </div>
-            )}
-          </div>
-          {gscConnected ? (
-            <button
-              onClick={onViewTraffic}
-              className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#e6f7f4] py-1.5 text-[13px] font-medium text-[#00846f] hover:bg-[#d7f0eb]"
-            >
-              <Check size={13} /> Connected
-            </button>
-          ) : FEATURES.PLATFORM_MODE ? (
-            <button
-              onClick={handlePlatformConnect}
-              disabled={connecting}
-              className="flex w-full items-center justify-center rounded-lg bg-[#111111] py-1.5 text-[13px] font-medium text-white hover:bg-black disabled:opacity-60"
-            >
-              {connecting ? "Redirecting..." : "Connect with Google"}
-            </button>
-          ) : (
-            <a
-              href="/api/auth/google-analytics/connect?return=dashboard"
-              className="flex w-full items-center justify-center rounded-lg bg-[#111111] py-1.5 text-[13px] font-medium text-white hover:bg-black"
-            >
-              Connect
-            </a>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function Section({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
   return (
     <div className="mb-6">
@@ -248,6 +118,9 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
   const [trafficResult, setTrafficResult] = useState<TrafficResult | null>(null);
   const [trafficLoading, setTrafficLoading] = useState(false);
   const [trafficError, setTrafficError] = useState<string | null>(null);
+  // Bumped when the Google connection or property choice changes, so Traffic data reloads without a page refresh.
+  const [googleVersion, setGoogleVersion] = useState(0);
+  const [googleReady, setGoogleReady] = useState(false);
   const [pageEvidence, setPageEvidence] = useState<Record<string, PageEvidence | { error: string }>>({});
   const [findings, setFindings] = useState<AnalyticsFinding[]>([]);
   const [findingCreating, setFindingCreating] = useState<Record<string, boolean>>({});
@@ -279,11 +152,29 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
     if (error) show(`Google Analytics connect failed: ${error}`);
     if (connected) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setTab("Traffic");
-      show("Connected — loading real Traffic data.");
+      setTab("SEO");
+      show("Google connected — choose your site below.");
+      window.dispatchEvent(new Event(GOOGLE_UPDATED_EVENT));
+    }
+    if (error || connected) {
+      const clean = new URLSearchParams(window.location.search);
+      ["ga_error", "ga_connected", "ga_project", "ga_gsc_count", "ga_ga4_count"].forEach((key) => clean.delete(key));
+      const query = clean.toString();
+      window.history.replaceState(null, "", window.location.pathname + (query ? `?${query}` : ""));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
+
+  // A changed Google connection or property must refresh Traffic without a page reload.
+  useEffect(() => {
+    const onGoogleUpdated = () => {
+      setTrafficResult(null);
+      setTrafficError(null);
+      setGoogleVersion((v) => v + 1);
+    };
+    window.addEventListener(GOOGLE_UPDATED_EVENT, onGoogleUpdated);
+    return () => window.removeEventListener(GOOGLE_UPDATED_EVENT, onGoogleUpdated);
+  }, []);
 
   useEffect(() => {
     if (open && project?.url) {
@@ -316,7 +207,7 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
         .then((data) => data.result && setSiteCrawlResult(data.result))
         .catch(() => {});
     }
-    if (tab === "Traffic" && !trafficResult) {
+    if ((tab === "Traffic" || (tab === "SEO" && googleReady)) && !trafficResult) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setTrafficLoading(true);
       setTrafficError(null);
@@ -348,7 +239,7 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
     if (tab === "SEO") {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, project?.id, tab]);
+  }, [open, project?.id, tab, googleVersion, googleReady]);
 
   const handleInspectRankingPage = async (url: string) => {
     if (pageEvidence[url]) return;
@@ -852,7 +743,23 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
             )}
           </Section>
         ) : !auditData ? (
-          <div className="flex flex-col items-center justify-center h-full text-center text-gray-500">
+          <>
+          {tab === "SEO" && (
+            <>
+              <GoogleSourcesCard onReadyChange={setGoogleReady} />
+              {googleReady && (
+                <GoogleSummary
+                  totals={trafficResult?.totals ?? null}
+                  ga4={trafficResult?.ga4 ?? null}
+                  loading={trafficLoading}
+                  error={trafficError}
+                  onViewTraffic={() => setTab("Traffic")}
+                  onRetry={() => setGoogleVersion((v) => v + 1)}
+                />
+              )}
+            </>
+          )}
+          <div className={`flex flex-col items-center justify-center text-center text-gray-500 ${tab === "SEO" ? "py-10" : "h-full"}`}>
              {loading ? <Loader2 className="animate-spin text-gray-400 mb-2" size={24} /> : <Search className="text-gray-300 mb-2" size={24} />}
              <p className="text-sm">
                {loading
@@ -862,11 +769,22 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
                    : "Add a website in the project switcher at the top to see insights."}
              </p>
           </div>
+          </>
         ) : (
           <>
             {tab === "SEO" && (
               <>
-                <ConnectGoogleServices onViewTraffic={() => setTab("Traffic")} />
+                <GoogleSourcesCard onReadyChange={setGoogleReady} />
+                {googleReady && (
+                  <GoogleSummary
+                    totals={trafficResult?.totals ?? null}
+                    ga4={trafficResult?.ga4 ?? null}
+                    loading={trafficLoading}
+                    error={trafficError}
+                    onViewTraffic={() => setTab("Traffic")}
+                    onRetry={() => setGoogleVersion((v) => v + 1)}
+                  />
+                )}
 
                 {!auditData.pageSpeed && (
                   <div className="mb-5 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] text-amber-800">

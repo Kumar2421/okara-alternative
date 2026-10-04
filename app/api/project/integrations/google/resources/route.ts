@@ -1,21 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getDb } from "@/lib/db";
 import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
 import {
   getProjectIntegration,
   listIntegrationResources,
+  listResourceUsage,
+  listSiblingIntegrations,
   selectIntegrationResource,
 } from "@/lib/domain/integrations/integrationStore";
 import {
   getProjectIntegration as getProjectIntegrationSupabase,
   listIntegrationResources as listIntegrationResourcesSupabase,
+  listResourceUsage as listResourceUsageSupabase,
+  listSiblingIntegrations as listSiblingIntegrationsSupabase,
   selectIntegrationResource as selectIntegrationResourceSupabase,
 } from "@/lib/domain/integrations/integrationStoreSupabase";
+import { buildGoogleResourcesView } from "@/lib/domain/integrations/googleResourcesView";
+import { INTEGRATION_TYPES } from "@/lib/domain/integrations/integrationTypes";
 import { FEATURES } from "@/lib/features";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
 
-const INTEGRATION_TYPES = ["google-search-console", "google-analytics"] as const;
-
+/**
+ * What the SEO tab needs for the Google connect/choose flow, in both modes:
+ * this project's connections and the account's full site/property lists, a
+ * suggested match for the project's website, which other projects already use
+ * each property, and whether a Google account connected for another project
+ * can be reused.
+ */
 export async function GET() {
   if (FEATURES.PLATFORM_MODE) {
     const supabase = await createClient();
@@ -32,31 +44,48 @@ export async function GET() {
     const projectId = setting?.value;
     if (!projectId) return NextResponse.json({ error: "No active project" }, { status: 422 });
 
-    const result = await Promise.all(
+    const { data: project } = await db.from("projects").select("url").eq("id", projectId).eq("owner_id", user.id).maybeSingle();
+    const connections = await Promise.all(
       INTEGRATION_TYPES.map(async (integrationType) => {
         const integration = await getProjectIntegrationSupabase(db, user.id, projectId, integrationType);
         return {
           integrationType,
-          integrationId: integration?.id ?? null,
+          integration,
           resources: integration ? await listIntegrationResourcesSupabase(db, user.id, integration.id) : [],
         };
       })
     );
-    return NextResponse.json({ projectId, integrations: result });
+    const sibling = connections.some((c) => c.integration)
+      ? null
+      : (await Promise.all(INTEGRATION_TYPES.map((t) => listSiblingIntegrationsSupabase(db, user.id, projectId, t)))).flat()[0] ?? null;
+
+    return NextResponse.json({
+      projectId,
+      ...buildGoogleResourcesView({
+        projectUrl: project?.url,
+        connections,
+        usage: await listResourceUsageSupabase(db, user.id, projectId),
+        sibling,
+      }),
+    });
   }
 
   const projectId = getActiveProjectId();
   if (!projectId) return NextResponse.json({ error: "No active project" }, { status: 422 });
 
-  const result = INTEGRATION_TYPES.map((integrationType) => {
+  const project = getDb().prepare("SELECT url FROM projects WHERE id = ?").get(projectId) as { url: string | null } | undefined;
+  const connections = INTEGRATION_TYPES.map((integrationType) => {
     const integration = getProjectIntegration(projectId, integrationType);
-    return {
-      integrationType,
-      integrationId: integration?.id ?? null,
-      resources: integration ? listIntegrationResources(integration.id) : [],
-    };
+    return { integrationType, integration, resources: integration ? listIntegrationResources(integration.id) : [] };
   });
-  return NextResponse.json({ projectId, integrations: result });
+  const sibling = connections.some((c) => c.integration)
+    ? null
+    : INTEGRATION_TYPES.flatMap((t) => listSiblingIntegrations(projectId, t))[0] ?? null;
+
+  return NextResponse.json({
+    projectId,
+    ...buildGoogleResourcesView({ projectUrl: project?.url, connections, usage: listResourceUsage(projectId), sibling }),
+  });
 }
 
 export async function POST(req: NextRequest) {
