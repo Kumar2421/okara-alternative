@@ -14,6 +14,7 @@ import { useProject } from "@/lib/project-store";
 import { useTerminalLog } from "@/lib/terminal-log-store";
 import { FEATURES } from "@/lib/features";
 import type { SearchInsights, SearchIntent } from "@/lib/domain/search/types";
+import { SEARCH_REFRESHED_EVENT, SearchOpportunitiesCard } from "@/components/dashboard/SearchOpportunitiesCard";
 
 const INTENT_LABELS: Record<SearchIntent, string> = {
   recommendation: "Looking for the best option",
@@ -61,7 +62,10 @@ function SearchHistoryBar() {
       .then(async (r) => {
         const data = await r.json().catch(() => ({}));
         if (!r.ok) setError(data.error ?? "Could not refresh search data.");
-        else load();
+        else {
+          load();
+          window.dispatchEvent(new Event(SEARCH_REFRESHED_EVENT));
+        }
       })
       .catch(() => setError("Could not refresh search data."))
       .finally(() => setBusy(false));
@@ -819,6 +823,8 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
                 )}
 
                 {trafficResult.search && <SearchThemesCard search={trafficResult.search} />}
+
+                <SearchOpportunitiesCard />
 
                 <h4 className="mb-2 text-[12px] font-semibold text-gray-700">Top Queries</h4>
                 <div className="mt-6">
