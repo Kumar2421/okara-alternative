@@ -94,7 +94,7 @@ export default function FindingActionsSection({
               )}
             </div>
 
-            <div className="mt-2 text-[10px] text-gray-500">
+            <div className="mt-2 whitespace-pre-line text-[11px] leading-4 text-gray-500">
               <span className="font-medium text-gray-700">{recommendation.implementation.kind}</span>
               {" · "}
               {recommendation.implementation.description}

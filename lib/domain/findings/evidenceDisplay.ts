@@ -13,6 +13,14 @@
 
 export type EvidenceRow = { key: string; label: string; value: unknown };
 
+const OPPORTUNITY_LABEL: Record<string, string> = {
+  ranking: "Close to page one",
+  ctr: "Ranks well, few click",
+  declining: "Slipping",
+  new_query: "New search",
+  lost_query: "No longer showing",
+};
+
 function humanizeKey(key: string): string {
   return key.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase()).trim();
 }
@@ -25,6 +33,22 @@ export function evidenceRowsForFinding(finding: { source: string; evidence: Reco
     return Object.entries(finding.evidence)
       .filter(([key]) => key !== "label" && key !== "whyItMatters")
       .map(([key, value]) => ({ key, label: humanizeKey(key), value }));
+  }
+
+  const opportunity = finding.evidence.opportunity as { type?: string; reasons?: string[] } | undefined;
+  if (opportunity?.type) {
+    const e = finding.evidence;
+    const previous = (e.previous ?? null) as { position?: number; impressions?: number } | null;
+    return [
+      { key: "query", label: "Search", value: e.query },
+      { key: "type", label: "Opportunity", value: OPPORTUNITY_LABEL[opportunity.type] ?? opportunity.type },
+      { key: "impressions", label: "Views (28 days)", value: typeof e.impressions === "number" ? Math.round(e.impressions).toLocaleString("en-US") : e.impressions },
+      { key: "clicks", label: "Clicks", value: e.clicks },
+      { key: "ctr", label: "Click rate", value: typeof e.ctr === "number" ? `${(e.ctr * 100).toFixed(1)}%` : e.ctr },
+      { key: "position", label: "Average position", value: typeof e.position === "number" && e.position > 0 ? e.position.toFixed(1) : null },
+      { key: "previousPosition", label: "Position before", value: typeof previous?.position === "number" ? previous.position.toFixed(1) : null },
+      { key: "previousImpressions", label: "Views before", value: typeof previous?.impressions === "number" ? Math.round(previous.impressions).toLocaleString("en-US") : null },
+    ];
   }
 
   const page = (finding.evidence.page ?? {}) as Record<string, unknown>;
@@ -50,6 +74,10 @@ export function evidenceRowsForFinding(finding: { source: string; evidence: Reco
 export function whyItMattersForFinding(finding: { source: string; evidence: Record<string, unknown> }): string | null {
   if (finding.source === "seo-audit" && typeof finding.evidence.whyItMatters === "string") {
     return finding.evidence.whyItMatters;
+  }
+  const opportunity = finding.evidence.opportunity as { reasons?: unknown } | undefined;
+  if (opportunity && Array.isArray(opportunity.reasons) && opportunity.reasons.length > 0) {
+    return opportunity.reasons.filter((r): r is string => typeof r === "string").join(". ") + ".";
   }
   return null;
 }

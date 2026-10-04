@@ -3,6 +3,9 @@ export const ACTION_TYPES = [
   "remove_noindex",
   "improve_content_relevance",
   "investigate_ttfb",
+  // Search-opportunity findings: rewrite title/description, or work out why a search moved.
+  "rewrite_snippet",
+  "investigate_ranking_change",
   // Every other finding type (the 11 SEOAgent issueIds with no dedicated
   // automated type — meta title/description, headings, OG/Twitter tags,
   // robots-txt) had no representable ActionType at all before this, which

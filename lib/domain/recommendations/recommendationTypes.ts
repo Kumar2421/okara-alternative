@@ -4,6 +4,12 @@ export const RECOMMENDATION_TYPES = [
   "low_keyword_relevance",
   "slow_ttfb",
   "lighthouse_issue",
+  // Search-opportunity findings (see lib/domain/search/opportunityRecommendations.ts)
+  "improve_search_intent_alignment",
+  "rewrite_snippet",
+  "investigate_decline",
+  "build_on_new_query",
+  "investigate_lost_query",
 ] as const;
 
 export type RecommendationType = (typeof RECOMMENDATION_TYPES)[number];

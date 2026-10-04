@@ -1,4 +1,5 @@
-import type { Recommendation, RecommendationPriority, RecommendationType } from "./recommendationTypes";
+import { deriveOpportunityRecommendations } from "../search/opportunityRecommendations.ts";
+import type { Recommendation, RecommendationPriority, RecommendationType } from "./recommendationTypes.ts";
 
 type FindingLike = {
   id: string;
@@ -46,6 +47,10 @@ function recommendation(
 }
 
 export function deriveRecommendations(finding: FindingLike): Recommendation[] {
+  // Findings created from a search opportunity carry their own evidence and steps, not page-audit conditions.
+  const fromOpportunity = deriveOpportunityRecommendations(finding);
+  if (fromOpportunity) return fromOpportunity;
+
   const page = pageEvidence(finding);
   const recommendations: Recommendation[] = [];
 
