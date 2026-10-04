@@ -427,12 +427,12 @@ export default function ProjectProvider({ children }: { children: React.ReactNod
             log("Finding real leads to kick off outreach...");
             const leadsRes = await fetch(`/api/project/${data.project.id}/generate-leads`, { method: "POST" });
             if (leadsRes.ok) {
-              const { added } = await leadsRes.json();
+              const { added, message } = await leadsRes.json();
               if (added > 0) {
                 logDone(`Found ${added} real lead${added === 1 ? "" : "s"} — check the Leads panel.`);
                 setLeadsVersion((v) => v + 1);
               } else {
-                log("No confident leads found yet — search manually in the Leads panel, or check back tomorrow.");
+                log(message ? `${message} Search manually in the Leads panel, or check back tomorrow.` : "No confident leads found yet — search manually in the Leads panel, or check back tomorrow.");
               }
             }
           } catch {
