@@ -14,6 +14,7 @@ import {
 import { getValidPlatformGoogleToken } from "@/lib/domain/shared/getValidPlatformGoogleToken";
 import { findQueryOpportunities } from "@/lib/domain/analytics/queryOpportunities";
 import { attachRankingPages } from "@/lib/domain/analytics/queryPageCorrelation";
+import { fetchSearchAnalyticsWithToken } from "@/lib/domain/search/searchConsoleClient";
 import { buildSearchInsights } from "@/lib/domain/search/searchInsights";
 import { brandTermsFrom } from "@/lib/domain/search/searchIntent";
 import type { SearchInsights } from "@/lib/domain/search/types";
@@ -25,34 +26,12 @@ function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-/* ---------- Platform-mode Google API calls ----------
+/* ---------- Platform-mode GA4 call ----------
  * googleAnalyticsData.ts's fetch* helpers pull the access token from the
  * self-host integration store internally, so they can't be reused for a
- * Supabase-vault token. Same real Search Console / GA4 Data API calls,
- * just parameterized on an explicit access token decrypted from Vault. */
-
-type SearchAnalyticsRow = { keys: string[]; clicks: number; impressions: number; ctr: number; position: number };
-
-async function fetchSearchAnalyticsPlatform(
-  accessToken: string,
-  siteUrl: string,
-  startDate: string,
-  endDate: string,
-  dimensions: string[],
-  rowLimit = 25000
-): Promise<SearchAnalyticsRow[]> {
-  const res = await fetch(`https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ startDate, endDate, dimensions, rowLimit }),
-  });
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`Search Console query failed: HTTP ${res.status}${detail ? ` — ${detail.slice(0, 200)}` : ""}`);
-  }
-  const data = await res.json();
-  return data.rows ?? [];
-}
+ * Supabase-vault token. Same real GA4 Data API call, parameterized on an
+ * explicit access token decrypted from Vault. (The Search Console
+ * equivalent lives in lib/domain/search/searchConsoleClient.ts.) */
 
 async function fetchGA4SummaryPlatform(accessToken: string, propertyId: string, startDate: string, endDate: string) {
   const res = await fetch(`https://analyticsdata.googleapis.com/v1beta/${propertyId}:runReport`, {
@@ -116,9 +95,9 @@ export async function GET() {
       try {
         const accessToken = await getValidPlatformGoogleToken(db, user.id, projectId);
         const [dateRows, queryRows, queryPageRows] = await Promise.all([
-          fetchSearchAnalyticsPlatform(accessToken, siteUrl, startDate, endDate, ["date"]),
-          fetchSearchAnalyticsPlatform(accessToken, siteUrl, startDate, endDate, ["query"], 25000),
-          fetchSearchAnalyticsPlatform(accessToken, siteUrl, startDate, endDate, ["query", "page"]),
+          fetchSearchAnalyticsWithToken(accessToken, siteUrl, startDate, endDate, ["date"]),
+          fetchSearchAnalyticsWithToken(accessToken, siteUrl, startDate, endDate, ["query"], 25000),
+          fetchSearchAnalyticsWithToken(accessToken, siteUrl, startDate, endDate, ["query", "page"]),
         ]);
 
         byDate = dateRows.map((r) => ({ date: r.keys[0], clicks: r.clicks, impressions: r.impressions, ctr: r.ctr, position: r.position }));

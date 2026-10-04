@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/leads-refresh",
       "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/cron/search-monitor",
+      "schedule": "0 3 * * *"
     }
   ]
 }

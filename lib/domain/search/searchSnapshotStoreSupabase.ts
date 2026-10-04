@@ -1,0 +1,43 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { isoDate, retentionCutoff, type SearchSnapshotPayload } from "./searchSnapshot.ts";
+import type { StoredSnapshot } from "./searchSnapshotStore.ts";
+
+// Platform (Supabase) store. Uses the service-role client, so every query is
+// scoped by user_id and project_id explicitly.
+
+export async function saveSnapshot(
+  db: SupabaseClient,
+  userId: string,
+  projectId: string,
+  payload: SearchSnapshotPayload,
+  now = new Date(),
+): Promise<void> {
+  const { error } = await db.from("search_snapshots").upsert(
+    { project_id: projectId, user_id: userId, snapshot_date: isoDate(now), payload, captured_at: now.toISOString() },
+    { onConflict: "project_id,snapshot_date" },
+  );
+  if (error) throw new Error(error.message);
+  await db.from("search_snapshots").delete().eq("project_id", projectId).eq("user_id", userId).lt("snapshot_date", retentionCutoff(now));
+}
+
+export async function getLatestSnapshot(db: SupabaseClient, userId: string, projectId: string): Promise<StoredSnapshot | null> {
+  const { data } = await db
+    .from("search_snapshots")
+    .select("snapshot_date, captured_at, payload")
+    .eq("project_id", projectId)
+    .eq("user_id", userId)
+    .order("snapshot_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!data) return null;
+  return { snapshotDate: String(data.snapshot_date), capturedAt: String(data.captured_at), payload: data.payload as SearchSnapshotPayload };
+}
+
+export async function countSnapshots(db: SupabaseClient, userId: string, projectId: string): Promise<number> {
+  const { count } = await db
+    .from("search_snapshots")
+    .select("project_id", { count: "exact", head: true })
+    .eq("project_id", projectId)
+    .eq("user_id", userId);
+  return count ?? 0;
+}
