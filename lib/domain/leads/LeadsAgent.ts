@@ -1,6 +1,7 @@
 import type { LlmDriver } from "@/lib/llm";
 import { tavilySearchRaw, type TavilyResult } from "@/lib/domain/shared/webSearchTool";
 import { googleSearchRaw } from "@/lib/domain/shared/googleSearch";
+import { applyExclusions, describeProfile, type LeadProfile } from "./leadProfile";
 
 export type LeadSearchQuery = {
   role: string;
@@ -90,7 +91,9 @@ export class LeadsAgent {
     query: LeadSearchQuery,
     tavilyApiKey: string,
     model: string,
-    google?: { apiKey: string; cx: string }
+    google?: { apiKey: string; cx: string },
+    /** The user's confirmed lead profile: guides relevance and removes excluded companies. */
+    profile?: LeadProfile
   ): Promise<ExtractedLead[]> {
     const queries = buildSearchQueries(query);
     const resultSets = await Promise.all(
@@ -134,8 +137,14 @@ Respond with ONLY a JSON array, no markdown code fences, no prose before or afte
 in exactly this shape:
 [{"name": "Jane Doe", "title": "VP Marketing", "company": "Acme Inc", "location": "Austin, TX", "email": null, "sourceUrl": "https://..."}]`;
 
-    const prompt = `Search target: role="${query.role}", company/industry="${query.companyOrIndustry}", location="${query.location}"
+    const profileBlock = profile
+      ? `\nThe user wants to reach ${describeProfile(profile) || "the people above"}.${
+          profile.problem ? ` They sell something that solves: ${profile.problem}` : ""
+        }\nOnly include a person whose role and company plausibly fit that. Skip results that clearly do not.\n`
+      : "";
 
+    const prompt = `Search target: role="${query.role}", company/industry="${query.companyOrIndustry}", location="${query.location}"
+${profileBlock}
 Real search results:
 ${resultsBlock}
 
@@ -150,6 +159,7 @@ Extract up to ${MAX_LEADS} distinct real people from the results above.`;
       baseUrl: this.baseUrl,
     });
 
-    return parseLeads(result.text ?? "");
+    const leads = parseLeads(result.text ?? "");
+    return profile ? applyExclusions(leads, profile.exclude) : leads;
   }
 }

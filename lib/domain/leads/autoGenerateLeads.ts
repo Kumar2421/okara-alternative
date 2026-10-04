@@ -1,7 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getDriver } from "@/lib/llm";
 import { LeadsAgent } from "@/lib/domain/leads/LeadsAgent";
-import { deriveLeadTarget, pickRole } from "@/lib/domain/leads/leadTarget";
+import { isConfirmed, pickSearch } from "@/lib/domain/leads/leadProfile";
+import { getLeadProfile } from "@/lib/domain/leads/leadProfileStoreSupabase";
 import { verifyMissingEmails } from "@/lib/domain/leads/verifyMissingEmails";
 import { PLATFORM_PROVIDER_KEYS, PLATFORM_DEFAULT_MODELS } from "@/lib/llm/platformKeys";
 
@@ -12,7 +13,7 @@ import { PLATFORM_PROVIDER_KEYS, PLATFORM_DEFAULT_MODELS } from "@/lib/llm/platf
 const AUTO_LEAD_PROVIDER_ID = "groq";
 
 /** Why a run added nothing, so "no leads today" is explainable instead of silent. */
-export type AutoLeadReason = "not_configured" | "no_tavily" | "search_failed" | "none_found" | "all_duplicates" | "save_failed";
+export type AutoLeadReason = "not_configured" | "profile_needed" | "no_tavily" | "search_failed" | "none_found" | "all_duplicates" | "save_failed";
 
 export type AutoLeadResult = {
   added: number;
@@ -25,6 +26,7 @@ export type AutoLeadResult = {
 
 const REASON_MESSAGES: Record<AutoLeadReason, string> = {
   not_configured: "Free lead generation isn't configured on this deployment (missing platform model key).",
+  profile_needed: "Set up your lead profile in the Leads tab to start getting relevant leads.",
   no_tavily: "Free lead generation needs a web-search key (TAVILY_API_KEY), which isn't configured.",
   search_failed: "The lead search failed.",
   none_found: "The search found no matching people this time.",
@@ -44,10 +46,10 @@ function nothing(reason: AutoLeadReason, target: AutoLeadResult["target"] = null
  * charges credits exactly as it does today. Self-host never calls this —
  * callers gate on FEATURES.PLATFORM_MODE before reaching it.
  *
- * Targets the product's BUYERS: the ICP written in its Marketing Strategy or
- * Product Info (roles, industry, location), rotating one buyer role per day
- * so repeated runs reach different people. With no ICP written down it falls
- * back to the project category, as before.
+ * Targets the user's confirmed LEAD PROFILE (roles, company types, sizes,
+ * locations, the problem solved, exclusions), rotating one combination per day
+ * so repeated runs reach different people. Until the user confirms a profile
+ * it does nothing: the first leads they see should be relevant.
  */
 export async function generateAutoLeads(
   db: SupabaseClient,
@@ -63,25 +65,16 @@ export async function generateAutoLeads(
   const tavilyKey = process.env.TAVILY_API_KEY?.trim() || "";
   if (!tavilyKey) return nothing("no_tavily");
 
-  const { data: docs } = await db
-    .from("project_documents")
-    .select("doc_type, content")
-    .eq("project_id", project.id)
-    .in("doc_type", ["marketing_strategy", "product_info"]);
-  const target = deriveLeadTarget({
-    marketingStrategy: docs?.find((d) => d.doc_type === "marketing_strategy")?.content,
-    productInfo: docs?.find((d) => d.doc_type === "product_info")?.content,
-    category: project.category,
-    name: project.name,
-  });
-  const role = pickRole(target.roles, new Date());
-  const runTarget = { role, industry: target.industry, location: target.location, source: target.source };
-  if (!target.industry.trim()) return nothing("none_found", runTarget);
+  const profile = await getLeadProfile(db, userId, project.id);
+  if (!isConfirmed(profile)) return nothing("profile_needed");
+
+  const search = pickSearch(profile, new Date());
+  const runTarget = { role: search.role, industry: search.companyOrIndustry, location: search.location, source: "lead-profile" };
 
   let leads;
   try {
     const agent = new LeadsAgent(driver, apiKey);
-    leads = await agent.search({ role, companyOrIndustry: target.industry, location: target.location }, tavilyKey, model, undefined);
+    leads = await agent.search(search, tavilyKey, model, undefined, profile);
   } catch (err) {
     return nothing("search_failed", runTarget, err instanceof Error ? err.message.slice(0, 200) : undefined);
   }
@@ -105,7 +98,7 @@ export async function generateAutoLeads(
   const verifiedEmails = await verifyMissingEmails(leads);
   const now = new Date().toISOString();
   const rows: Record<string, unknown>[] = [];
-  const queryLabel = `${role} ${target.industry}`.trim();
+  const queryLabel = `${search.role} ${search.companyOrIndustry}`.trim();
 
   for (let i = 0; i < leads.length && rows.length < limit; i++) {
     const lead = leads[i];

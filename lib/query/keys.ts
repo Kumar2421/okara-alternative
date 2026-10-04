@@ -26,5 +26,6 @@ export const qk = {
     [...scope(projectId), "findings", findingId, "recommendations"] as const,
   findingActions: (projectId: string | undefined, findingId: string) =>
     [...scope(projectId), "findings", findingId, "actions"] as const,
+  leadProfile: (projectId: string | undefined) => [...scope(projectId), "lead-profile"] as const,
   searchOpportunities: (projectId: string | undefined) => [...scope(projectId), "search-opportunities"] as const,
 };
