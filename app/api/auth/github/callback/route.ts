@@ -1,3 +1,4 @@
+import { CREDENTIALS_PATH } from "@/lib/settingsPaths";
 import { NextRequest, NextResponse } from "next/server";
 import { consumeOAuthState as consumeOAuthStateSupabase } from "@/lib/domain/integrations/oauthStateSupabase";
 import { exchangeCodeForToken, getGitHubUser } from "@/lib/domain/shared/githubOAuth";
@@ -5,7 +6,7 @@ import { FEATURES } from "@/lib/features";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
 
 export async function GET(req: NextRequest) {
-  const settingsUrl = `${req.nextUrl.origin}/settings/api-credentials`;
+  const settingsUrl = `${req.nextUrl.origin}${CREDENTIALS_PATH}`;
   const code = req.nextUrl.searchParams.get("code");
   const state = req.nextUrl.searchParams.get("state");
   if (!code || !state) return NextResponse.redirect(`${settingsUrl}?github_error=${encodeURIComponent("No authorization code returned")}`);

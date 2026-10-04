@@ -1,3 +1,4 @@
+import { CREDENTIALS_PATH } from "@/lib/settingsPaths";
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { consumeOAuthState } from "@/lib/domain/integrations/oauthState";
@@ -13,7 +14,7 @@ export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code");
   const state = req.nextUrl.searchParams.get("state");
   const redirectUri = `${req.nextUrl.origin}/api/auth/gmail/callback`;
-  const settingsUrl = `${req.nextUrl.origin}/settings/api-credentials`;
+  const settingsUrl = `${req.nextUrl.origin}${CREDENTIALS_PATH}`;
 
   if (!code || !state) {
     return NextResponse.redirect(`${settingsUrl}?gmail_error=${encodeURIComponent("No authorization code returned")}`);

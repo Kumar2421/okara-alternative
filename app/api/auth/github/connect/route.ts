@@ -1,3 +1,4 @@
+import { CREDENTIALS_PATH } from "@/lib/settingsPaths";
 import { NextRequest, NextResponse } from "next/server";
 import { buildAuthUrl } from "@/lib/domain/shared/githubOAuth";
 import { createOAuthState as createOAuthStateSupabase } from "@/lib/domain/integrations/oauthStateSupabase";
@@ -6,7 +7,7 @@ import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
 
 export async function GET(req: NextRequest) {
-  const settingsUrl = `${req.nextUrl.origin}/settings/api-credentials`;
+  const settingsUrl = `${req.nextUrl.origin}${CREDENTIALS_PATH}`;
   if (!FEATURES.PLATFORM_MODE) {
     return NextResponse.redirect(`${settingsUrl}?github_error=${encodeURIComponent("GitHub OAuth is available on hosted deployments; use the self-host token flow instead.")}`);
   }

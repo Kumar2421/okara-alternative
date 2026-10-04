@@ -1,3 +1,4 @@
+import { CREDENTIALS_PATH } from "@/lib/settingsPaths";
 import { NextRequest, NextResponse } from "next/server";
 import { buildAuthUrl } from "@/lib/domain/shared/googleAnalyticsOAuth";
 import { createOAuthState } from "@/lib/domain/integrations/oauthState";
@@ -11,7 +12,7 @@ export async function GET(req: NextRequest) {
   const redirectUri = req.nextUrl.origin + "/api/auth/google-analytics/callback";
   const returnTo = req.nextUrl.searchParams.get("return") === "dashboard" ? "dashboard" : "settings";
   const errorRedirect = (message: string) =>
-    NextResponse.redirect(req.nextUrl.origin + "/settings/api-credentials?ga_error=" + encodeURIComponent(message));
+    NextResponse.redirect(req.nextUrl.origin + CREDENTIALS_PATH + "?ga_error=" + encodeURIComponent(message));
 
   if (FEATURES.PLATFORM_MODE) {
     const supabase = await createClient();
