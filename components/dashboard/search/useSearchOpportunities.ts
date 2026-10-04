@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { fetchJson } from "@/lib/query/fetchJson";
+import { qk } from "@/lib/query/keys";
+import { useProject } from "@/lib/project-store";
 import type { OpportunityGroups } from "@/lib/domain/search/searchOpportunities";
-
-/** Dispatched after a snapshot refresh so every search view reloads. */
-export const SEARCH_REFRESHED_EVENT = "marlo:search-refreshed";
 
 export type SearchOpportunitiesState =
   | { status: "loading" }
@@ -14,25 +14,22 @@ export type SearchOpportunitiesState =
 
 type Response = { snapshot: { capturedAt: string } | null; opportunities?: OpportunityGroups };
 
-/** Loads the grouped opportunities from the latest saved snapshot and reloads on refresh. */
+/**
+ * Grouped opportunities from the latest saved snapshot. Shares one cache entry
+ * per project, so the dashboard summary and the slide-over never double-fetch,
+ * and a refresh anywhere updates both.
+ */
 export function useSearchOpportunities(): SearchOpportunitiesState {
-  const [state, setState] = useState<SearchOpportunitiesState>({ status: "loading" });
+  const { project } = useProject();
+  const query = useQuery({
+    queryKey: qk.searchOpportunities(project?.id),
+    queryFn: () => fetchJson<Response>("/api/agents/analytics/search/opportunities"),
+    enabled: Boolean(project),
+  });
 
-  const load = useCallback(() => {
-    fetch("/api/agents/analytics/search/opportunities")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("failed"))))
-      .then((json: Response) => {
-        if (!json.snapshot || !json.opportunities) setState({ status: "empty" });
-        else setState({ status: "ready", capturedAt: json.snapshot.capturedAt, opportunities: json.opportunities });
-      })
-      .catch(() => setState({ status: "error" }));
-  }, []);
-
-  useEffect(() => {
-    load();
-    window.addEventListener(SEARCH_REFRESHED_EVENT, load);
-    return () => window.removeEventListener(SEARCH_REFRESHED_EVENT, load);
-  }, [load]);
-
-  return state;
+  if (query.isPending) return { status: "loading" };
+  if (query.isError) return { status: "error" };
+  const { snapshot, opportunities } = query.data;
+  if (!snapshot || !opportunities) return { status: "empty" };
+  return { status: "ready", capturedAt: snapshot.capturedAt, opportunities };
 }

@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronDown, Search } from "lucide-react";
+import { fetchJson } from "@/lib/query/fetchJson";
+import { qk } from "@/lib/query/keys";
 import { useProject } from "@/lib/project-store";
-
-/** Dispatched after the user's Google connection or property choice changes, so data views reload. */
-export const GOOGLE_UPDATED_EVENT = "marlo:google-updated";
 
 type IntegrationType = "google-search-console" | "google-analytics";
 type Resource = { resourceId: string; resourceName: string; selected: boolean; usedBy?: string[] };
@@ -170,58 +170,55 @@ export type GoogleReadiness = { ready: boolean };
 export default function GoogleSourcesCard({ onReadyChange }: { onReadyChange?: (ready: boolean) => void }) {
   const { project } = useProject();
   const projectId = project?.id;
-  const [data, setData] = useState<Loaded | null | undefined>(undefined);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
-  const load = useCallback(() => {
-    fetch("/api/project/integrations/google/resources", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("failed"))))
-      .then((json: Loaded & { account?: Account }) => {
-        setData({ account: json.account ?? { connectedHere: false, canReuse: false, email: null }, integrations: json.integrations ?? [] });
-      })
-      .catch(() => setData(null));
-  }, []);
+  const resources = useQuery({
+    queryKey: qk.googleResources(projectId),
+    queryFn: async (): Promise<Loaded> => {
+      const json = await fetchJson<Partial<Loaded>>("/api/project/integrations/google/resources");
+      return {
+        account: json.account ?? { connectedHere: false, canReuse: false, email: null },
+        integrations: json.integrations ?? [],
+      };
+    },
+    enabled: Boolean(projectId),
+  });
+  const data = resources.data;
 
-  // The dashboard remounts the panel per project, so this always starts from a clean slate.
-  useEffect(() => {
-    if (projectId) load();
-  }, [projectId, load]);
+  // A changed connection or property changes what Google data the project can see.
+  const change = useMutation({
+    mutationFn: ({ url, body }: { url: string; body?: unknown }) =>
+      fetchJson(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: body ? JSON.stringify(body) : undefined,
+      }),
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: qk.googleResources(projectId) }),
+        queryClient.invalidateQueries({ queryKey: qk.traffic(projectId) }),
+      ]),
+  });
+  const busy = change.isPending;
+  const error = change.error instanceof Error ? change.error.message : null;
+  const post = (url: string, body?: unknown) => change.mutate({ url, body });
 
-  const ready = Boolean(data && data.integrations.length > 0 && data.integrations.every((i) => i.resources.length === 0 || i.resources.some((r) => r.selected)) && data.integrations.some((i) => i.resources.some((r) => r.selected)));
+  const ready = Boolean(
+    data &&
+      data.integrations.some((i) => i.resources.some((r) => r.selected)) &&
+      data.integrations.every((i) => i.resources.length === 0 || i.resources.some((r) => r.selected)),
+  );
   useEffect(() => {
     onReadyChange?.(ready);
   }, [ready, onReadyChange]);
 
-  const notify = () => window.dispatchEvent(new Event(GOOGLE_UPDATED_EVENT));
-
-  async function post(url: string, body?: unknown) {
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: body ? JSON.stringify(body) : undefined,
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json.error ?? "Something went wrong.");
-      load();
-      notify();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   if (!projectId) return null;
-  if (data === undefined) return <Skeleton />;
-  if (data === null) {
+  if (resources.isPending) return <Skeleton />;
+  if (resources.isError || !data) {
     return (
       <div className="mb-5 flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] text-amber-800">
         <span>Couldn&apos;t load your Google connection.</span>
-        <button type="button" onClick={() => { setData(undefined); load(); }} className="font-medium underline">
+        <button type="button" onClick={() => resources.refetch()} className="font-medium underline">
           Retry
         </button>
       </div>

@@ -14,7 +14,11 @@ import { useProject } from "@/lib/project-store";
 import { useTerminalLog } from "@/lib/terminal-log-store";
 import { FEATURES } from "@/lib/features";
 import type { SearchInsights } from "@/lib/domain/search/types";
-import GoogleSourcesCard, { GOOGLE_UPDATED_EVENT } from "@/components/dashboard/search/GoogleSourcesCard";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ApiError, fetchJson } from "@/lib/query/fetchJson";
+import { SkeletonCard, SkeletonLines, SkeletonStats } from "@/components/shared/Skeleton";
+import { qk } from "@/lib/query/keys";
+import GoogleSourcesCard from "@/components/dashboard/search/GoogleSourcesCard";
 import GoogleSummary from "@/components/dashboard/search/GoogleSummary";
 import SearchHistoryBar from "@/components/dashboard/search/SearchHistoryBar";
 import SearchInsightsSection from "@/components/dashboard/search/SearchInsightsSection";
@@ -105,21 +109,12 @@ function DeltaBadge({ change, lowerIsBetter = false }: { change: number | null; 
 
 export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onToggle: () => void; }) {
   const [tab, setTab] = useState<Tab>("SEO");
-  const [auditData, setAuditData] = useState<SEOAuditPayload | null>(null);
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
   const [loading, setLoading] = useState(false);
-  const [linksResult, setLinksResult] = useState<{ links: CheckedLink[]; checkedAt: string } | null>(null);
   const [linksChecking, setLinksChecking] = useState(false);
-  const [geoResult, setGeoResult] = useState<{ rows: GeoCitationRow[]; checkedAt: string } | null>(null);
   const [geoChecking, setGeoChecking] = useState(false);
-  const [siteCrawlResult, setSiteCrawlResult] = useState<{ pages: CrawledPage[]; checkedAt: string } | null>(null);
   const [siteCrawling, setSiteCrawling] = useState(false);
   const [pageSpeedRunning, setPageSpeedRunning] = useState(false);
-  const [trafficResult, setTrafficResult] = useState<TrafficResult | null>(null);
-  const [trafficLoading, setTrafficLoading] = useState(false);
-  const [trafficError, setTrafficError] = useState<string | null>(null);
-  // Bumped when the Google connection or property choice changes, so Traffic data reloads without a page refresh.
-  const [googleVersion, setGoogleVersion] = useState(0);
   const [googleReady, setGoogleReady] = useState(false);
   const [pageEvidence, setPageEvidence] = useState<Record<string, PageEvidence | { error: string }>>({});
   const [findings, setFindings] = useState<AnalyticsFinding[]>([]);
@@ -129,22 +124,70 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
   const { log, logDone } = useTerminalLog();
   const searchParams = useSearchParams();
 
-  const loadAudit = useCallback(async (url: string) => {
-    try {
-      const res = await fetch(`/api/agents/seo/audit?url=${encodeURIComponent(url)}`);
-      if (res.ok) {
-        const data = await res.json();
-        // Platform mode: `payload` is a Postgres jsonb column — Supabase
-        // already returns it parsed. Self-host: SQLite stores it as a TEXT
-        // string, still needs JSON.parse(). Unconditionally parsing broke
-        // every platform-mode audit load (JSON.parse on an already-parsed
-        // object stringifies to "[object Object]" first, then fails).
-        if (data.payload) setAuditData(typeof data.payload === "string" ? JSON.parse(data.payload) : data.payload);
+  const queryClient = useQueryClient();
+  const pid = project?.id;
+
+  // Server data lives in one shared cache keyed by project: switching project can never show
+  // another project's data, a failed load is an error (not "never run"), and mutations below
+  // write straight into the cache.
+  const auditKey = qk.audit(pid, project?.url, auditVersion);
+  const auditQuery = useQuery({
+    queryKey: auditKey,
+    enabled: open && Boolean(project?.url),
+    queryFn: async (): Promise<SEOAuditPayload | null> => {
+      const data = await fetchJson<{ payload?: SEOAuditPayload | string | null }>(
+        `/api/agents/seo/audit?url=${encodeURIComponent(project?.url ?? "")}`,
+      );
+      // Platform mode: `payload` is a Postgres jsonb column, already parsed. Self-host: SQLite
+      // stores TEXT that needs JSON.parse(). Parsing unconditionally broke every platform audit load.
+      if (!data.payload) return null;
+      return typeof data.payload === "string" ? JSON.parse(data.payload) : data.payload;
+    },
+  });
+  const auditData = auditQuery.data ?? null;
+  const auditLoading = auditQuery.isPending && open && Boolean(project?.url);
+  const setAuditData = (value: SEOAuditPayload | null) => queryClient.setQueryData(auditKey, value);
+
+  type LinksResult = { links: CheckedLink[]; checkedAt: string };
+  type GeoResult = { rows: GeoCitationRow[]; checkedAt: string };
+  type CrawlResult = { pages: CrawledPage[]; checkedAt: string };
+  const savedResult = <T,>(key: readonly string[], url: string, enabled: boolean) => ({
+    queryKey: key,
+    enabled,
+    queryFn: async (): Promise<T | null> => (await fetchJson<{ result?: T | null }>(url)).result ?? null,
+  });
+  const linksKey = qk.links(pid);
+  const geoKey = qk.geo(pid);
+  const crawlKey = qk.siteCrawl(pid);
+  const linksResult = useQuery(savedResult<LinksResult>(linksKey, "/api/agents/links/check", open && Boolean(project) && tab === "Links")).data ?? null;
+  const geoResult = useQuery(savedResult<GeoResult>(geoKey, "/api/agents/geo/check", open && Boolean(project) && tab === "GEO")).data ?? null;
+  const siteCrawlResult = useQuery(savedResult<CrawlResult>(crawlKey, "/api/agents/site-crawl/run", open && Boolean(project) && tab === "Links")).data ?? null;
+  const setLinksResult = (value: LinksResult | null) => queryClient.setQueryData(linksKey, value);
+  const setGeoResult = (value: GeoResult | null) => queryClient.setQueryData(geoKey, value);
+  const setSiteCrawlResult = (value: CrawlResult | null) => queryClient.setQueryData(crawlKey, value);
+
+  // Real Search Console + Analytics numbers: on the Traffic tab, and on SEO once a site is chosen.
+  const trafficQuery = useQuery({
+    queryKey: qk.traffic(pid),
+    enabled: open && Boolean(project) && (tab === "Traffic" || (tab === "SEO" && googleReady)),
+    staleTime: 5 * 60_000,
+    queryFn: async () => {
+      log("Fetching real Search Console + Analytics data...");
+      try {
+        const data = await fetchJson<TrafficResult>("/api/agents/analytics/traffic");
+        logDone(`Traffic data loaded — ${data.totals.clicks} clicks over the last 28 days.`);
+        return data;
+      } catch (err) {
+        logDone(`⚠ ${err instanceof Error ? err.message : "Failed to load Traffic data."}`);
+        throw err;
       }
-    } catch (e) {
-      console.error(e);
-    }
-  }, []);
+    },
+  });
+  const trafficResult = trafficQuery.data ?? null;
+  const trafficLoading = trafficQuery.isFetching && !trafficQuery.data;
+  const trafficError = trafficQuery.error instanceof Error ? trafficQuery.error.message : null;
+  const trafficNeedsSetup = trafficQuery.error instanceof ApiError && trafficQuery.error.status >= 400 && trafficQuery.error.status < 500;
+  const retryTraffic = () => void trafficQuery.refetch();
 
   useEffect(() => {
     const error = searchParams.get("ga_error");
@@ -154,7 +197,8 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setTab("SEO");
       show("Google connected — choose your site below.");
-      window.dispatchEvent(new Event(GOOGLE_UPDATED_EVENT));
+      void queryClient.invalidateQueries({ queryKey: qk.googleResources(pid) });
+      void queryClient.invalidateQueries({ queryKey: qk.traffic(pid) });
     }
     if (error || connected) {
       const clean = new URLSearchParams(window.location.search);
@@ -164,82 +208,6 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
-
-  // A changed Google connection or property must refresh Traffic without a page reload.
-  useEffect(() => {
-    const onGoogleUpdated = () => {
-      setTrafficResult(null);
-      setTrafficError(null);
-      setGoogleVersion((v) => v + 1);
-    };
-    window.addEventListener(GOOGLE_UPDATED_EVENT, onGoogleUpdated);
-    return () => window.removeEventListener(GOOGLE_UPDATED_EVENT, onGoogleUpdated);
-  }, []);
-
-  useEffect(() => {
-    if (open && project?.url) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      loadAudit(project.url);
-    }
-    // auditVersion bumps once the automatic post-creation crawl actually
-    // finishes — project.url alone updates the instant the project is
-    // created, well before that, so without this the first fetch here can
-    // land before any audit data exists and nothing re-triggers it.
-  }, [open, project?.url, auditVersion, loadAudit]);
-
-  useEffect(() => {
-    if (!open || !project) return;
-    if (tab === "Links" && !linksResult) {
-      fetch("/api/agents/links/check")
-        .then((r) => r.json())
-        .then((data) => data.result && setLinksResult(data.result))
-        .catch(() => {});
-    }
-    if (tab === "GEO" && !geoResult) {
-      fetch("/api/agents/geo/check")
-        .then((r) => r.json())
-        .then((data) => data.result && setGeoResult(data.result))
-        .catch(() => {});
-    }
-    if (tab === "Links" && !siteCrawlResult) {
-      fetch("/api/agents/site-crawl/run")
-        .then((r) => r.json())
-        .then((data) => data.result && setSiteCrawlResult(data.result))
-        .catch(() => {});
-    }
-    if ((tab === "Traffic" || (tab === "SEO" && googleReady)) && !trafficResult) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setTrafficLoading(true);
-      setTrafficError(null);
-      log("Fetching real Search Console + Analytics data...");
-      Promise.all([
-        fetch("/api/agents/analytics/traffic"),
-        fetch("/api/agents/analytics/findings"),
-      ])
-        .then(async ([trafficResponse, findingsResponse]) => {
-          const findingsData = await findingsResponse.json().catch(() => null);
-          if (findingsResponse.ok && Array.isArray(findingsData?.findings)) setFindings(findingsData.findings);
-          const r = trafficResponse;
-          const data = await r.json();
-          if (!r.ok) {
-            setTrafficError(data.error ?? "Failed to load Traffic data.");
-            logDone(`⚠ ${data.error ?? "Failed to load Traffic data."}`);
-            return;
-          }
-          setTrafficResult(data);
-          logDone(`Traffic data loaded — ${data.totals.clicks} clicks over the last 28 days.`);
-        })
-        .catch(() => {
-          setTrafficResult(null);
-          setTrafficError("Failed to load Traffic data.");
-          logDone("⚠ Failed to load Traffic data.");
-        })
-        .finally(() => setTrafficLoading(false));
-    }
-    if (tab === "SEO") {
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, project?.id, tab, googleVersion, googleReady]);
 
   const handleInspectRankingPage = async (url: string) => {
     if (pageEvidence[url]) return;
@@ -498,24 +466,33 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
             }
           >
             {trafficLoading ? (
-              <div className="flex flex-col items-center justify-center py-12 text-center text-gray-500">
-                <Loader2 className="animate-spin text-gray-400 mb-2" size={24} />
-                <p className="text-sm">Fetching real Search Console + Analytics data...</p>
+              <div className="space-y-4" aria-busy="true">
+                <SkeletonStats count={3} />
+                <SkeletonCard rows={4} />
+                <SkeletonCard rows={3} />
               </div>
             ) : trafficError ? (
               <div className="rounded-xl border border-dashed border-gray-200 p-6 text-center text-[13px] text-gray-500">
                 <TrendingUp className="mx-auto mb-2 text-gray-300" size={28} />
                 {trafficError}
                 <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
-                  <a
-                    href="/api/auth/google-analytics/connect?return=dashboard"
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-[#111111] px-3 py-1.5 text-[12px] font-medium text-white hover:bg-black"
-                  >
-                    Connect Google Search Console
-                  </a>
-                  <a href="/settings/api-credentials" className="text-[12px] font-medium text-[#00846f] hover:underline">
-                    Settings → API Credentials
-                  </a>
+                  {trafficNeedsSetup ? (
+                    <button
+                      type="button"
+                      onClick={() => setTab("SEO")}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-[#111111] px-3 py-1.5 text-[12px] font-medium text-white hover:bg-black"
+                    >
+                      Connect Google or choose your site
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={retryTraffic}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-[#111111] px-3 py-1.5 text-[12px] font-medium text-white hover:bg-black"
+                    >
+                      Try again
+                    </button>
+                  )}
                 </div>
               </div>
             ) : trafficResult ? (
@@ -736,9 +713,9 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
                 )}
               </>
             ) : (
-              <div className="rounded-xl border border-dashed border-gray-200 p-6 text-center text-[13px] text-gray-500">
-                <TrendingUp className="mx-auto mb-2 text-gray-300" size={28} />
-                Loading...
+              <div className="space-y-4" aria-busy="true">
+                <SkeletonStats count={3} />
+                <SkeletonCard rows={4} />
               </div>
             )}
           </Section>
@@ -754,11 +731,17 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
                   loading={trafficLoading}
                   error={trafficError}
                   onViewTraffic={() => setTab("Traffic")}
-                  onRetry={() => setGoogleVersion((v) => v + 1)}
+                  onRetry={retryTraffic}
                 />
               )}
             </>
           )}
+          {auditLoading && !loading ? (
+            <div className="space-y-4 py-2" aria-busy="true">
+              <SkeletonCard rows={3} />
+              <SkeletonLines rows={5} />
+            </div>
+          ) : (
           <div className={`flex flex-col items-center justify-center text-center text-gray-500 ${tab === "SEO" ? "py-10" : "h-full"}`}>
              {loading ? <Loader2 className="animate-spin text-gray-400 mb-2" size={24} /> : <Search className="text-gray-300 mb-2" size={24} />}
              <p className="text-sm">
@@ -769,6 +752,7 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
                    : "Add a website in the project switcher at the top to see insights."}
              </p>
           </div>
+          )}
           </>
         ) : (
           <>
@@ -782,7 +766,7 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
                     loading={trafficLoading}
                     error={trafficError}
                     onViewTraffic={() => setTab("Traffic")}
-                    onRetry={() => setGoogleVersion((v) => v + 1)}
+                    onRetry={retryTraffic}
                   />
                 )}
 
