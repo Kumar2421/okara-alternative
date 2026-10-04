@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
+import { getDb } from "@/lib/db";
 import {
   fetchSearchAnalytics,
   fetchGA4Summary,
@@ -13,6 +14,9 @@ import {
 import { getValidPlatformGoogleToken } from "@/lib/domain/shared/getValidPlatformGoogleToken";
 import { findQueryOpportunities } from "@/lib/domain/analytics/queryOpportunities";
 import { attachRankingPages } from "@/lib/domain/analytics/queryPageCorrelation";
+import { buildSearchInsights } from "@/lib/domain/search/searchInsights";
+import { brandTermsFrom } from "@/lib/domain/search/searchIntent";
+import type { SearchInsights } from "@/lib/domain/search/types";
 import { FEATURES } from "@/lib/features";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
@@ -105,6 +109,7 @@ export async function GET() {
     let topQueries: { query: string; clicks: number; impressions: number; ctr: number; position: number }[] = [];
     let opportunities: ReturnType<typeof findQueryOpportunities> = [];
     let totals = { clicks: 0, impressions: 0, ctr: 0, position: 0 };
+    let search: SearchInsights | null = null;
     let gscError: string | null = null;
 
     if (siteUrl) {
@@ -131,6 +136,9 @@ export async function GET() {
           score: Number(row.score.toFixed(2)),
         }));
         opportunities = attachRankingPages(ranked, queryPageRows) as typeof opportunities;
+
+        const { data: project } = await db.from("projects").select("name, url").eq("id", projectId).eq("owner_id", user.id).maybeSingle();
+        search = buildSearchInsights(queryRows, brandTermsFrom(project?.name, project?.url));
 
         const totalClicks = byDate.reduce((sum, r) => sum + r.clicks, 0);
         const totalImpressions = byDate.reduce((sum, r) => sum + r.impressions, 0);
@@ -164,6 +172,7 @@ export async function GET() {
       byDate,
       topQueries,
       opportunities,
+      search,
       totals,
       gscError,
       ga4,
@@ -205,6 +214,7 @@ export async function GET() {
   let topQueries: { query: string; clicks: number; impressions: number; ctr: number; position: number }[] = [];
   let opportunities: ReturnType<typeof findQueryOpportunities> = [];
   let totals = { clicks: 0, impressions: 0, ctr: 0, position: 0 };
+  let search: SearchInsights | null = null;
   let gscError: string | null = null;
 
   if (siteUrl) {
@@ -230,6 +240,9 @@ export async function GET() {
         score: Number(row.score.toFixed(2)),
       }));
       opportunities = attachRankingPages(ranked, queryPageRows) as typeof opportunities;
+
+      const project = getDb().prepare("SELECT name, url FROM projects WHERE id = ?").get(projectId) as { name: string; url: string } | undefined;
+      search = buildSearchInsights(queryRows, brandTermsFrom(project?.name, project?.url));
 
       const totalClicks = byDate.reduce((sum, r) => sum + r.clicks, 0);
       const totalImpressions = byDate.reduce((sum, r) => sum + r.impressions, 0);
@@ -262,6 +275,7 @@ export async function GET() {
     byDate,
     topQueries,
     opportunities,
+    search,
     totals,
     gscError,
     ga4,

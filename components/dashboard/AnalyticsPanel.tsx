@@ -13,6 +13,66 @@ import type { GeoCitationRow } from "@/lib/domain/geo/GEOAgent";
 import { useProject } from "@/lib/project-store";
 import { useTerminalLog } from "@/lib/terminal-log-store";
 import { FEATURES } from "@/lib/features";
+import type { SearchInsights, SearchIntent } from "@/lib/domain/search/types";
+
+const INTENT_LABELS: Record<SearchIntent, string> = {
+  recommendation: "Looking for the best option",
+  alternative: "Looking for alternatives",
+  comparison: "Comparing options",
+  pricing: "Asking about price",
+  review: "Reading reviews",
+  how_to: "Learning how to do something",
+  problem: "Trying to fix a problem",
+  audience: "Searching for their kind of business",
+  commercial: "Shopping for a tool or service",
+  brand: "Looking for you by name",
+  informational: "General questions",
+};
+
+function SearchThemesCard({ search }: { search: SearchInsights }) {
+  if (search.analysedQueries === 0) return null;
+  return (
+    <div className="mb-5 rounded-xl border border-gray-200 bg-white p-4">
+      <h4 className="text-[12px] font-semibold text-gray-700">What people search for</h4>
+      <p className="mb-3 text-[11px] text-gray-500">
+        Grouped by what the searcher is trying to do, from your top {search.analysedQueries.toLocaleString()} searches.
+      </p>
+      <div className="space-y-2">
+        {search.intents.slice(0, 6).map((intent) => (
+          <div key={intent.intent}>
+            <div className="flex justify-between text-[12px] text-gray-700">
+              <span>{INTENT_LABELS[intent.intent]}</span>
+              <span className="text-gray-500">
+                {Math.round(intent.share * 100)}% · {intent.impressions.toLocaleString()} views
+              </span>
+            </div>
+            <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-gray-100">
+              <div className="h-full rounded-full bg-gray-800" style={{ width: `${Math.max(intent.share * 100, 2)}%` }} />
+            </div>
+          </div>
+        ))}
+      </div>
+      {search.themes.length > 0 && (
+        <>
+          <h5 className="mb-1 mt-4 text-[12px] font-semibold text-gray-700">Topics people ask about</h5>
+          <ul className="divide-y divide-gray-100">
+            {search.themes.slice(0, 5).map((theme) => (
+              <li key={theme.label} className="flex items-baseline justify-between gap-3 py-1.5 text-[12px]">
+                <span className="min-w-0 truncate text-gray-800" title={theme.examples.join(" · ")}>
+                  {theme.label}
+                  {theme.queries > 1 && <span className="ml-1 text-gray-400">+{theme.queries - 1} similar</span>}
+                </span>
+                <span className="shrink-0 text-gray-500">
+                  {theme.impressions.toLocaleString()} views · you rank ~{theme.position.toFixed(1)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
 
 const TABS = ["SEO", "Links", "Technical", "GEO", "Traffic", "Findings"] as const;
 type Tab = (typeof TABS)[number];
@@ -49,6 +109,7 @@ type TrafficResult = {
   byDate: TrafficByDate[];
   topQueries: TrafficQuery[];
   opportunities: TrafficOpportunity[];
+  search?: SearchInsights | null;
   totals: { clicks: number; impressions: number; ctr: number; position: number };
   gscError: string | null;
   ga4: { sessions: number; activeUsers: number; screenPageViews: number } | null;
@@ -291,31 +352,6 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
     // created, well before that, so without this the first fetch here can
     // land before any audit data exists and nothing re-triggers it.
   }, [open, project?.url, auditVersion, loadAudit]);
-
-  const fetchTraffic = useCallback((range: 7 | 30) => {
-    setTrafficLoading(true);
-    setTrafficError(null);
-    log(`Fetching real Search Console + Analytics data (last ${range} days)...`);
-    fetch(`/api/agents/analytics/traffic?range=${range}`)
-      .then(async (r) => {
-        const data = await r.json();
-        if (!r.ok) {
-          setTrafficResult(null);
-          setTrafficError(data.error ?? "Failed to load Traffic data.");
-          logDone(`⚠ ${data.error ?? "Failed to load Traffic data."}`);
-          return;
-        }
-        setTrafficResult(data);
-        logDone(`Traffic data loaded — ${data.funnel.clicks} clicks over the last ${range} days.`);
-      })
-      .catch(() => {
-        setTrafficResult(null);
-        setTrafficError("Failed to load Traffic data.");
-        logDone("⚠ Failed to load Traffic data.");
-      })
-      .finally(() => setTrafficLoading(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   useEffect(() => {
     if (!open || !project) return;
@@ -719,6 +755,8 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
                 {trafficResult.ga4Error && (
                   <div className="mb-5 text-[11px] text-amber-600">⚠ Google Analytics: {trafficResult.ga4Error}</div>
                 )}
+
+                {trafficResult.search && <SearchThemesCard search={trafficResult.search} />}
 
                 <h4 className="mb-2 text-[12px] font-semibold text-gray-700">Top Queries</h4>
                 <div className="mt-6">
