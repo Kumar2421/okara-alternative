@@ -4,6 +4,7 @@ import { createServiceClient } from "@/utils/supabase/serviceClient";
 import { FEATURES } from "@/lib/features";
 import { getConnectedEmail, listSearchConsoleSites, listGA4Properties } from "@/lib/domain/shared/googleAnalyticsOAuth";
 import { getConnectedEmail as getGmailConnectedEmail } from "@/lib/domain/shared/gmailOAuth";
+import { fetchGrantedScopes } from "@/lib/domain/shared/googleTokenInfo";
 import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
 import {
   upsertProjectIntegration,
@@ -36,7 +37,7 @@ async function persistPlatformGmailTokens(
   providerRefreshToken: string
 ) {
   const db = createServiceClient();
-  const email = await getGmailConnectedEmail(providerToken);
+  const [email, scopes] = await Promise.all([getGmailConnectedEmail(providerToken), fetchGrantedScopes(providerToken)]);
   const now = new Date().toISOString();
 
   const [{ data: accessSecretId, error: accessErr }, { data: refreshSecretId, error: refreshErr }] =
@@ -59,6 +60,8 @@ async function persistPlatformGmailTokens(
       token_expiry: now,
       external_email: email ?? null,
       external_property: null,
+      // Google lets people untick individual permissions, so record what was really granted.
+      scopes,
       updated_at: now,
     },
     { onConflict: "user_id,project_id,provider" }

@@ -6,7 +6,11 @@
  */
 const scope = (projectId: string | undefined) => ["project", projectId ?? "none"] as const;
 
+/** Account-level data that is the same for every project. */
+const account = ["account"] as const;
+
 export const qk = {
+  gmailStatus: () => [...account, "gmail-status"] as const,
   project: scope,
   dashboardData: (projectId: string | undefined) => [...scope(projectId), "dashboard-data"] as const,
   audit: (projectId: string | undefined, url: string | undefined, version: number) =>

@@ -27,7 +27,7 @@ async function getValidGmailAccessTokenSupabase(db: SupabaseClient, userId: stri
     .maybeSingle();
 
   if (!conn?.access_token_secret_id) {
-    throw new Error("Gmail isn't connected — connect it in Settings → API Credentials.");
+    throw new Error("Gmail isn't connected — use Connect Gmail at the top of the Leads panel.");
   }
 
   const expiresAt = conn.token_expiry ? new Date(conn.token_expiry).getTime() : 0;
@@ -37,11 +37,11 @@ async function getValidGmailAccessTokenSupabase(db: SupabaseClient, userId: stri
   }
 
   if (!conn.refresh_token_secret_id) {
-    throw new Error("Gmail isn't connected — connect it in Settings → API Credentials.");
+    throw new Error("Gmail isn't connected — use Connect Gmail at the top of the Leads panel.");
   }
   const { data: refreshSecret } = await db.rpc("vault_get_secret", { p_id: conn.refresh_token_secret_id });
   const refreshToken = refreshSecret as string;
-  if (!refreshToken) throw new Error("Gmail isn't connected — connect it in Settings → API Credentials.");
+  if (!refreshToken) throw new Error("Gmail isn't connected — use Connect Gmail at the top of the Leads panel.");
 
   const clientId = process.env.GMAIL_CLIENT_ID;
   const clientSecret = process.env.GMAIL_CLIENT_SECRET;
@@ -129,7 +129,7 @@ export async function POST(req: NextRequest) {
       .eq("provider", "gmail")
       .maybeSingle();
     if (!conn?.external_email) {
-      return NextResponse.json({ error: "Gmail isn't connected — connect it in Settings → API Credentials." }, { status: 422 });
+      return NextResponse.json({ error: "Gmail isn't connected — use Connect Gmail at the top of the Leads panel." }, { status: 422 });
     }
     const fromEmail = conn.external_email;
 
