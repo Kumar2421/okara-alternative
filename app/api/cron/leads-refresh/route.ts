@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FEATURES } from "@/lib/features";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
-import { autoGenerateLeads } from "@/lib/domain/leads/autoGenerateLeads";
+import { generateAutoLeads, type AutoLeadResult } from "@/lib/domain/leads/autoGenerateLeads";
 
 // Vercel Cron's own function timeout, not the per-request default — this
 // loops every eligible project in one invocation, so it needs real headroom
@@ -46,12 +46,19 @@ export async function GET(req: NextRequest) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   let totalAdded = 0;
-  const results: { projectId: string; added: number }[] = [];
+  const results: { projectId: string; added: number; reason: string | null; message: string | null }[] = [];
 
   for (const project of dueProjects ?? []) {
-    const added = await autoGenerateLeads(db, project.owner_id, project, DAILY_LIMIT).catch(() => 0);
-    totalAdded += added;
-    results.push({ projectId: project.id, added });
+    const outcome: AutoLeadResult = await generateAutoLeads(db, project.owner_id, project, DAILY_LIMIT).catch(
+      (err): AutoLeadResult => ({
+        added: 0,
+        reason: "search_failed",
+        message: err instanceof Error ? err.message.slice(0, 200) : "Unexpected error.",
+        target: null,
+      })
+    );
+    totalAdded += outcome.added;
+    results.push({ projectId: project.id, added: outcome.added, reason: outcome.reason, message: outcome.message });
 
     await db
       .from("projects")

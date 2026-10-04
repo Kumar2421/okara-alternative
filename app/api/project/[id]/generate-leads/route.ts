@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { FEATURES } from "@/lib/features";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
-import { autoGenerateLeads } from "@/lib/domain/leads/autoGenerateLeads";
+import { generateAutoLeads } from "@/lib/domain/leads/autoGenerateLeads";
 
 // Vercel: LLM/crawl calls can run past the 10s default — allow up to the
 // platform max for this route (Hobby plan caps at 60s; Pro allows more).
@@ -43,7 +43,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   if (projectError) return NextResponse.json({ error: projectError.message }, { status: 500 });
   if (!project) return NextResponse.json({ error: "No project with that id" }, { status: 404 });
 
-  const added = await autoGenerateLeads(db, user.id, project, CREATION_LIMIT);
+  const outcome = await generateAutoLeads(db, user.id, project, CREATION_LIMIT);
 
   const { error: updateError } = await db
     .from("projects")
@@ -52,5 +52,5 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     .eq("owner_id", user.id);
   if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 });
 
-  return NextResponse.json({ added });
+  return NextResponse.json({ added: outcome.added, reason: outcome.reason, message: outcome.message });
 }
