@@ -142,6 +142,13 @@ test("readOutcomes: nothing to attach for actions that were never implemented", 
   assert.equal(only.outcome, null);
 });
 
+test("readOutcomes: reports whether undo is still allowed", async () => {
+  const h = await implemented();
+  assert.equal((await readOutcomes(h.ports, [h.state.action], new Date(T0.getTime() + 3_600_000)))[0].canUndo, true);
+  assert.equal((await readOutcomes(h.ports, [h.state.action], new Date(T0.getTime() + UNDO_WINDOW_MS + 60_000)))[0].canUndo, false);
+  assert.equal((await readOutcomes(harness().ports, [makeAction()], T0))[0].canUndo, false, "never implemented");
+});
+
 test("readOutcomes: waiting early, then improved", async () => {
   const h = await implemented();
   assert.equal((await readOutcomes(h.ports, [h.state.action], at(3)))[0].outcome?.status, "waiting");

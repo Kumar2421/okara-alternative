@@ -104,7 +104,13 @@ export async function undoImplementation(ports: OutcomePorts, args: { actionId: 
   return reset ? { ok: true, value: reset } : fail(404, "Action not found.");
 }
 
-export type ActionWithOutcome = Action & { outcome: Outcome | null };
+/** An action with its measured outcome, and whether "I made this change" can still be undone. */
+export type ActionWithOutcome = Action & { outcome: Outcome | null; canUndo: boolean };
+
+function canUndoAt(action: Action, now: Date): boolean {
+  const implementation = action.status === "completed" ? implementationOf(action.result) : null;
+  return Boolean(implementation && now.getTime() - Date.parse(implementation.implementedAt) <= UNDO_WINDOW_MS);
+}
 
 /**
  * Attach each implemented action's outcome. Along the way, saves what is
@@ -114,7 +120,7 @@ export type ActionWithOutcome = Action & { outcome: Outcome | null };
  */
 export async function readOutcomes(ports: OutcomePorts, actions: Action[], now: Date = new Date()): Promise<ActionWithOutcome[]> {
   const implemented = actions.filter((a) => a.status === "completed" && implementationOf(a.result));
-  if (implemented.length === 0) return actions.map((action) => ({ ...action, outcome: null }));
+  if (implemented.length === 0) return actions.map((action) => ({ ...action, outcome: null, canUndo: false }));
 
   const snapshot = await ports.getSnapshot();
   const findings = new Map<string, Finding | null>();
@@ -146,5 +152,5 @@ export async function readOutcomes(ports: OutcomePorts, actions: Action[], now: 
     }
   }
 
-  return actions.map((action) => ({ ...action, outcome: out.get(action.id) ?? null }));
+  return actions.map((action) => ({ ...action, outcome: out.get(action.id) ?? null, canUndo: canUndoAt(action, now) }));
 }

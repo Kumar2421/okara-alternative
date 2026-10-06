@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Action } from "@/lib/domain/actions/actionTypes";
+import type { ActionWithOutcome } from "@/lib/domain/search/outcomeService";
 import type { Finding } from "@/lib/domain/findings/findingTypes";
 import type { Recommendation } from "@/lib/domain/recommendations/recommendationTypes";
 import { fetchJson } from "@/lib/query/fetchJson";
@@ -66,7 +67,7 @@ export function useFindingWork(findingId: string | null) {
   const actionsKey = qk.findingActions(projectId, id);
   const actions = useQuery({
     queryKey: actionsKey,
-    queryFn: async () => (await fetchJson<{ actions?: Action[] }>(`/api/agents/actions?findingId=${encodeURIComponent(id)}`)).actions ?? [],
+    queryFn: async () => (await fetchJson<{ actions?: ActionWithOutcome[] }>(`/api/agents/actions?findingId=${encodeURIComponent(id)}`)).actions ?? [],
     enabled,
   });
 
@@ -96,8 +97,42 @@ export function useFindingWork(findingId: string | null) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: actionsKey }),
   });
 
-  const busyKey = create.isPending ? create.variables?.id : cancel.isPending ? (cancel.variables?.recommendationId ?? cancel.variables?.id) : null;
-  const error = [create.error, cancel.error].find((e): e is Error => e instanceof Error)?.message ?? null;
+  // "I made this change": the server saves today's numbers and the page's current title, description and
+  // heading as the baseline, completes the action, and moves its finding to Fixed (so both caches change).
+  const implement = useMutation({
+    mutationFn: ({ action, pageUrl }: { action: Action; pageUrl?: string }) =>
+      fetchJson<{ action: Action }>("/api/agents/actions", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: action.id, implemented: true, pageUrl }),
+      }),
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: actionsKey }),
+        queryClient.invalidateQueries({ queryKey: qk.findings(projectId) }),
+      ]),
+  });
 
-  return { recommendations, actions, create, cancel, busyKey: busyKey ?? null, error };
+  const undo = useMutation({
+    mutationFn: (action: Action) =>
+      fetchJson<{ action: Action }>("/api/agents/actions", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: action.id, undoImplemented: true }),
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: actionsKey }),
+  });
+
+  const busyKey = create.isPending
+    ? create.variables?.id
+    : cancel.isPending
+      ? (cancel.variables?.recommendationId ?? cancel.variables?.id)
+      : implement.isPending
+        ? implement.variables?.action.id
+        : undo.isPending
+          ? undo.variables?.id
+          : null;
+  const error = [create.error, cancel.error, implement.error, undo.error].find((e): e is Error => e instanceof Error)?.message ?? null;
+
+  return { recommendations, actions, create, cancel, implement, undo, busyKey: busyKey ?? null, error };
 }

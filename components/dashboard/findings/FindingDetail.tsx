@@ -130,6 +130,8 @@ export default function FindingDetail({
             busyRecommendationId={work.busyKey}
             onCreate={(recommendation) => work.create.mutate(recommendation)}
             onCancel={(action) => work.cancel.mutate(action)}
+            onImplement={(action, pageUrl) => work.implement.mutate({ action, pageUrl })}
+            onUndo={(action) => work.undo.mutate(action)}
           />
         )}
       </section>
