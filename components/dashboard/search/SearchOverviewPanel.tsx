@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { qk } from "@/lib/query/keys";
 import { SkeletonStats, SkeletonCard } from "@/components/shared/Skeleton";
+import { summaryTotals } from "@/lib/domain/search/summaryTotals.ts";
 import type { NextActionCard } from "@/lib/domain/search/nextActions.ts";
 import type { WeekEvent } from "@/lib/domain/search/weekChanges.ts";
 
@@ -64,15 +65,8 @@ export default function SearchOverviewPanel({ projectId }: { projectId: string }
   }
 
   const stats = data?.stats;
-  const d28Totals = stats?.d28.queries.reduce(
-    (acc, q) => ({ clicks: acc.clicks + q.clicks, impressions: acc.impressions + q.impressions, position: acc.position + q.position / stats.d28.queries.length }),
-    { clicks: 0, impressions: 0, position: 0 },
-  ) || { clicks: 0, impressions: 0, position: 0 };
-
-  const prev28Totals = stats?.prev28.queries.reduce(
-    (acc, q) => ({ clicks: acc.clicks + q.clicks, impressions: acc.impressions + q.impressions, position: acc.position + q.position / stats.prev28.queries.length }),
-    { clicks: 0, impressions: 0, position: 0 },
-  ) || { clicks: 0, impressions: 0, position: 0 };
+  const d28Totals = summaryTotals(stats?.d28 ?? null);
+  const prev28Totals = summaryTotals(stats?.prev28 ?? null);
 
   const clicksDelta = d28Totals.clicks - prev28Totals.clicks;
   const impressionsDelta = d28Totals.impressions - prev28Totals.impressions;
@@ -83,7 +77,7 @@ export default function SearchOverviewPanel({ projectId }: { projectId: string }
       {/* Summary Stats */}
       <section>
         <div className="mb-2 flex items-center justify-between">
-          <h4 className="text-[12px] font-semibold text-gray-700">Last 28 days vs previous 28 days</h4>
+          <h4 className="text-[12px] font-semibold text-gray-700">Your top searches (28 days vs previous)</h4>
         </div>
         <div className="grid grid-cols-3 gap-3">
           <StatCard label="Search clicks" value={d28Totals.clicks.toLocaleString()} delta={clicksDelta} />
