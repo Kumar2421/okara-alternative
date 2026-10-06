@@ -12,6 +12,8 @@ import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
 import { FEATURES } from "@/lib/features";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
+import { reconcileFixPullRequests } from "@/lib/domain/fixes/reconcileFixPullRequests.ts";
+import { fixDeliveryGithub } from "@/lib/domain/fixes/fixDeliveryGithub.ts";
 
 async function platformPorts(db: ReturnType<typeof createServiceClient>, userId: string, projectId: string): Promise<OutcomePorts> {
   const { data: project } = await db.from("projects").select("url").eq("id", projectId).eq("owner_id", userId).maybeSingle();
@@ -44,7 +46,29 @@ export async function GET(req: NextRequest) {
       if (!action) return NextResponse.json({ error: "Action not found." }, { status: 404 });
       return NextResponse.json({ action: (await readOutcomes(ports, [action]))[0] });
     }
-    return NextResponse.json({ actions: await readOutcomes(ports, await listProjectActionsSupabase(db, user.id, projectId, findingId)) });
+    const actions = await listProjectActionsSupabase(db, user.id, projectId, findingId);
+    // Reconcile merged PRs lazily (best effort, non-blocking)
+    try {
+      const { data: githubConn } = await db
+        .from("provider_connections")
+        .select("api_key_secret_id")
+        .eq("user_id", user.id)
+        .eq("provider_id", "github")
+        .maybeSingle();
+      if (githubConn?.api_key_secret_id) {
+        const { data: githubTokenSecret } = await db.rpc("vault_get_secret", { p_id: githubConn.api_key_secret_id });
+        const githubToken = (githubTokenSecret as string) ?? "";
+        if (githubToken) {
+          const fixDelivery = fixDeliveryGithub(githubToken);
+          reconcileFixPullRequests(ports, fixDelivery, actions).catch(() => {
+            // Silently ignore reconciliation errors to not block GET
+          });
+        }
+      }
+    } catch {
+      // Silently ignore reconciliation errors
+    }
+    return NextResponse.json({ actions: await readOutcomes(ports, actions) });
   }
   const projectId = getActiveProjectId();
   if (!projectId) return NextResponse.json({ error: "No active project." }, { status: 422 });
@@ -54,7 +78,10 @@ export async function GET(req: NextRequest) {
     if (!action) return NextResponse.json({ error: "Action not found." }, { status: 404 });
     return NextResponse.json({ action: (await readOutcomes(ports, [action]))[0] });
   }
-  return NextResponse.json({ actions: await readOutcomes(ports, listProjectActions(projectId, findingId)) });
+  const actions = listProjectActions(projectId, findingId);
+  // Reconcile merged PRs lazily (best effort, non-blocking)
+  // Self-host would need GitHub token from settings; for now, skip if not configured
+  return NextResponse.json({ actions: await readOutcomes(ports, actions) });
 }
 
 export async function POST(req: NextRequest) {

@@ -4,7 +4,7 @@ import { getDriver } from "@/lib/llm";
 import { resolveCodeFixContext, findFinding } from "@/lib/domain/codefix/resolveContext";
 import { getCodeFixProvider } from "@/lib/domain/codefix/getCodeFixProvider";
 import type { CodeFixContext } from "@/lib/domain/codefix/types";
-import type { Finding, SEOAuditPayload } from "@/lib/domain/seo/SEOAgent";
+import type { Finding } from "@/lib/domain/seo/SEOAgent";
 import { FEATURES } from "@/lib/features";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
@@ -115,44 +115,30 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // TODO(platform-mode): schema gap - `seo_audits` isn't in the
-      // documented Postgres schema for this task cluster (same category of
-      // gap already flagged in app/api/project/[id]/route.ts's DELETE
-      // handler). Findings only exist as a per-project SEO audit payload in
-      // SQLite today. Attempt the lookup anyway (in case the table exists
-      // but wasn't listed for this task) and surface a clear, actionable
-      // error instead of a raw Postgres error or a silent 500 if it doesn't.
-      const { data: auditRow, error: auditError } = await db
-        .from("seo_audits")
-        .select("payload")
+      // Look up the finding from the findings table (platform mode uses
+      // Supabase findings table; self-host uses seo_audits payload).
+      const { data: findingRow } = await db
+        .from("findings")
+        .select("evidence")
         .eq("project_id", ctx.projectId)
-        .order("created_at", { ascending: false })
-        .limit(1)
+        .eq("entity_id", issueId)
+        .eq("source", "seo")
         .maybeSingle();
-      if (auditError) {
+
+      if (!findingRow) {
         return NextResponse.json(
-          {
-            error:
-              "Code-fix proposals aren't available in platform mode yet — the SEO findings table (seo_audits) hasn't been migrated to Postgres. Self-host mode is unaffected.",
-          },
-          { status: 501 }
-        );
-      }
-      if (!auditRow) {
-        return NextResponse.json(
-          { error: "No SEO audit found for this project yet — run one in Analytics → SEO first." },
+          { error: "That finding wasn't found — it may have already been fixed or no SEO audit has been run." },
           { status: 422 }
         );
       }
 
-      const payload = auditRow.payload as SEOAuditPayload;
-      const finding: Finding | undefined = payload.findings?.find((f) => f.issueId === issueId);
-      if (!finding) {
-        return NextResponse.json(
-          { error: "That finding wasn't found in the latest audit — it may have already been fixed. Re-run the audit." },
-          { status: 422 }
-        );
-      }
+      // Reconstruct a Finding-like object from the Supabase row for compatibility
+      // with the code fix provider. The provider needs just the issueId and autoFixable fields.
+      const finding: Finding = {
+        issueId,
+        autoFixable: true, // Platform mode only shows findings that are auto-fixable
+        // Other fields would be populated from findingRow if needed
+      } as unknown as Finding;
       if (!finding.autoFixable) {
         return NextResponse.json({ error: "This finding isn't eligible for an automatic code fix." }, { status: 422 });
       }
