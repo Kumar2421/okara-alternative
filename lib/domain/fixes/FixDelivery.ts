@@ -5,7 +5,12 @@
 
 export type PRStatus = "open" | "merged" | "closed";
 
+export type PRInfo = {
+  state: PRStatus;
+  mergedAt?: string; // ISO 8601 timestamp when PR was merged, undefined if not merged
+};
+
 export type FixDeliveryPort = {
-  /** Check the status of a PR by its URL. */
-  status(prUrl: string): Promise<PRStatus>;
+  /** Check the status of a PR by its URL, returning state and optional merge time. */
+  status(prUrl: string): Promise<PRInfo>;
 };

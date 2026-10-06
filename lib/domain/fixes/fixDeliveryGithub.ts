@@ -1,4 +1,4 @@
-import type { FixDeliveryPort } from "./FixDelivery.ts";
+import type { FixDeliveryPort, PRInfo } from "./FixDelivery.ts";
 
 const GITHUB_API_BASE = "https://api.github.com";
 const API_VERSION = "2022-11-28";
@@ -33,13 +33,13 @@ function parseGitHubPrUrl(prUrl: string): { owner: string; repo: string; number:
 }
 
 /**
- * GitHub PR status adapter. Queries GitHub API to determine PR state.
+ * GitHub PR status adapter. Queries GitHub API to determine PR state and merge time.
  */
 export function fixDeliveryGithub(githubToken: string): FixDeliveryPort {
   return {
-    status: async (prUrl) => {
+    status: async (prUrl): Promise<PRInfo> => {
       const parsed = parseGitHubPrUrl(prUrl);
-      if (!parsed) return "closed"; // Invalid URL → treat as closed
+      if (!parsed) return { state: "closed" };
 
       try {
         const res = await fetch(
@@ -48,21 +48,20 @@ export function fixDeliveryGithub(githubToken: string): FixDeliveryPort {
         );
 
         if (!res.ok) {
-          // If we can't find the PR, assume it's closed
-          return "closed";
+          return { state: "closed" };
         }
 
         const data = await res.json();
         if (data.merged_at) {
-          return "merged";
+          return { state: "merged", mergedAt: data.merged_at };
         }
         if (data.state === "open") {
-          return "open";
+          return { state: "open" };
         }
-        return "closed";
+        return { state: "closed" };
       } catch {
         // Network error or parsing failure → assume closed (conservative)
-        return "closed";
+        return { state: "closed" };
       }
     },
   };

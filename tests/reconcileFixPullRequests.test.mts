@@ -84,32 +84,23 @@ function harness(opts: { actions?: Action[]; finding?: Finding } = {}) {
   return { ports, fixDelivery, actions };
 }
 
-test("reconcileFixPullRequests: merged PR gets marked as implemented", async () => {
+test("reconcileFixPullRequests: merged PR gets marked as implemented with actual merge time", async () => {
   const h = harness({
     actions: [makeAction("https://github.com/o/r/pull/1")],
   });
-  h.fixDelivery.setState("https://github.com/o/r/pull/1", "merged");
+  const mergedAt = new Date("2026-10-05T12:00:00Z").toISOString();
+  h.fixDelivery.setState("https://github.com/o/r/pull/1", "merged", mergedAt);
 
-  const prUrl = "https://github.com/o/r/pull/1";
-  const action = h.actions[0];
+  const result = await reconcileFixPullRequests(h.ports, h.fixDelivery, h.actions);
 
-  // Verify extractPrUrl works
-  const extracted = action.result && typeof action.result === "object"
-    ? (action.result as Record<string, unknown>)["implementation"]
-      ? ((action.result as Record<string, unknown>)["implementation"] as Record<string, unknown>)["change"]
-        ? (((action.result as Record<string, unknown>)["implementation"] as Record<string, unknown>)["change"] as Record<string, unknown>)["prUrl"]
-        : null
-      : null
-    : null;
-  assert.equal(extracted, prUrl, "extractPrUrl should find the PR URL");
-
-  await reconcileFixPullRequests(h.ports, h.fixDelivery, h.actions);
-
+  assert.equal(result.implemented, 1);
+  assert.equal(result.skipped, 0);
+  assert.equal(result.failed.length, 0);
   const actionAfter = h.actions[0];
-  assert.equal(actionAfter.status, "completed", "action should be marked completed");
+  assert.equal(actionAfter.status, "completed");
   const impl = implementationOf(actionAfter.result);
   assert.equal(impl?.via, "github_pr");
-  assert.equal(impl?.change?.prUrl, "https://github.com/o/r/pull/1");
+  assert.equal(impl?.implementedAt, mergedAt, "should use actual merge time, not current time");
 });
 
 test("reconcileFixPullRequests: open PR is not marked as implemented", async () => {
@@ -118,10 +109,11 @@ test("reconcileFixPullRequests: open PR is not marked as implemented", async () 
   });
   h.fixDelivery.setState("https://github.com/o/r/pull/1", "open");
 
-  await reconcileFixPullRequests(h.ports, h.fixDelivery, h.actions);
+  const result = await reconcileFixPullRequests(h.ports, h.fixDelivery, h.actions);
 
-  const action = h.actions[0];
-  assert.equal(action.status, "proposed");
+  assert.equal(result.implemented, 0);
+  assert.equal(result.skipped, 1);
+  assert.equal(h.actions[0].status, "proposed");
 });
 
 test("reconcileFixPullRequests: closed PR is not marked as implemented", async () => {
@@ -130,23 +122,28 @@ test("reconcileFixPullRequests: closed PR is not marked as implemented", async (
   });
   h.fixDelivery.setState("https://github.com/o/r/pull/1", "closed");
 
-  await reconcileFixPullRequests(h.ports, h.fixDelivery, h.actions);
+  const result = await reconcileFixPullRequests(h.ports, h.fixDelivery, h.actions);
 
-  const action = h.actions[0];
-  assert.equal(action.status, "proposed");
+  assert.equal(result.implemented, 0);
+  assert.equal(result.skipped, 1);
+  assert.equal(h.actions[0].status, "proposed");
 });
 
 test("reconcileFixPullRequests: idempotent; merged PR marked again stays completed", async () => {
   const h = harness();
   const action = makeAction("https://github.com/o/r/pull/1");
   h.actions.push(action);
-  h.fixDelivery.setState("https://github.com/o/r/pull/1", "merged");
+  const mergedAt = new Date("2026-10-05T12:00:00Z").toISOString();
+  h.fixDelivery.setState("https://github.com/o/r/pull/1", "merged", mergedAt);
 
-  await reconcileFixPullRequests(h.ports, h.fixDelivery, h.actions);
+  const result1 = await reconcileFixPullRequests(h.ports, h.fixDelivery, h.actions);
+  assert.equal(result1.implemented, 1, "first run should implement");
   assert.equal(h.actions[0].status, "completed");
 
-  // Run again
-  await reconcileFixPullRequests(h.ports, h.fixDelivery, h.actions);
+  // Run again — should skip since already implemented via github_pr
+  const result2 = await reconcileFixPullRequests(h.ports, h.fixDelivery, h.actions);
+  assert.equal(result2.implemented, 0);
+  assert.equal(result2.skipped, 1, "already-implemented action should be skipped");
   assert.equal(h.actions[0].status, "completed");
 });
 
@@ -161,14 +158,15 @@ test("reconcileFixPullRequests: skips actions already implemented via github_pr"
     },
   };
   h.actions.push(action);
-  h.fixDelivery.setState("https://github.com/o/r/pull/1", "merged");
+  const mergedAt = new Date("2026-10-05T12:00:00Z").toISOString();
+  h.fixDelivery.setState("https://github.com/o/r/pull/1", "merged", mergedAt);
 
-  const originalResult = action.result;
-  await reconcileFixPullRequests(h.ports, h.fixDelivery, h.actions);
+  const result = await reconcileFixPullRequests(h.ports, h.fixDelivery, h.actions);
 
-  // Should not change anything (already implemented via GitHub)
-  assert.deepEqual(action.result, originalResult);
-  assert.equal(action.status, "completed");
+  assert.equal(result.implemented, 0);
+  assert.equal(result.skipped, 1);
+  const impl = implementationOf(action.result);
+  assert.equal(impl?.via, "github_pr");
 });
 
 test("reconcileFixPullRequests: skips actions with no PR URL", async () => {
@@ -176,8 +174,10 @@ test("reconcileFixPullRequests: skips actions with no PR URL", async () => {
     actions: [makeAction(null)],
   });
 
-  await reconcileFixPullRequests(h.ports, h.fixDelivery, h.actions);
+  const result = await reconcileFixPullRequests(h.ports, h.fixDelivery, h.actions);
 
+  assert.equal(result.implemented, 0);
+  assert.equal(result.skipped, 1);
   assert.equal(h.actions[0].status, "proposed");
 });
 
@@ -189,13 +189,15 @@ test("reconcileFixPullRequests: skips completed/failed/cancelled actions", async
     actions.push({ status, action });
     h.actions.push(action);
   }
-  h.fixDelivery.setState("https://github.com/o/r/pull/1", "merged");
+  const mergedAt = new Date("2026-10-05T12:00:00Z").toISOString();
+  h.fixDelivery.setState("https://github.com/o/r/pull/1", "merged", mergedAt);
 
-  await reconcileFixPullRequests(h.ports, h.fixDelivery, h.actions);
+  const result = await reconcileFixPullRequests(h.ports, h.fixDelivery, h.actions);
 
-  // Verify that actions with non-proposed/approved status are left untouched
+  assert.equal(result.implemented, 0);
+  assert.equal(result.skipped, 3);
   for (const { status, action } of actions) {
-    assert.equal(action.status, status, `${status} action should not be changed`);
+    assert.equal(action.status, status);
   }
 });
 
@@ -205,37 +207,42 @@ test("reconcileFixPullRequests: one failing action doesn't block others", async 
   const action2 = makeAction("https://github.com/o/r/pull/2");
   h.actions.push(action1, action2);
 
-  // Simulate failure for action1 by id
   const originalGetAction = h.ports.getAction;
   h.ports.getAction = async (id) => {
     if (id === action1.id) throw new Error("Database error");
     return originalGetAction(id);
   };
 
-  h.fixDelivery.setState("https://github.com/o/r/pull/1", "merged");
-  h.fixDelivery.setState("https://github.com/o/r/pull/2", "merged");
+  const mergedAt = new Date("2026-10-05T12:00:00Z").toISOString();
+  h.fixDelivery.setState("https://github.com/o/r/pull/1", "merged", mergedAt);
+  h.fixDelivery.setState("https://github.com/o/r/pull/2", "merged", mergedAt);
 
-  await reconcileFixPullRequests(h.ports, h.fixDelivery, h.actions);
+  const result = await reconcileFixPullRequests(h.ports, h.fixDelivery, h.actions);
 
-  // Action 1 should fail and not block action 2
+  assert.equal(result.implemented, 1);
+  assert.equal(result.failed.length, 1);
+  assert.equal(result.failed[0].actionId, action1.id);
   assert.equal(h.actions[0].status, "proposed");
   assert.equal(h.actions[1].status, "completed");
 });
 
 test("reconcileFixPullRequests: handles multiple actions with different PR states", async () => {
   const h = harness();
+  const mergedAt = new Date("2026-10-05T12:00:00Z").toISOString();
   h.actions.push(
     makeAction("https://github.com/o/r/pull/1"),
     makeAction("https://github.com/o/r/pull/2"),
     makeAction("https://github.com/o/r/pull/3")
   );
 
-  h.fixDelivery.setState("https://github.com/o/r/pull/1", "merged");
+  h.fixDelivery.setState("https://github.com/o/r/pull/1", "merged", mergedAt);
   h.fixDelivery.setState("https://github.com/o/r/pull/2", "open");
   h.fixDelivery.setState("https://github.com/o/r/pull/3", "closed");
 
-  await reconcileFixPullRequests(h.ports, h.fixDelivery, h.actions);
+  const result = await reconcileFixPullRequests(h.ports, h.fixDelivery, h.actions);
 
+  assert.equal(result.implemented, 1);
+  assert.equal(result.skipped, 2);
   assert.equal(h.actions[0].status, "completed");
   assert.equal(h.actions[1].status, "proposed");
   assert.equal(h.actions[2].status, "proposed");

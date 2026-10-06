@@ -12,8 +12,8 @@ import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
 import { FEATURES } from "@/lib/features";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
-import { reconcileFixPullRequests } from "@/lib/domain/fixes/reconcileFixPullRequests.ts";
-import { fixDeliveryGithub } from "@/lib/domain/fixes/fixDeliveryGithub.ts";
+import { reconcileFixPullRequests } from "@/lib/domain/fixes/reconcileFixPullRequests";
+import { fixDeliveryGithub } from "@/lib/domain/fixes/fixDeliveryGithub";
 
 async function platformPorts(db: ReturnType<typeof createServiceClient>, userId: string, projectId: string): Promise<OutcomePorts> {
   const { data: project } = await db.from("projects").select("url").eq("id", projectId).eq("owner_id", userId).maybeSingle();
