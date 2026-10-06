@@ -62,3 +62,15 @@ export function transitionAction(projectId: string, id: string, status: ActionSt
     .run(status, result === null ? null : JSON.stringify(result), startedAt, completedAt, projectId, id);
   return getProjectAction(projectId, id);
 }
+
+/** Replace an action's saved result without changing its status (used to keep proof and verdicts). */
+export function setActionResult(projectId: string, id: string, result: Record<string, unknown>): void {
+  getDb().prepare("UPDATE actions SET result = ? WHERE project_id = ? AND id = ?").run(JSON.stringify(result), projectId, id);
+}
+
+/** Undo a completion: back to proposed with no result. Only the outcome service calls this (it enforces the undo window). */
+export function resetAction(projectId: string, id: string): Action | null {
+  if (!getProjectAction(projectId, id)) return null;
+  getDb().prepare("UPDATE actions SET status = 'proposed', result = NULL, started_at = NULL, completed_at = NULL WHERE project_id = ? AND id = ?").run(projectId, id);
+  return getProjectAction(projectId, id);
+}

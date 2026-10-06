@@ -5,10 +5,27 @@ import { isActionStatus, isActionType } from "@/lib/domain/actions/actionTypes";
 import { deriveActionType } from "@/lib/domain/actions/deriveActionType";
 import { getProjectFinding } from "@/lib/domain/findings/findingStore";
 import { getProjectFinding as getProjectFindingSupabase } from "@/lib/domain/findings/findingStoreSupabase";
+import { implementAction, readOutcomes, undoImplementation, type OutcomePorts } from "@/lib/domain/search/outcomeService";
+import { platformOutcomePorts, selfHostOutcomePorts } from "@/lib/domain/search/outcomePorts";
+import { getDb } from "@/lib/db";
 import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
 import { FEATURES } from "@/lib/features";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
+
+async function platformPorts(db: ReturnType<typeof createServiceClient>, userId: string, projectId: string): Promise<OutcomePorts> {
+  const { data: project } = await db.from("projects").select("url").eq("id", projectId).eq("owner_id", userId).maybeSingle();
+  return platformOutcomePorts(db, userId, projectId, project?.url ?? null);
+}
+
+function selfHostPorts(projectId: string): OutcomePorts {
+  const project = getDb().prepare("SELECT url FROM projects WHERE id = ?").get(projectId) as { url: string | null } | undefined;
+  return selfHostOutcomePorts(projectId, project?.url ?? null);
+}
+
+function serviceResponse(result: Awaited<ReturnType<typeof implementAction>>) {
+  return result.ok ? NextResponse.json({ action: result.value }) : NextResponse.json({ error: result.error }, { status: result.status });
+}
 
 export async function GET(req: NextRequest) {
   const id = req.nextUrl.searchParams.get("id");
@@ -21,15 +38,23 @@ export async function GET(req: NextRequest) {
     const { data: setting } = await db.from("user_settings").select("value").eq("user_id", user.id).eq("key", "active_project_id").maybeSingle();
     const projectId = setting?.value;
     if (!projectId) return NextResponse.json({ error: "No active project." }, { status: 422 });
+    const ports = await platformPorts(db, user.id, projectId);
     const action = id ? await getProjectActionSupabase(db, user.id, projectId, id) : null;
-    if (id) return action ? NextResponse.json({ action }) : NextResponse.json({ error: "Action not found." }, { status: 404 });
-    return NextResponse.json({ actions: await listProjectActionsSupabase(db, user.id, projectId, findingId) });
+    if (id) {
+      if (!action) return NextResponse.json({ error: "Action not found." }, { status: 404 });
+      return NextResponse.json({ action: (await readOutcomes(ports, [action]))[0] });
+    }
+    return NextResponse.json({ actions: await readOutcomes(ports, await listProjectActionsSupabase(db, user.id, projectId, findingId)) });
   }
   const projectId = getActiveProjectId();
   if (!projectId) return NextResponse.json({ error: "No active project." }, { status: 422 });
+  const ports = selfHostPorts(projectId);
   const action = id ? getProjectAction(projectId, id) : null;
-  if (id) return action ? NextResponse.json({ action }) : NextResponse.json({ error: "Action not found." }, { status: 404 });
-  return NextResponse.json({ actions: listProjectActions(projectId, findingId) });
+  if (id) {
+    if (!action) return NextResponse.json({ error: "Action not found." }, { status: 404 });
+    return NextResponse.json({ action: (await readOutcomes(ports, [action]))[0] });
+  }
+  return NextResponse.json({ actions: await readOutcomes(ports, listProjectActions(projectId, findingId)) });
 }
 
 export async function POST(req: NextRequest) {
@@ -81,6 +106,33 @@ export async function POST(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   const body = await req.json().catch(() => null);
+
+  // "I made this change" / undo: the server builds the baseline and proof itself.
+  if (typeof body?.id === "string" && (body.implemented === true || body.undoImplemented === true)) {
+    try {
+      const pageUrl = typeof body.pageUrl === "string" ? body.pageUrl : null;
+      const run = (ports: OutcomePorts) =>
+        body.undoImplemented === true
+          ? undoImplementation(ports, { actionId: body.id })
+          : implementAction(ports, { actionId: body.id, pageUrl });
+      if (FEATURES.PLATFORM_MODE) {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+        const db = createServiceClient();
+        const { data: setting } = await db.from("user_settings").select("value").eq("user_id", user.id).eq("key", "active_project_id").maybeSingle();
+        const projectId = setting?.value;
+        if (!projectId) return NextResponse.json({ error: "No active project." }, { status: 422 });
+        return serviceResponse(await run(await platformPorts(db, user.id, projectId)));
+      }
+      const projectId = getActiveProjectId();
+      if (!projectId) return NextResponse.json({ error: "No active project." }, { status: 422 });
+      return serviceResponse(await run(selfHostPorts(projectId)));
+    } catch (err) {
+      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 502 });
+    }
+  }
+
   if (typeof body?.id !== "string" || !isActionStatus(body?.status)) return NextResponse.json({ error: "id and valid status are required." }, { status: 400 });
   try {
     if (FEATURES.PLATFORM_MODE) {
