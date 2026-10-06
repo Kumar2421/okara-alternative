@@ -30,7 +30,7 @@ export type EntitlementContext = {
 // Plan definitions and their limits
 const PLAN_LIMITS: Record<Plan, Limits> = {
   free: {
-    projects: 1,
+    projects: 4,
     daily_leads: 10,
     gsc_history_retention_days: 30,
     auto_evaluated_outcomes: false,

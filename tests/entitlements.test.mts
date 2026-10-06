@@ -16,7 +16,7 @@ const features = [
 
 const expectedLimits: Record<Plan, Limits> = {
   free: {
-    projects: 1,
+    projects: 4,
     daily_leads: 10,
     gsc_history_retention_days: 30,
     auto_evaluated_outcomes: false,
@@ -163,7 +163,7 @@ test("Plan configs follow hierarchy: free <= lite <= pro <= selfhost", () => {
 // Test plan config definitions
 test("Plan configs match expected values", () => {
   // Free plan config
-  assert.equal(expectedLimits.free.projects, 1);
+  assert.equal(expectedLimits.free.projects, 4);
   assert.equal(expectedLimits.free.daily_leads, 10);
   assert.equal(expectedLimits.free.gsc_history_retention_days, 30);
   assert.equal(expectedLimits.free.auto_evaluated_outcomes, false);
