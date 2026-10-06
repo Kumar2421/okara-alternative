@@ -5,6 +5,16 @@ import { upsertFinding as upsertFindingSupabase } from "@/lib/domain/findings/fi
 import { sqliteFindingRepository, supabaseFindingRepository } from "@/lib/domain/findings/findingRepositories";
 import { deriveSearchFinding } from "@/lib/domain/findings/findingRules";
 import { applyRecheck, getFinding, listFindings, transitionFinding } from "@/lib/domain/findings/findingService";
+import {
+  findExistingFinding,
+  isOpportunityType,
+  opportunityEvidenceOf,
+  opportunityFindingFromSnapshot,
+  recheckOpportunityFinding,
+} from "@/lib/domain/search/opportunityFinding";
+import type { OpportunityType } from "@/lib/domain/search/searchOpportunities";
+import { getLatestSnapshot } from "@/lib/domain/search/searchSnapshotStore";
+import { getLatestSnapshot as getLatestSnapshotSupabase } from "@/lib/domain/search/searchSnapshotStoreSupabase";
 import { SEOAgent } from "@/lib/domain/seo/SEOAgent";
 import { reconcileSeoAuditRecheck } from "@/lib/domain/seo/reconcileRecheck";
 import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
@@ -109,8 +119,59 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ findings: await listFindings(sqliteFindingRepository(), projectId) });
 }
 
+/**
+ * Track a search opportunity as a finding. The evidence is rebuilt from the
+ * latest saved snapshot, so it cannot be forged and matches what the panel
+ * showed. Creating one that is already tracked returns the existing finding
+ * unchanged, which also keeps its original numbers as the baseline.
+ */
+async function createFromOpportunity(type: OpportunityType, query: string) {
+  if (!query.trim()) return NextResponse.json({ error: "A search term is required." }, { status: 400 });
+
+  try {
+    if (FEATURES.PLATFORM_MODE) {
+      const supabase = await createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+      const db = createServiceClient();
+      const { data: setting } = await db.from("user_settings").select("value").eq("user_id", user.id).eq("key", "active_project_id").maybeSingle();
+      const projectId = setting?.value;
+      if (!projectId) return NextResponse.json({ error: "No active project." }, { status: 422 });
+      const { data: project } = await db.from("projects").select("name, url").eq("id", projectId).eq("owner_id", user.id).maybeSingle();
+      if (!project) return NextResponse.json({ error: "Project not found." }, { status: 404 });
+
+      const snapshot = await getLatestSnapshotSupabase(db, user.id, projectId);
+      const built = opportunityFindingFromSnapshot({ type, query, payload: snapshot?.payload ?? null, projectId, brand: project.name, projectUrl: project.url });
+      if (!built.ok) return NextResponse.json({ error: built.error }, { status: built.status });
+
+      const existing = findExistingFinding(await supabaseFindingRepository(db, user.id).list(projectId), built.input);
+      if (existing) return NextResponse.json({ finding: existing, existing: true });
+      return NextResponse.json({ finding: await upsertFindingSupabase(db, user.id, built.input), existing: false });
+    }
+
+    const projectId = getActiveProjectId();
+    if (!projectId) return NextResponse.json({ error: "No active project." }, { status: 422 });
+    const db = getDb();
+    const project = db.prepare("SELECT name, url FROM projects WHERE id = ?").get(projectId) as { name: string; url: string | null } | undefined;
+    if (!project) return NextResponse.json({ error: "Project not found." }, { status: 404 });
+
+    const snapshot = getLatestSnapshot(db, projectId);
+    const built = opportunityFindingFromSnapshot({ type, query, payload: snapshot?.payload ?? null, projectId, brand: project.name, projectUrl: project.url });
+    if (!built.ok) return NextResponse.json({ error: built.error }, { status: built.status });
+
+    const existing = findExistingFinding(await sqliteFindingRepository().list(projectId), built.input);
+    if (existing) return NextResponse.json({ finding: existing, existing: true });
+    return NextResponse.json({ finding: upsertFinding(built.input), existing: false });
+  } catch (err) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 502 });
+  }
+}
+
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
+  if (isOpportunityType(body?.opportunityType)) {
+    return createFromOpportunity(body.opportunityType, typeof body.query === "string" ? body.query : "");
+  }
   const query = typeof body?.query === "string" ? body.query.trim() : "";
   const pageUrl = typeof body?.url === "string" ? body.url.trim() : "";
   if (!query || !pageUrl) return NextResponse.json({ error: "Query and ranking page URL are required." }, { status: 400 });
@@ -191,7 +252,9 @@ export async function PUT(req: NextRequest) {
 
       if (action === "recheck") {
         const pageSpeedApiKey = await resolvePlatformPageSpeedKey(db, user.id);
-        const result = finding.source === "seo-audit"
+        const result = opportunityEvidenceOf(finding.evidence)
+          ? recheckOpportunityFinding(finding, await getLatestSnapshotSupabase(db, user.id, projectId))
+          : finding.source === "seo-audit"
           ? await runSeoAuditRecheck(finding, pageSpeedApiKey)
           : await runRecheck(finding, pageSpeedApiKey).then((r) => ({
               issueDetected: Boolean(r.rule),
@@ -219,7 +282,9 @@ export async function PUT(req: NextRequest) {
     if (action === "recheck") {
       const stored = getDb().prepare("SELECT value FROM settings WHERE key = 'pagespeed_api_key'").get() as { value: string } | undefined;
       const pageSpeedApiKey = stored?.value || process.env.PAGESPEED_API_KEY || undefined;
-      const result = finding.source === "seo-audit"
+      const result = opportunityEvidenceOf(finding.evidence)
+        ? recheckOpportunityFinding(finding, getLatestSnapshot(getDb(), projectId))
+        : finding.source === "seo-audit"
         ? await runSeoAuditRecheck(finding, pageSpeedApiKey)
         : await runRecheck(finding, pageSpeedApiKey).then((r) => ({
             issueDetected: Boolean(r.rule),

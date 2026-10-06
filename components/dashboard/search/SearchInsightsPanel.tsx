@@ -1,12 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import { Check } from "lucide-react";
 import SidePanel from "@/components/shared/SidePanel";
 import { pickHighlights } from "@/lib/domain/search/highlights";
 import type { OpportunityGroups, SearchOpportunity } from "@/lib/domain/search/searchOpportunities";
 import type { SearchInsights } from "@/lib/domain/search/types";
 import { INTENT_LABELS, timeAgo } from "./intentLabels";
 import type { SearchOpportunitiesState } from "./useSearchOpportunities";
+import { useTrackOpportunity, type OpportunityTracking } from "./useTrackOpportunity";
 
 export type TopQuery = { query: string; clicks: number; impressions: number; ctr: number; position: number };
 
@@ -31,7 +33,28 @@ function Stat({ label, value, tone }: { label: string; value: number; tone?: "go
   );
 }
 
-function OpportunityItem({ item }: { item: SearchOpportunity }) {
+function TrackButton({ item, tracking }: { item: SearchOpportunity; tracking: OpportunityTracking }) {
+  if (tracking.isTracked(item)) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+        <Check size={11} /> Tracked in Findings
+      </span>
+    );
+  }
+  const busy = tracking.pendingKey === tracking.keyOf(item);
+  return (
+    <button
+      type="button"
+      onClick={() => tracking.track(item)}
+      disabled={busy}
+      className="rounded-md border border-gray-200 px-2.5 py-1 text-[11px] font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+    >
+      {busy ? "Adding…" : "Track this"}
+    </button>
+  );
+}
+
+function OpportunityItem({ item, tracking }: { item: SearchOpportunity; tracking: OpportunityTracking }) {
   return (
     <li className="py-3">
       <div className="flex items-baseline justify-between gap-3">
@@ -47,6 +70,9 @@ function OpportunityItem({ item }: { item: SearchOpportunity }) {
           <li key={reason}>{reason}</li>
         ))}
       </ul>
+      <div className="mt-2">
+        <TrackButton item={item} tracking={tracking} />
+      </div>
     </li>
   );
 }
@@ -55,7 +81,7 @@ function Empty({ children }: { children: React.ReactNode }) {
   return <div className="rounded-xl border border-dashed border-gray-200 p-6 text-center text-[12px] text-gray-500">{children}</div>;
 }
 
-function Overview({ groups }: { groups: OpportunityGroups }) {
+function Overview({ groups, tracking }: { groups: OpportunityGroups; tracking: OpportunityTracking }) {
   const highlights = pickHighlights(groups);
   return (
     <div className="space-y-5">
@@ -76,7 +102,7 @@ function Overview({ groups }: { groups: OpportunityGroups }) {
         ) : (
           <ul className="divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white px-4">
             {highlights.map((item) => (
-              <OpportunityItem key={`${item.type}:${item.query}`} item={item} />
+              <OpportunityItem key={`${item.type}:${item.query}`} item={item} tracking={tracking} />
             ))}
           </ul>
         )}
@@ -85,7 +111,7 @@ function Overview({ groups }: { groups: OpportunityGroups }) {
   );
 }
 
-function Opportunities({ groups }: { groups: OpportunityGroups }) {
+function Opportunities({ groups, tracking }: { groups: OpportunityGroups; tracking: OpportunityTracking }) {
   const visible = SECTIONS.filter((section) => groups[section.key].length > 0);
   if (visible.length === 0) return <Empty>No opportunities right now. Check back after the next daily update.</Empty>;
   return (
@@ -96,7 +122,7 @@ function Opportunities({ groups }: { groups: OpportunityGroups }) {
           <p className="text-[11px] text-gray-500">{section.hint}</p>
           <ul className="divide-y divide-gray-100">
             {groups[section.key].map((item) => (
-              <OpportunityItem key={`${item.type}:${item.query}`} item={item} />
+              <OpportunityItem key={`${item.type}:${item.query}`} item={item} tracking={tracking} />
             ))}
           </ul>
         </section>
@@ -192,6 +218,7 @@ type Props = {
 /** Full search insights in a slide-over: the data that is too dense for a dashboard column. */
 export default function SearchInsightsPanel({ open, onClose, state, search, topQueries }: Props) {
   const [tab, setTab] = useState<Tab>("Overview");
+  const tracking = useTrackOpportunity();
 
   const toolbar = (
     <div role="tablist" aria-label="Search insights sections" className="flex gap-1">
@@ -219,7 +246,7 @@ export default function SearchInsightsPanel({ open, onClose, state, search, topQ
   else if (state.status === "loading") body = <Empty>Loading…</Empty>;
   else if (state.status === "error") body = <Empty>Couldn&apos;t load search insights. Try again in a moment.</Empty>;
   else if (state.status === "empty") body = <Empty>No saved search history yet. Close this and use Refresh now to start tracking.</Empty>;
-  else body = tab === "Overview" ? <Overview groups={state.opportunities} /> : <Opportunities groups={state.opportunities} />;
+  else body = tab === "Overview" ? <Overview groups={state.opportunities} tracking={tracking} /> : <Opportunities groups={state.opportunities} tracking={tracking} />;
 
   return (
     <SidePanel
@@ -229,6 +256,7 @@ export default function SearchInsightsPanel({ open, onClose, state, search, topQ
       subtitle={needsSnapshot && state.status === "ready" ? `Updated ${timeAgo(state.capturedAt)}` : "Based on your last 28 days in Google Search"}
       toolbar={toolbar}
     >
+      {tracking.error && <div className="mb-3 rounded-xl border border-red-200 bg-red-50 p-3 text-[12px] text-red-700">{tracking.error}</div>}
       {body}
     </SidePanel>
   );

@@ -1,3 +1,4 @@
+import { opportunityEvidenceOf } from "../search/opportunityFinding.ts";
 import type { ActionType } from "./actionTypes.ts";
 
 type FindingLike = {
@@ -19,6 +20,19 @@ type FindingLike = {
  * that finding already shows.
  */
 export function deriveActionType(finding: FindingLike): ActionType {
+  const opportunity = opportunityEvidenceOf(finding.evidence);
+  if (opportunity) {
+    switch (opportunity.opportunity.type) {
+      case "ctr":
+        return "rewrite_snippet";
+      case "declining":
+      case "lost_query":
+        return "investigate_ranking_change";
+      default:
+        return "improve_content_relevance";
+    }
+  }
+
   if (finding.source === "seo-audit") {
     return finding.entityId === "canonical-missing" ? "add_canonical" : "manual_fix";
   }
