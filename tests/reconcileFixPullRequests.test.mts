@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { reconcileFixPullRequests } from "../lib/domain/fixes/reconcileFixPullRequests.ts";
 import { fixDeliveryFake } from "../lib/domain/fixes/fixDeliveryFake.ts";
+import { linkPullRequest } from "../lib/domain/fixes/linkPullRequest.ts";
 import { implementationOf } from "../lib/domain/search/actionOutcome.ts";
 import type { OutcomePorts } from "../lib/domain/search/outcomeService.ts";
 import type { Action } from "../lib/domain/actions/actionTypes.ts";
@@ -246,4 +247,21 @@ test("reconcileFixPullRequests: handles multiple actions with different PR state
   assert.equal(h.actions[0].status, "completed");
   assert.equal(h.actions[1].status, "proposed");
   assert.equal(h.actions[2].status, "proposed");
+});
+
+test("apply -> merged -> implemented: a PR linked by codefix/apply is picked up on merge", async () => {
+  const h = harness({ actions: [makeAction(null, "approved")] });
+  const url = "https://github.com/o/r/pull/9";
+  for (const link of linkPullRequest(h.actions, url)) h.actions[0].result = link.result;
+  const mergedAt = "2026-10-05T12:00:00.000Z";
+  h.fixDelivery.setState(url, "merged", mergedAt);
+
+  const result = await reconcileFixPullRequests(h.ports, h.fixDelivery, h.actions);
+
+  assert.equal(result.implemented, 1);
+  assert.equal(h.actions[0].status, "completed");
+  const impl = implementationOf(h.actions[0].result);
+  assert.equal(impl?.via, "github_pr");
+  assert.equal(impl?.implementedAt, mergedAt);
+  assert.equal(impl?.change?.prUrl, url);
 });

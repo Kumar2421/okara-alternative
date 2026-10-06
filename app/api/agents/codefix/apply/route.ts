@@ -8,6 +8,9 @@ import type { Finding } from "@/lib/domain/seo/SEOAgent";
 import { FEATURES } from "@/lib/features";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
+import { linkPullRequest } from "@/lib/domain/fixes/linkPullRequest";
+import { listProjectActions, setActionResult } from "@/lib/domain/actions/actionStore";
+import { listProjectActions as listProjectActionsSupabase, setActionResult as setActionResultSupabase } from "@/lib/domain/actions/actionStoreSupabase";
 
 // Vercel: LLM/crawl calls can run past the 10s default — allow up to the
 // platform max for this route (Hobby plan caps at 60s; Pro allows more).

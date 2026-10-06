@@ -1,6 +1,7 @@
 import type { Action } from "../actions/actionTypes.ts";
 import { implementationOf } from "../search/actionOutcome.ts";
 import { implementAction, type OutcomePorts } from "../search/outcomeService.ts";
+import { pullRequestUrlOf } from "./linkPullRequest.ts";
 import type { FixDeliveryPort } from "./FixDelivery.ts";
 
 export type ReconcileResult = {
@@ -13,16 +14,10 @@ export type ReconcileResult = {
  * Extract PR URL from an action's stored data (result.implementation.change.prUrl).
  */
 function extractPrUrl(action: Action): string | null {
-  if (action.result && typeof action.result === "object") {
-    const impl = (action.result as Record<string, unknown>)["implementation"];
-    if (impl && typeof impl === "object") {
-      const change = (impl as Record<string, unknown>)["change"];
-      if (change && typeof change === "object" && typeof (change as Record<string, unknown>)["prUrl"] === "string") {
-        return (change as Record<string, unknown>)["prUrl"] as string;
-      }
-    }
-  }
-  return null;
+  const linked = pullRequestUrlOf(action.result);
+  if (linked) return linked;
+  const prUrl = implementationOf(action.result)?.change?.prUrl;
+  return typeof prUrl === "string" ? prUrl : null;
 }
 
 /**
