@@ -42,8 +42,10 @@ export type Action = {
 };
 
 export const ACTION_TRANSITIONS: Record<ActionStatus, ActionStatus[]> = {
-  proposed: ["approved", "cancelled"],
-  approved: ["running", "cancelled"],
+  // A user can report a tracked change as made without Marlo ever running it
+  // (the manual path); an integration like a GitHub PR goes approved -> running -> completed.
+  proposed: ["approved", "cancelled", "completed"],
+  approved: ["running", "cancelled", "completed"],
   running: ["completed", "failed", "cancelled"],
   completed: [],
   failed: ["approved", "cancelled"],

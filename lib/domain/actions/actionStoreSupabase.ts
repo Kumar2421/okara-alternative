@@ -68,3 +68,24 @@ export async function transitionAction(db: SupabaseClient, userId: string, proje
   if (error) throw new Error(error.message);
   return mapRow(data);
 }
+
+/** Replace an action's saved result without changing its status (used to keep proof and verdicts). */
+export async function setActionResult(db: SupabaseClient, userId: string, projectId: string, id: string, result: Record<string, unknown>): Promise<void> {
+  if (!(await getProjectAction(db, userId, projectId, id))) return;
+  const { error } = await db.from("actions").update({ result }).eq("project_id", projectId).eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+/** Undo a completion: back to proposed with no result. Only the outcome service calls this (it enforces the undo window). */
+export async function resetAction(db: SupabaseClient, userId: string, projectId: string, id: string): Promise<Action | null> {
+  if (!(await getProjectAction(db, userId, projectId, id))) return null;
+  const { data, error } = await db
+    .from("actions")
+    .update({ status: "proposed", result: null, started_at: null, completed_at: null })
+    .eq("project_id", projectId)
+    .eq("id", id)
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  return mapRow(data);
+}

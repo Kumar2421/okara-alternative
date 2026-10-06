@@ -32,6 +32,8 @@ export type ImplementationRecord = {
   baseline: OutcomeBaseline | null;
   /** Proof of what changed, filled by integrations (a merged PR's link and summary). */
   change?: { prUrl?: string; summary?: string };
+  /** The page that was edited; its fingerprint is compared before and after. */
+  pageUrl?: string;
   /** The page's title, description and main heading when the change was reported. */
   pageBefore?: PageFingerprint | null;
   /** The same, captured the first time the outcome is read after the minimum wait. */
@@ -79,6 +81,7 @@ export function buildImplementation(args: {
   via?: ImplementationVia;
   now?: Date;
   change?: ImplementationRecord["change"];
+  pageUrl?: string | null;
   pageBefore?: PageFingerprint | null;
 }): ImplementationRecord {
   const now = args.now ?? new Date();
@@ -88,6 +91,7 @@ export function buildImplementation(args: {
     implementedAt: now.toISOString(),
     baseline: evidence ? baselineFor(evidence, args.snapshot, now) : null,
     ...(args.change ? { change: args.change } : {}),
+    ...(args.pageUrl ? { pageUrl: args.pageUrl } : {}),
     ...(args.pageBefore ? { pageBefore: args.pageBefore } : {}),
   };
 }
@@ -114,6 +118,7 @@ export function implementationOf(result: Record<string, unknown> | null | undefi
     implementedAt: raw.implementedAt,
     baseline,
     ...(raw.change ? { change: raw.change } : {}),
+    ...(typeof raw.pageUrl === "string" && raw.pageUrl ? { pageUrl: raw.pageUrl } : {}),
     ...(pageBefore ? { pageBefore } : {}),
     ...(pageAfter ? { pageAfter } : {}),
   };
