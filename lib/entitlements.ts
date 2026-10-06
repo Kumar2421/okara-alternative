@@ -38,7 +38,7 @@ const PLAN_LIMITS: Record<Plan, Limits> = {
     managed_keys: 1,
   },
   lite: {
-    projects: 3,
+    projects: 10,
     daily_leads: 50,
     gsc_history_retention_days: 60,
     auto_evaluated_outcomes: true,

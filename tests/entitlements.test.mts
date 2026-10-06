@@ -24,7 +24,7 @@ const expectedLimits: Record<Plan, Limits> = {
     managed_keys: 1,
   },
   lite: {
-    projects: 3,
+    projects: 10,
     daily_leads: 50,
     gsc_history_retention_days: 60,
     auto_evaluated_outcomes: true,
@@ -171,7 +171,7 @@ test("Plan configs match expected values", () => {
   assert.equal(expectedLimits.free.managed_keys, 1);
 
   // Lite plan config
-  assert.equal(expectedLimits.lite.projects, 3);
+  assert.equal(expectedLimits.lite.projects, 10);
   assert.equal(expectedLimits.lite.daily_leads, 50);
   assert.equal(expectedLimits.lite.gsc_history_retention_days, 60);
   assert.equal(expectedLimits.lite.auto_evaluated_outcomes, true);
@@ -190,7 +190,7 @@ test("Plan configs match expected values", () => {
 test("Lite plan config has moderate features", () => {
   const lite = expectedLimits.lite;
 
-  assert.equal(lite.projects, 3);
+  assert.equal(lite.projects, 10);
   assert.equal(lite.daily_leads, 50);
   assert.equal(lite.gsc_history_retention_days, 60);
   assert.equal(lite.auto_evaluated_outcomes, true);
