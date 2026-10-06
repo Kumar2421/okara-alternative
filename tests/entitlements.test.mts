@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { can, limitFor, getLimits, type Plan, type Limits } from "../lib/entitlements.ts";
 
 // Test table-driven plan x feature matrix
-const plans: Plan[] = ["free", "pro", "agency", "selfhost"];
+const plans: Plan[] = ["free", "lite", "pro", "selfhost"];
 
 const features = [
   "projects",
@@ -23,17 +23,17 @@ const expectedLimits: Record<Plan, Limits> = {
     notifications_digest: "daily",
     managed_keys: 1,
   },
-  pro: {
-    projects: 5,
-    daily_leads: 100,
-    gsc_history_retention_days: 90,
+  lite: {
+    projects: 3,
+    daily_leads: 50,
+    gsc_history_retention_days: 60,
     auto_evaluated_outcomes: true,
     notifications_digest: "daily",
-    managed_keys: -1, // unlimited
+    managed_keys: 3,
   },
-  agency: {
-    projects: 50,
-    daily_leads: 500,
+  pro: {
+    projects: -1, // unlimited
+    daily_leads: -1, // unlimited
     gsc_history_retention_days: -1, // unlimited
     auto_evaluated_outcomes: true,
     notifications_digest: "real-time",
@@ -113,50 +113,50 @@ function isLimitGreaterOrEqual(a: number, b: number): boolean {
 }
 
 // Test plan hierarchy in the config (higher tiers should have at least as much as lower tiers)
-test("Plan configs follow hierarchy: free <= pro <= agency <= selfhost", () => {
+test("Plan configs follow hierarchy: free <= lite <= pro <= selfhost", () => {
   const free = expectedLimits.free;
+  const lite = expectedLimits.lite;
   const pro = expectedLimits.pro;
-  const agency = expectedLimits.agency;
   const selfhost = expectedLimits.selfhost;
 
   // Projects
   assert.ok(
-    isLimitGreaterOrEqual(pro.projects, free.projects) &&
-    isLimitGreaterOrEqual(agency.projects, pro.projects) &&
-    isLimitGreaterOrEqual(selfhost.projects, agency.projects),
-    "Projects: free <= pro <= agency <= selfhost"
+    isLimitGreaterOrEqual(lite.projects, free.projects) &&
+    isLimitGreaterOrEqual(pro.projects, lite.projects) &&
+    isLimitGreaterOrEqual(selfhost.projects, pro.projects),
+    "Projects: free <= lite <= pro <= selfhost"
   );
 
   // Daily leads
   assert.ok(
-    isLimitGreaterOrEqual(pro.daily_leads, free.daily_leads) &&
-    isLimitGreaterOrEqual(agency.daily_leads, pro.daily_leads) &&
-    isLimitGreaterOrEqual(selfhost.daily_leads, agency.daily_leads),
-    "Daily leads: free <= pro <= agency <= selfhost"
+    isLimitGreaterOrEqual(lite.daily_leads, free.daily_leads) &&
+    isLimitGreaterOrEqual(pro.daily_leads, lite.daily_leads) &&
+    isLimitGreaterOrEqual(selfhost.daily_leads, pro.daily_leads),
+    "Daily leads: free <= lite <= pro <= selfhost"
   );
 
   // GSC history retention
   assert.ok(
-    isLimitGreaterOrEqual(pro.gsc_history_retention_days, free.gsc_history_retention_days) &&
-    isLimitGreaterOrEqual(agency.gsc_history_retention_days, pro.gsc_history_retention_days) &&
-    isLimitGreaterOrEqual(selfhost.gsc_history_retention_days, agency.gsc_history_retention_days),
-    "GSC history: free <= pro <= agency <= selfhost"
+    isLimitGreaterOrEqual(lite.gsc_history_retention_days, free.gsc_history_retention_days) &&
+    isLimitGreaterOrEqual(pro.gsc_history_retention_days, lite.gsc_history_retention_days) &&
+    isLimitGreaterOrEqual(selfhost.gsc_history_retention_days, pro.gsc_history_retention_days),
+    "GSC history: free <= lite <= pro <= selfhost"
   );
 
   // Auto-evaluated outcomes (boolean progression: false < true)
   assert.ok(
-    (!free.auto_evaluated_outcomes && pro.auto_evaluated_outcomes) &&
-    (pro.auto_evaluated_outcomes && agency.auto_evaluated_outcomes) &&
-    (agency.auto_evaluated_outcomes && selfhost.auto_evaluated_outcomes),
-    "Auto-evaluated outcomes: free < pro <= agency <= selfhost"
+    (!free.auto_evaluated_outcomes && lite.auto_evaluated_outcomes) &&
+    (lite.auto_evaluated_outcomes && pro.auto_evaluated_outcomes) &&
+    (pro.auto_evaluated_outcomes && selfhost.auto_evaluated_outcomes),
+    "Auto-evaluated outcomes: free < lite <= pro <= selfhost"
   );
 
   // Managed keys
   assert.ok(
-    isLimitGreaterOrEqual(pro.managed_keys, free.managed_keys) &&
-    isLimitGreaterOrEqual(agency.managed_keys, pro.managed_keys) &&
-    isLimitGreaterOrEqual(selfhost.managed_keys, agency.managed_keys),
-    "Managed keys: free <= pro <= agency <= selfhost"
+    isLimitGreaterOrEqual(lite.managed_keys, free.managed_keys) &&
+    isLimitGreaterOrEqual(pro.managed_keys, lite.managed_keys) &&
+    isLimitGreaterOrEqual(selfhost.managed_keys, pro.managed_keys),
+    "Managed keys: free <= lite <= pro <= selfhost"
   );
 });
 
@@ -170,21 +170,42 @@ test("Plan configs match expected values", () => {
   assert.equal(expectedLimits.free.notifications_digest, "daily");
   assert.equal(expectedLimits.free.managed_keys, 1);
 
-  // Pro plan config
-  assert.equal(expectedLimits.pro.projects, 5);
-  assert.equal(expectedLimits.pro.daily_leads, 100);
-  assert.equal(expectedLimits.pro.gsc_history_retention_days, 90);
-  assert.equal(expectedLimits.pro.auto_evaluated_outcomes, true);
-  assert.equal(expectedLimits.pro.notifications_digest, "daily");
-  assert.equal(expectedLimits.pro.managed_keys, -1); // unlimited
+  // Lite plan config
+  assert.equal(expectedLimits.lite.projects, 3);
+  assert.equal(expectedLimits.lite.daily_leads, 50);
+  assert.equal(expectedLimits.lite.gsc_history_retention_days, 60);
+  assert.equal(expectedLimits.lite.auto_evaluated_outcomes, true);
+  assert.equal(expectedLimits.lite.notifications_digest, "daily");
+  assert.equal(expectedLimits.lite.managed_keys, 3);
 
-  // Agency plan config
-  assert.equal(expectedLimits.agency.projects, 50);
-  assert.equal(expectedLimits.agency.daily_leads, 500);
-  assert.equal(expectedLimits.agency.gsc_history_retention_days, -1); // unlimited
-  assert.equal(expectedLimits.agency.auto_evaluated_outcomes, true);
-  assert.equal(expectedLimits.agency.notifications_digest, "real-time");
-  assert.equal(expectedLimits.agency.managed_keys, -1); // unlimited
+  // Pro plan config
+  assert.equal(expectedLimits.pro.projects, -1); // unlimited
+  assert.equal(expectedLimits.pro.daily_leads, -1); // unlimited
+  assert.equal(expectedLimits.pro.gsc_history_retention_days, -1); // unlimited
+  assert.equal(expectedLimits.pro.auto_evaluated_outcomes, true);
+  assert.equal(expectedLimits.pro.notifications_digest, "real-time");
+  assert.equal(expectedLimits.pro.managed_keys, -1); // unlimited
+});
+
+test("Lite plan config has moderate features", () => {
+  const lite = expectedLimits.lite;
+
+  assert.equal(lite.projects, 3);
+  assert.equal(lite.daily_leads, 50);
+  assert.equal(lite.gsc_history_retention_days, 60);
+  assert.equal(lite.auto_evaluated_outcomes, true);
+  assert.equal(lite.managed_keys, 3);
+});
+
+test("Pro plan config is fully unlimited", () => {
+  const pro = expectedLimits.pro;
+
+  assert.equal(pro.projects, -1);
+  assert.equal(pro.daily_leads, -1);
+  assert.equal(pro.gsc_history_retention_days, -1);
+  assert.equal(pro.auto_evaluated_outcomes, true);
+  assert.equal(pro.notifications_digest, "real-time");
+  assert.equal(pro.managed_keys, -1);
 });
 
 test("Selfhost config has all features unlimited", () => {
@@ -194,4 +215,29 @@ test("Selfhost config has all features unlimited", () => {
   assert.equal(expectedLimits.selfhost.auto_evaluated_outcomes, true);
   assert.equal(expectedLimits.selfhost.notifications_digest, "real-time");
   assert.equal(expectedLimits.selfhost.managed_keys, -1);
+});
+
+test("All plans follow hierarchy: free < lite <= pro <= selfhost", () => {
+  const free = expectedLimits.free;
+  const lite = expectedLimits.lite;
+  const pro = expectedLimits.pro;
+  const selfhost = expectedLimits.selfhost;
+
+  // Verify each tier is stricter or equal to the next (using isLimitGreaterOrEqual for -1 handling)
+  assert.ok(
+    free.projects < lite.projects && isLimitGreaterOrEqual(pro.projects, lite.projects),
+    "Projects hierarchy violated"
+  );
+  assert.ok(
+    free.daily_leads < lite.daily_leads && isLimitGreaterOrEqual(pro.daily_leads, lite.daily_leads),
+    "Daily leads hierarchy violated"
+  );
+  assert.ok(
+    !free.auto_evaluated_outcomes && lite.auto_evaluated_outcomes && pro.auto_evaluated_outcomes,
+    "Auto-outcomes hierarchy violated"
+  );
+  assert.ok(
+    isLimitGreaterOrEqual(selfhost.projects, pro.projects),
+    "Selfhost should be >= pro"
+  );
 });

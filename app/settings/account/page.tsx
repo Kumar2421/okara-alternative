@@ -20,7 +20,10 @@ export default function AccountPage() {
     fetch("/api/usage")
       .then((r) => r.json())
       .then((data) => {
-        setPlan(data.planTier || "Free");
+        // Capitalize: free -> Free, lite -> Lite, pro -> Pro
+        const tier = data.planTier || "free";
+        const capitalized = tier.charAt(0).toUpperCase() + tier.slice(1);
+        setPlan(capitalized);
       })
       .catch(() => {
         setPlan("Free");

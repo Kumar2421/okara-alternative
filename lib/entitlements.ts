@@ -3,9 +3,15 @@ import { FEATURES } from "./features.ts";
 /**
  * Entitlements and plan limits.
  * Rule: logic is open, operations/scale are paid; self-host (OSS) must never be crippled.
+ *
+ * Plans mapped from profiles.plan_tier:
+ * - 'free' -> free (1 project, 10 daily leads)
+ * - 'lite' -> lite (3 projects, 50 daily leads)
+ * - 'pro' -> pro (unlimited projects, unlimited daily leads)
+ * - selfhost mode -> selfhost (all unlimited)
  */
 
-export type Plan = "free" | "pro" | "agency" | "selfhost";
+export type Plan = "free" | "lite" | "pro" | "selfhost";
 
 export type Limits = {
   projects: number;
@@ -31,17 +37,17 @@ const PLAN_LIMITS: Record<Plan, Limits> = {
     notifications_digest: "daily",
     managed_keys: 1,
   },
-  pro: {
-    projects: 5,
-    daily_leads: 100,
-    gsc_history_retention_days: 90,
+  lite: {
+    projects: 3,
+    daily_leads: 50,
+    gsc_history_retention_days: 60,
     auto_evaluated_outcomes: true,
     notifications_digest: "daily",
-    managed_keys: -1, // unlimited
+    managed_keys: 3,
   },
-  agency: {
-    projects: 50,
-    daily_leads: 500,
+  pro: {
+    projects: -1, // unlimited
+    daily_leads: -1, // unlimited
     gsc_history_retention_days: -1, // unlimited
     auto_evaluated_outcomes: true,
     notifications_digest: "real-time",
@@ -58,9 +64,12 @@ const PLAN_LIMITS: Record<Plan, Limits> = {
 };
 
 /**
- * Get user's current plan.
- * Platform mode: reads from Supabase user_plans table.
+ * Get user's current plan from profiles.plan_tier.
+ * Platform mode: reads from Supabase profiles table.
  * Self-host: always "selfhost".
+ *
+ * Fails open: on error, returns "pro" (most permissive paid tier) to avoid
+ * capping paying users. Logs warning without PII.
  */
 export async function getUserPlan(userId: string): Promise<Plan> {
   // Self-host always has unlimited plan
@@ -73,21 +82,31 @@ export async function getUserPlan(userId: string): Promise<Plan> {
     const { createServiceClient } = await import("@/utils/supabase/serviceClient.ts");
     const db = createServiceClient();
     const { data, error } = await db
-      .from("user_plans")
-      .select("plan")
-      .eq("user_id", userId)
+      .from("profiles")
+      .select("plan_tier")
+      .eq("id", userId)
       .maybeSingle();
 
     if (error) {
-      console.error("Error fetching user plan:", error);
+      // Fail open: on lookup error, allow the action and warn
+      console.warn("Could not verify user plan tier:", error.code);
+      return "pro";
+    }
+
+    if (!data) {
+      // Profile missing — treat as free only if completely missing
       return "free";
     }
 
-    const plan = data?.plan as Plan | undefined;
-    return plan || "free";
-  } catch (error) {
-    console.error("Error fetching user plan:", error);
-    return "free";
+    // Map database tier to plan
+    const tier = data.plan_tier as string;
+    if (tier === "lite") return "lite";
+    if (tier === "pro") return "pro";
+    return "free"; // default
+  } catch {
+    // Fail open: on any unexpected error, allow the action and warn
+    console.warn("Entitlements lookup error");
+    return "pro";
   }
 }
 
@@ -189,8 +208,9 @@ export async function canCreateProject(userId: string): Promise<{
       .eq("owner_id", userId);
 
     if (error) {
-      console.error("Error counting projects:", error);
-      return { allowed: false, remaining: 0, limit: projectLimit, message: "Could not verify project limit" };
+      // Fail open: on lookup error, allow and warn
+      console.warn("Could not verify project count:", error.code);
+      return { allowed: true, remaining: projectLimit, limit: projectLimit };
     }
 
     const projectCount = count || 0;
@@ -206,9 +226,10 @@ export async function canCreateProject(userId: string): Promise<{
     }
 
     return { allowed: true, remaining, limit: projectLimit };
-  } catch (error) {
-    console.error("Error checking project limit:", error);
-    return { allowed: false, remaining: 0, limit: projectLimit, message: "Could not verify project limit" };
+  } catch {
+    // Fail open: on unexpected error, allow and warn
+    console.warn("Project limit check error");
+    return { allowed: true, remaining: projectLimit, limit: projectLimit };
   }
 }
 
@@ -263,8 +284,9 @@ export async function canFetchLeadsToday(userId: string): Promise<{
       .gte("created_at", todayStr);
 
     if (error) {
-      console.error("Error counting daily leads:", error);
-      return { allowed: false, remaining: 0, limit: dailyLeadsLimit, message: "Could not verify daily lead limit" };
+      // Fail open: on lookup error, allow and warn
+      console.warn("Could not verify daily leads count:", error.code);
+      return { allowed: true, remaining: dailyLeadsLimit, limit: dailyLeadsLimit };
     }
 
     const leadsCount = count || 0;
@@ -280,9 +302,10 @@ export async function canFetchLeadsToday(userId: string): Promise<{
     }
 
     return { allowed: true, remaining, limit: dailyLeadsLimit };
-  } catch (error) {
-    console.error("Error checking daily leads limit:", error);
-    return { allowed: false, remaining: 0, limit: dailyLeadsLimit, message: "Could not verify daily lead limit" };
+  } catch {
+    // Fail open: on unexpected error, allow and warn
+    console.warn("Daily leads limit check error");
+    return { allowed: true, remaining: dailyLeadsLimit, limit: dailyLeadsLimit };
   }
 }
 
