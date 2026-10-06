@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { getActiveProjectId, setActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
-import { assertPublicHttpUrl } from "@/lib/domain/seo/SEOAgent";
-import { checkUrlReachable } from "@/lib/domain/shared/checkUrlReachable";
+import { getActiveProjectId, setActiveProjectId } from "@/lib/domain/shared/getActiveProjectId.ts";
+import { assertPublicHttpUrl } from "@/lib/domain/seo/SEOAgent.ts";
+import { checkUrlReachable } from "@/lib/domain/shared/checkUrlReachable.ts";
 import { FEATURES } from "@/lib/features";
+import { canCreateProject } from "@/lib/entitlements.ts";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
 
@@ -103,6 +104,15 @@ export async function POST(req: NextRequest) {
   if (FEATURES.PLATFORM_MODE) {
     const db = createServiceClient();
     const now = new Date().toISOString();
+
+    // Check project creation entitlements
+    const projectLimitCheck = await canCreateProject(platformUserId!);
+    if (!projectLimitCheck.allowed) {
+      return NextResponse.json(
+        { error: projectLimitCheck.message || "Project limit reached" },
+        { status: 403 }
+      );
+    }
 
     const { data: inserted, error } = await db
       .from("projects")
