@@ -8,11 +8,33 @@ import { FEATURES } from "@/lib/features";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
 import { chargeCredits, InsufficientCreditsError } from "@/lib/credits";
+import { buildRedditSearchPlan, emptyRedditSettings, mergeSubreddits, type RedditSettings } from "@/lib/domain/reddit/redditSettings";
+import { getRedditSettings } from "@/lib/domain/reddit/redditSettingsStore";
+import { getRedditSettings as getRedditSettingsSupabase } from "@/lib/domain/reddit/redditSettingsStoreSupabase";
+import { getAuthenticatedProjectContext } from "@/lib/domain/shared/project-context";
 import { PLATFORM_PROVIDER_KEYS } from "@/lib/llm/platformKeys";
 
 // Vercel: LLM/crawl calls can run past the 10s default — allow up to the
 // platform max for this route (Hobby plan caps at 60s; Pro allows more).
 export const maxDuration = 60;
+
+/** Saved Reddit focus for the active project. Only a bias, so any failure falls back to none. */
+async function loadSavedSettings(): Promise<RedditSettings> {
+  try {
+    const auth = await getAuthenticatedProjectContext();
+    if ("response" in auth) return emptyRedditSettings();
+    const { userId, projectId, supabase } = auth.context;
+    return supabase && userId ? await getRedditSettingsSupabase(supabase, userId, projectId) : getRedditSettings(getDb(), projectId);
+  } catch {
+    return emptyRedditSettings();
+  }
+}
+
+/** Requested subreddits plus saved priorities; with neither, the long-standing defaults. */
+function runSubreddits(requested: string[], saved: string[]): string[] {
+  const merged = mergeSubreddits(requested, saved);
+  return merged.length ? merged : ["reactjs", "SaaS"];
+}
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
@@ -91,9 +113,11 @@ export async function POST(req: NextRequest) {
     }
 
     try {
+      const saved = await loadSavedSettings();
       const agent = new RedditAgent(driver, apiKey, baseUrl);
       const { opportunities, usedMockThreads } = await agent.findOpportunities({
-        subreddits: subList.length ? subList : ["reactjs", "SaaS"],
+        subreddits: runSubreddits(subList, saved.subreddits),
+        searchPlan: buildRedditSearchPlan(saved),
         keywords,
         brandVoice,
         model,
@@ -119,9 +143,11 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    const saved = await loadSavedSettings();
     const agent = new RedditAgent(driver, row.api_key, row.base_url ?? undefined);
     const { opportunities, usedMockThreads } = await agent.findOpportunities({
-      subreddits: subList.length ? subList : ["reactjs", "SaaS"],
+      subreddits: runSubreddits(subList, saved.subreddits),
+      searchPlan: buildRedditSearchPlan(saved),
       keywords,
       brandVoice,
       model,

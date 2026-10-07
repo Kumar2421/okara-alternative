@@ -143,7 +143,7 @@ export default function AccountPage() {
           title="Coming soon"
           className="rounded-lg bg-[#111111] px-3 py-1.5 text-[13px] font-medium text-white opacity-40"
         >
-          Enable
+          Coming soon
         </button>
       </div>
     </div>

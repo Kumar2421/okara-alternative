@@ -11,10 +11,8 @@ import {
   Users,
   UserCircle,
   Shield,
-  Smartphone,
   KeyRound,
   Zap,
-  Puzzle,
   Bell,
 } from "lucide-react";
 import { FEATURES } from "@/lib/features";
@@ -26,15 +24,14 @@ const AI_CMO_ITEMS = [
   { href: "/settings/api-credentials", label: "API Credentials", icon: KeyRound },
   { href: "/settings/agents", label: "Agents", icon: SlidersHorizontal },
   { href: "/settings/integrations", label: "Integrations", icon: Plug, dot: true },
-  { href: "/settings/skills-mcp", label: "Skills & MCP", icon: Puzzle, dot: true },
   { href: "/settings/team", label: "Team", icon: Users, dot: true },
 ];
 
-// API Credentials and Skills & MCP are self-host-only concerns -- platform
-// mode manages its own keys (see resolvePlatformApiKey.ts) and has no local
-// skill/MCP filesystem to configure, so both nav entries are noise there.
+// API Credentials is a self-host-only concern -- platform mode manages its
+// own keys (see resolvePlatformApiKey.ts), so the entry is noise there.
+// Devices and Skills & MCP routes still exist but are intentionally unlinked.
 const VISIBLE_AI_CMO_ITEMS = FEATURES.PLATFORM_MODE
-  ? AI_CMO_ITEMS.filter((item) => item.href !== "/settings/api-credentials" && item.href !== "/settings/skills-mcp")
+  ? AI_CMO_ITEMS.filter((item) => item.href !== "/settings/api-credentials")
   : AI_CMO_ITEMS;
 
 const CHAT_ITEMS = [{ href: "/settings/personalization", label: "Personalization", icon: UserCircle }];
@@ -42,7 +39,6 @@ const CHAT_ITEMS = [{ href: "/settings/personalization", label: "Personalization
 const GENERAL_ITEMS = [
   { href: "/settings/account", label: "Account & Security", icon: Shield },
   { href: "/settings/notifications", label: "Notifications", icon: Bell },
-  { href: "/settings/devices", label: "Devices", icon: Smartphone },
 ];
 
 function NavGroup({

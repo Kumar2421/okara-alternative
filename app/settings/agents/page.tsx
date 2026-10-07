@@ -1,9 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Globe, Save, Loader2 } from "lucide-react";
+import { Globe, Save, Loader2, X } from "lucide-react";
 import Toggle from "@/components/settings/Toggle";
 import { useToast } from "@/components/dashboard/Toast";
+import { SkeletonLine } from "@/components/shared/Skeleton";
+import { useRedditSettings } from "@/components/settings/useRedditSettings";
+import { addKeyword, addSubreddit, REDDIT_LIMITS, type AddResult, type RedditSettings } from "@/lib/domain/reddit/redditSettings";
 
 type AgentToggleState = Record<string, boolean>;
 
@@ -18,9 +21,98 @@ const TOGGLE_IDS = ["seo", "reddit", "x", "linkedin", "articles"];
 const SETTINGS_KEYS = {
   region: "agents_region",
   redditPrompt: "agents_reddit_prompt",
-  searchRegion: "agents_search_region",
   toggle: (id: string) => `agents_toggle_${id}`,
 };
+
+/** Chips with an input: Enter adds, X removes. Validation lives in the domain `add` function. */
+function ChipField({
+  label,
+  max,
+  items,
+  placeholder,
+  disabled,
+  loading,
+  add,
+  onChange,
+}: {
+  label: string;
+  max: number;
+  items: string[];
+  placeholder: string;
+  disabled: boolean;
+  loading: boolean;
+  add: (list: string[], raw: string) => AddResult;
+  onChange: (next: string[]) => Promise<string | null>;
+}) {
+  const [draft, setDraft] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  async function commit(result: AddResult, clearDraft: boolean) {
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    setError(null);
+    if (clearDraft) setDraft("");
+    const failure = await onChange(result.list);
+    if (failure) setError(failure);
+  }
+
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between text-[12px] text-gray-600">
+        {label}
+        <span className="text-gray-400">
+          {items.length}/{max}
+        </span>
+      </div>
+      {loading ? (
+        <SkeletonLine className="h-9 w-full" />
+      ) : (
+        <>
+          {items.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {items.map((item) => (
+                <span key={item} className="flex items-center gap-1 rounded-full bg-gray-100 py-1 pl-2.5 pr-1.5 text-[12px] text-gray-700">
+                  {item}
+                  <button
+                    type="button"
+                    aria-label={`Remove ${item}`}
+                    disabled={disabled}
+                    onClick={() => void commit({ ok: true, list: items.filter((x) => x !== item) }, false)}
+                    className="rounded-full p-0.5 text-gray-400 hover:bg-gray-200 hover:text-gray-700 disabled:opacity-50"
+                  >
+                    <X size={11} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          <input
+            value={draft}
+            disabled={disabled}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              if (error) setError(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter") return;
+              e.preventDefault();
+              if (draft.trim()) void commit(add(items, draft), true);
+            }}
+            placeholder={items.length >= max ? "Limit reached" : placeholder}
+            className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-[13px] text-gray-800 placeholder:text-gray-400 disabled:opacity-50"
+          />
+        </>
+      )}
+      {error && (
+        <p role="alert" className="mt-1 text-[11px] text-red-600">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
 
 export default function AgentsSettingsPage() {
   const { show } = useToast();
@@ -33,9 +125,19 @@ export default function AgentsSettingsPage() {
   });
   const [region, setRegion] = useState("United States (English)");
   const [redditPrompt, setRedditPrompt] = useState("");
-  const [searchRegion, setSearchRegion] = useState("Global (no filter)");
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
+  const reddit = useRedditSettings();
+
+  /** Persist a settings change. Optimistic with rollback (in the hook); resolves to an error message or null. */
+  async function saveReddit(patch: Partial<RedditSettings>): Promise<string | null> {
+    try {
+      await reddit.save.mutateAsync({ ...reddit.settings, ...patch });
+      return null;
+    } catch (err) {
+      return err instanceof Error ? err.message : "Could not save. Your change was not kept.";
+    }
+  }
 
   useEffect(() => {
     fetch("/api/settings")
@@ -52,7 +154,6 @@ export default function AgentsSettingsPage() {
         });
         setRegion(find(SETTINGS_KEYS.region) ?? "United States (English)");
         setRedditPrompt(find(SETTINGS_KEYS.redditPrompt) ?? "");
-        setSearchRegion(find(SETTINGS_KEYS.searchRegion) ?? "Global (no filter)");
       })
       .catch(() => {})
       .finally(() => setLoaded(true));
@@ -69,7 +170,6 @@ export default function AgentsSettingsPage() {
         ...TOGGLE_IDS.map((id): [string, string] => [SETTINGS_KEYS.toggle(id), String(toggles[id])]),
         [SETTINGS_KEYS.region, region],
         [SETTINGS_KEYS.redditPrompt, redditPrompt],
-        [SETTINGS_KEYS.searchRegion, searchRegion],
       ];
       for (const [key, value] of entries) {
         const res = await fetch("/api/settings", {
@@ -153,40 +253,41 @@ export default function AgentsSettingsPage() {
         />
         <label className="mb-1 flex items-center gap-1 text-[12px] text-gray-600">Search region</label>
         <select
-          value={searchRegion}
-          onChange={(e) => setSearchRegion(e.target.value)}
-          disabled={!toggles.reddit}
+          value={reddit.settings.country}
+          onChange={async (e) => {
+            const failure = await saveReddit({ country: e.target.value === "us" ? "us" : "global" });
+            if (failure) show(failure);
+          }}
+          disabled={!toggles.reddit || reddit.isLoading || reddit.save.isPending}
           className="mb-3 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-[13px] text-gray-800 disabled:opacity-50"
         >
-          <option>Global (no filter)</option>
-          <option>United States only</option>
+          <option value="global">Global (no filter)</option>
+          <option value="us">United States only</option>
         </select>
         <div className="mb-3">
-          <div className="mb-1 flex items-center justify-between text-[12px] text-gray-600">
-            Priority subreddits
-            <span className="text-gray-400">0/20</span>
-          </div>
-          <button
-            onClick={() => show("Add subreddit — coming soon.")}
+          <ChipField
+            label="Priority subreddits"
+            max={REDDIT_LIMITS.subreddits}
+            items={reddit.settings.subreddits}
+            placeholder="Add a subreddit, like r/startups, and press Enter"
             disabled={!toggles.reddit}
-            className="flex items-center gap-1.5 rounded-lg border border-dashed border-gray-300 px-3 py-2 text-[13px] text-gray-400 hover:bg-gray-50 disabled:opacity-50"
-          >
-            + Add <span className="text-gray-400">Add subreddits to focus your search</span>
-          </button>
+            loading={reddit.isLoading}
+            add={addSubreddit}
+            onChange={(subreddits) => saveReddit({ subreddits })}
+          />
         </div>
-        <div>
-          <div className="mb-1 flex items-center justify-between text-[12px] text-gray-600">
-            Search keywords
-            <span className="text-gray-400">0/30</span>
-          </div>
-          <button
-            onClick={() => show("Add keyword — coming soon.")}
-            disabled={!toggles.reddit}
-            className="flex items-center gap-1.5 rounded-lg border border-dashed border-gray-300 px-3 py-2 text-[13px] text-gray-400 hover:bg-gray-50 disabled:opacity-50"
-          >
-            + Add <span className="text-gray-400">None added</span>
-          </button>
-        </div>
+        <ChipField
+          label="Search keywords"
+          max={REDDIT_LIMITS.keywords}
+          items={reddit.settings.keywords}
+          placeholder="Add a keyword and press Enter"
+          disabled={!toggles.reddit}
+          loading={reddit.isLoading}
+          add={addKeyword}
+          onChange={(keywords) => saveReddit({ keywords })}
+        />
+        {reddit.isError && <p className="mt-2 text-[11px] text-red-600">Could not load your saved Reddit settings. Refresh to try again.</p>}
+        <p className="mt-2 text-[11px] text-gray-400">Priority subreddits, keywords and region save as you change them and focus the next Reddit run.</p>
       </div>
 
       {PLATFORM_AGENTS.filter((a) => a.id !== "articles").map((agent) => (
