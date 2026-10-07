@@ -49,7 +49,7 @@ function buildChatSystemPrompt(activeId: string | null): string {
   return `${STYLE_INSTRUCTION}\n\n${block}\n${trafficBlock}`;
 }
 
-/** Platform-mode equivalent of buildChatSystemPrompt() — Supabase-scoped to
+/** Platform-mode equivalent of buildChatSystemPrompt() - Supabase-scoped to
  * one user instead of the shared local SQLite file. Search data comes from
  * the chat tools (search_snapshots), so no "not cached" claim is made here. */
 async function buildChatSystemPromptSupabase(db: SupabaseClient, userId: string, activeId: string | null): Promise<string> {
