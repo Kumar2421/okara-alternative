@@ -185,6 +185,30 @@ function init(): Database.Database {
       PRIMARY KEY (project_id, snapshot_date)
     );
 
+    -- GEO / AI-visibility history (twin of supabase geo_runs / geo_prompts).
+    -- Every run is tagged with the method that produced it; see lib/domain/geo/types.ts.
+    CREATE TABLE IF NOT EXISTS geo_prompts (
+      project_id TEXT NOT NULL,
+      prompt     TEXT NOT NULL,
+      source     TEXT NOT NULL,
+      active     INTEGER NOT NULL DEFAULT 1,
+      PRIMARY KEY (project_id, prompt)
+    );
+    CREATE TABLE IF NOT EXISTS geo_runs (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id     TEXT NOT NULL,
+      prompt         TEXT NOT NULL,
+      engine         TEXT NOT NULL,
+      method         TEXT NOT NULL,
+      run_at         TEXT NOT NULL,
+      mentioned      INTEGER NOT NULL DEFAULT 0,
+      cited          INTEGER NOT NULL DEFAULT 0,
+      competitors    TEXT NOT NULL DEFAULT '[]',
+      sources        TEXT NOT NULL DEFAULT '[]',
+      answer_excerpt TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS geo_runs_project_run_at_idx ON geo_runs (project_id, run_at);
+
     -- Real leads (outreach prospects) — row-per-lead, not a JSON blob, since
     -- per-row state (email sent/not, notes) is coming in a later phase. Every
     -- row must carry a real source_url it was extracted from; email is

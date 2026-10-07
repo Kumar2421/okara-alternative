@@ -3,6 +3,7 @@
 import { Suspense } from "react";
 import PageSpeedCard from "@/components/settings/PageSpeedCard";
 import TavilyCard from "@/components/settings/TavilyCard";
+import GeminiCard from "@/components/settings/GeminiCard";
 import GoogleCloudCard from "@/components/settings/GoogleCloudCard";
 import GmailCard from "@/components/settings/GmailCard";
 import GoogleAnalyticsCard from "@/components/settings/GoogleAnalyticsCard";
@@ -21,6 +22,7 @@ export default function ApiCredentialsPage() {
       <div className="space-y-3">
         <PageSpeedCard />
         <TavilyCard />
+        <GeminiCard />
         <Suspense fallback={null}>
           <GoogleCloudCard />
         </Suspense>

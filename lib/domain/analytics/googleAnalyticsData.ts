@@ -90,3 +90,18 @@ export function getSelectedGA4Property(projectId: string): { id: string; name: s
   const resource = integration ? getSelectedIntegrationResource(integration.id, "ga4_property") : null;
   return resource ? { id: resource.resourceId, name: resource.resourceName } : null;
 }
+
+/** Generic GA4 runReport (self-host token). Returns the raw report JSON. */
+export async function fetchGA4Report(propertyId: string, body: unknown): Promise<{ rows?: unknown[] }> {
+  const accessToken = await getValidAccessToken();
+  const res = await fetch(`https://analyticsdata.googleapis.com/v1beta/${propertyId}:runReport`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`GA4 report failed: HTTP ${res.status}${detail ? ` — ${detail.slice(0, 200)}` : ""}`);
+  }
+  return res.json();
+}

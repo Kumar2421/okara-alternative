@@ -23,6 +23,7 @@ import GoogleSummary from "@/components/dashboard/search/GoogleSummary";
 import SearchHistoryBar from "@/components/dashboard/search/SearchHistoryBar";
 import SearchOverviewPanel from "@/components/dashboard/search/SearchOverviewPanel";
 import SearchInsightsSection from "@/components/dashboard/search/SearchInsightsSection";
+import GeoVisibility from "@/components/dashboard/geo/GeoVisibility";
 
 const TABS = ["SEO", "Links", "Technical", "GEO", "Traffic", "Findings"] as const;
 type Tab = (typeof TABS)[number];
@@ -1240,8 +1241,10 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
             )}
 
             {tab === "GEO" && (
+              <>
+              <GeoVisibility />
               <Section
-                title="AI Citation Check"
+                title="Quick citation check (search results only)"
                 subtitle="Real search-grounded check for whether your site is surfaced when people search around your product"
               >
                 <button
@@ -1311,6 +1314,7 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
                   </div>
                 )}
               </Section>
+              </>
             )}
           </>
         )}
