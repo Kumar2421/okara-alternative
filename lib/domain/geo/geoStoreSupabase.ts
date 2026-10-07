@@ -62,12 +62,21 @@ export function supabaseRunStore(db: SupabaseClient, userId: string, projectId: 
       return count ?? 0;
     },
     async countMethodRunsToday(method, date) {
-      const { count } = await db
-        .from("geo_runs")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", userId).eq("method", method)
-        .gte("run_at", dayStart(date)).lte("run_at", dayEnd(date));
-      return count ?? 0;
+      const { data } = await db.from("geo_usage").select("used").eq("user_id", userId).eq("method", method).eq("day", date).maybeSingle();
+      return Number(data?.used ?? 0);
+    },
+    async reserve(method, date, cap) {
+      const { data, error } = await db.rpc("geo_reserve_slots", { p_user: userId, p_method: method, p_day: date, p_n: 1, p_cap: cap });
+      if (error) throw new Error(error.message);
+      return data === true;
+    },
+    async tryLock(ttlMs) {
+      const { data, error } = await db.rpc("geo_try_lock", { p_user: userId, p_project: projectId, p_ttl_seconds: Math.ceil(ttlMs / 1000) });
+      if (error) throw new Error(error.message);
+      return data === true;
+    },
+    async unlock() {
+      await db.from("geo_locks").delete().eq("project_id", projectId).eq("user_id", userId);
     },
     async saveRuns(rows) {
       const { error } = await db.from("geo_runs").insert(
@@ -79,4 +88,16 @@ export function supabaseRunStore(db: SupabaseClient, userId: string, projectId: 
       if (error) throw new Error(error.message);
     },
   };
+}
+
+/** Most recent run per project (any method), for ordering the weekly cron. Projects never run are absent. */
+export async function lastRunByProject(db: SupabaseClient, projectIds: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (projectIds.length === 0) return out;
+  const { data, error } = await db.rpc("geo_last_runs", { p_project_ids: projectIds });
+  if (error) throw new Error(error.message);
+  for (const r of (data ?? []) as Array<{ project_id: string; last_run_at: string }>) {
+    out.set(String(r.project_id), new Date(String(r.last_run_at)).toISOString());
+  }
+  return out;
 }

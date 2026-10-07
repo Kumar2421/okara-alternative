@@ -5,19 +5,21 @@ import { getSelectedGA4Property as getSelectedGA4PropertySupabase } from "@/lib/
 import { getLatestSnapshot } from "@/lib/domain/search/searchSnapshotStore";
 import { getLatestSnapshot as getLatestSnapshotSupabase } from "@/lib/domain/search/searchSnapshotStoreSupabase";
 import { brandTermsFrom } from "@/lib/domain/search/searchIntent";
+import { assertPublicHttpUrl } from "@/lib/domain/seo/SEOAgent";
 import { getValidPlatformGoogleToken } from "@/lib/domain/shared/getValidPlatformGoogleToken";
 import { resolvePlatformApiKey } from "@/lib/domain/shared/resolvePlatformApiKey";
 import { tavilySearchRaw } from "@/lib/domain/shared/webSearchTool";
 import { getDriver } from "@/lib/llm";
 import { PLATFORM_DEFAULT_MODELS, PLATFORM_PROVIDER_KEYS } from "@/lib/llm/platformKeys";
 import { buildReferralReportBody, parseReferralRows, type ReferralResult } from "./aiReferral";
-import { resolveGeminiDailyCap } from "./dailyCap";
+import { resolveGeminiDailyCap, resolveSimulatedDailyCap } from "./dailyCap";
 import { createGeminiGroundedPort, createSimulatedPort, DEFAULT_GEMINI_MODEL, type AnswerPort } from "./engines";
 import * as sqliteStore from "./geoStore";
 import * as supabaseStore from "./geoStoreSupabase";
 import { activePrompts, mergePrompts, suggestPrompts } from "./promptSet";
-import { evaluateReadiness, type ReadinessResult } from "./readiness";
-import { runGeoPrompts, type RunStore, type RunSummary } from "./runner";
+import { evaluateReadiness, type Fetched, type ReadinessResult } from "./readiness";
+import { fetchPublic, type FetchOutcome } from "./safeFetch";
+import { emptySummary, runGeoPrompts, type RunStore, type RunSummary } from "./runner";
 import { MAX_TRACKED_PROMPTS, type AnswerMethod, type GeoPrompt, type GeoRunRow } from "./types";
 import { aggregateRuns, compareTrend, dayOf, ratesByDay, type Subject, type Trend } from "./visibility";
 
@@ -87,6 +89,8 @@ export type GeoCapabilities = {
   simulatedAvailable: boolean;
   geminiDailyCap: number | null;
   geminiUsedToday: number;
+  simulatedDailyCap: number | null;
+  simulatedUsedToday: number;
 };
 
 function buildPorts(keys: Keys): AnswerPort[] {
@@ -156,9 +160,9 @@ export async function runProjectGeo(ctx: GeoContext, opts: { budgetMs?: number; 
   const project = await loadProject(ctx);
   if (!project) throw new Error("No project website linked yet. Add one in the project switcher first.");
   const prompts = activePrompts(await ensurePrompts(ctx, project));
-  if (prompts.length === 0) return { ran: 0, skippedAlreadyDone: 0, skippedCap: 0, skippedBudget: 0, failed: [], noPrompts: true };
+  if (prompts.length === 0) return { ...emptySummary(), noPrompts: true };
   const ports = buildPorts(await resolveKeys(ctx));
-  if (ports.length === 0) return { ran: 0, skippedAlreadyDone: 0, skippedCap: 0, skippedBudget: 0, failed: [], noEngines: true };
+  if (ports.length === 0) return { ...emptySummary(), noEngines: true };
 
   const subject: Subject = { brand: project.name, domain: project.domain, competitors: await loadCompetitorDomains(ctx) };
   const now = opts.now;
@@ -167,7 +171,10 @@ export async function runProjectGeo(ctx: GeoContext, opts: { budgetMs?: number; 
     ports,
     subject,
     store: runStoreFor(ctx),
-    caps: { "gemini-grounded": resolveGeminiDailyCap(ctx.mode === "platform", process.env.GEMINI_DAILY_CAP) },
+    caps: {
+      "gemini-grounded": resolveGeminiDailyCap(ctx.mode === "platform", process.env.GEMINI_DAILY_CAP),
+      simulated: resolveSimulatedDailyCap(ctx.mode === "platform", process.env.SIMULATED_DAILY_CAP),
+    },
     budgetMs: opts.budgetMs,
     now: now ? () => now : undefined,
   });
@@ -201,7 +208,9 @@ export async function getOverview(ctx: GeoContext, now = new Date()): Promise<Ge
   const project = await loadProject(ctx);
   if (!project) return null;
   const [prompts, runs, keys, store] = await Promise.all([ensurePrompts(ctx, project), listRuns(ctx, now), resolveKeys(ctx), Promise.resolve(runStoreFor(ctx))]);
-  const usedToday = keys.gemini ? await store.countMethodRunsToday("gemini-grounded", dayOf(now.toISOString())) : 0;
+  const today = dayOf(now.toISOString());
+  const usedToday = keys.gemini ? await store.countMethodRunsToday("gemini-grounded", today) : 0;
+  const simulatedUsed = keys.tavily && keys.groq ? await store.countMethodRunsToday("simulated", today) : 0;
 
   const rows: PromptRow[] = prompts.map((p) => {
     const own = runs.filter((r) => r.prompt === p.prompt);
@@ -234,6 +243,8 @@ export async function getOverview(ctx: GeoContext, now = new Date()): Promise<Ge
       simulatedAvailable: Boolean(keys.tavily && keys.groq),
       geminiDailyCap: resolveGeminiDailyCap(ctx.mode === "platform", process.env.GEMINI_DAILY_CAP),
       geminiUsedToday: usedToday,
+      simulatedDailyCap: resolveSimulatedDailyCap(ctx.mode === "platform", process.env.SIMULATED_DAILY_CAP),
+      simulatedUsedToday: simulatedUsed,
     },
     lastRunAt: runs.length > 0 ? runs[0].runAt : null,
   };
@@ -243,28 +254,27 @@ export async function getPromptHistory(ctx: GeoContext, prompt: string): Promise
   return (await listRuns(ctx)).filter((r) => r.prompt === prompt);
 }
 
-async function fetchText(url: string): Promise<string | null> {
-  try {
-    const res = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(8000), headers: { "User-Agent": "MarloBot/1.0 (+readiness check)" } });
-    if (!res.ok) return null;
-    return (await res.text()).slice(0, 500_000);
-  } catch {
-    return null;
-  }
+function toFetched(outcome: FetchOutcome): Fetched {
+  if (outcome.kind === "ok") return { state: "ok", body: outcome.body };
+  return outcome.kind === "not-found" ? { state: "missing" } : { state: "unknown" };
 }
 
-export async function checkReadiness(domain: string): Promise<ReadinessResult> {
+/** Every request (and every redirect hop) goes through the public-URL guard, with capped hops and bytes. */
+export function fetchForReadiness(url: string): Promise<FetchOutcome> {
+  return fetchPublic(url, { assertUrl: (u) => void assertPublicHttpUrl(u) });
+}
+
+export async function checkReadiness(domain: string, fetcher: (url: string) => Promise<FetchOutcome> = fetchForReadiness): Promise<ReadinessResult> {
   const base = `https://${domain}`;
-  const [robotsTxt, llmsTxt, homepageHtml, sitemapXml] = await Promise.all([
-    fetchText(`${base}/robots.txt`),
-    fetchText(`${base}/llms.txt`),
-    fetchText(`${base}/`),
-    fetchText(`${base}/sitemap.xml`),
+  const [robots, llms, home, sitemapXml] = await Promise.all([
+    fetcher(`${base}/robots.txt`),
+    fetcher(`${base}/llms.txt`),
+    fetcher(`${base}/`),
+    fetcher(`${base}/sitemap.xml`),
   ]);
-  const sitemapFound = /^\s*sitemap\s*:/im.test(robotsTxt ?? "") || Boolean(sitemapXml && /<(urlset|sitemapindex)[\s>]/i.test(sitemapXml));
-  // A soft-404 HTML page at /llms.txt is not a real llms.txt.
-  const llms = llmsTxt && !/^\s*<(!doctype|html)/i.test(llmsTxt) ? llmsTxt : null;
-  return evaluateReadiness({ robotsTxt, llmsTxt: llms, sitemapFound, homepageHtml });
+  // A soft-404 HTML page at /llms.txt is not a real llms.txt: treat it as missing.
+  const llmsFetched: Fetched = llms.kind === "ok" && /^s*<(!doctype|html)/i.test(llms.body) ? { state: "missing" } : toFetched(llms);
+  return evaluateReadiness({ robots: toFetched(robots), llms: llmsFetched, sitemapXml: toFetched(sitemapXml), homepageHtml: home.kind === "ok" ? home.body : null });
 }
 
 export type ReferralView = (ReferralResult & { range: { startDate: string; endDate: string } }) | { notConnected: true };

@@ -208,6 +208,17 @@ function init(): Database.Database {
       answer_excerpt TEXT NOT NULL DEFAULT ''
     );
     CREATE INDEX IF NOT EXISTS geo_runs_project_run_at_idx ON geo_runs (project_id, run_at);
+    -- Daily call slots reserved per method (failed calls count) and a per-project in-flight lock.
+    CREATE TABLE IF NOT EXISTS geo_usage (
+      method TEXT NOT NULL,
+      day    TEXT NOT NULL,
+      used   INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (method, day)
+    );
+    CREATE TABLE IF NOT EXISTS geo_locks (
+      project_id   TEXT PRIMARY KEY,
+      locked_until INTEGER NOT NULL
+    );
 
     -- Real leads (outreach prospects) — row-per-lead, not a JSON blob, since
     -- per-row state (email sent/not, notes) is coming in a later phase. Every

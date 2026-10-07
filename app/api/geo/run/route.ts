@@ -16,6 +16,9 @@ export async function POST() {
     if (summary.noEngines) {
       return NextResponse.json({ error: "No AI visibility method is set up. Add a Gemini key, or Tavily plus a Groq connection, in Settings." }, { status: 422 });
     }
+    if (summary.inFlight) {
+      return NextResponse.json({ error: "A check is already running for this project. Try again in a minute." }, { status: 409 });
+    }
     return NextResponse.json({ summary });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 502 });

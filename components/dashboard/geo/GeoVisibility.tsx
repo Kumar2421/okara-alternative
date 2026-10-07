@@ -267,6 +267,44 @@ function MethodsExplainer() {
   );
 }
 
+type RunSummary = {
+  ran: number;
+  skippedCap: number;
+  skippedAlreadyDone: number;
+  failed: unknown[];
+  skipped: Array<{ prompt: string; method: "gemini-grounded" | "simulated"; reason: "cap" | "rotation" | "budget" }>;
+  runsPerPrompt: Partial<Record<"gemini-grounded" | "simulated", number>>;
+};
+
+const METHOD_NAME = { "gemini-grounded": "Gemini with Google Search", simulated: "Simulated" } as const;
+const SKIP_REASON = {
+  cap: "the daily limit was reached",
+  rotation: "the daily limit is smaller than your prompt list, so the starting prompt rotates each day",
+  budget: "the run ran out of time",
+} as const;
+
+function SkippedPrompts({ summary }: { summary: RunSummary }) {
+  const reduced = (Object.entries(summary.runsPerPrompt) as Array<["gemini-grounded" | "simulated", number]>).filter(([, n]) => n < 3);
+  if (summary.skipped.length === 0 && reduced.length === 0) return null;
+  return (
+    <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
+      {reduced.map(([m, n]) => (
+        <p key={m}>
+          {METHOD_NAME[m]}: the daily limit allows only {n} run{n === 1 ? "" : "s"} per prompt today instead of 3.
+        </p>
+      ))}
+      {summary.skipped.length > 0 && <p className="mt-1 font-medium">Not checked in this run:</p>}
+      <ul className="list-disc pl-4">
+        {summary.skipped.map((s) => (
+          <li key={s.method + s.prompt + s.reason}>
+            {s.prompt} ({METHOD_NAME[s.method]}): {SKIP_REASON[s.reason]}.
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export default function GeoVisibility() {
   const { project } = useProject();
   const pid = project?.id;
@@ -278,9 +316,11 @@ export default function GeoVisibility() {
     enabled: Boolean(pid),
     queryFn: () => fetchJson<GeoOverview>("/api/geo/overview"),
   });
+  const [lastSummary, setLastSummary] = useState<RunSummary | null>(null);
   const run = useMutation({
-    mutationFn: () => fetchJson<{ summary: { ran: number; skippedCap: number; skippedAlreadyDone: number; failed: unknown[] } }>("/api/geo/run", { method: "POST" }),
+    mutationFn: () => fetchJson<{ summary: RunSummary }>("/api/geo/run", { method: "POST" }),
     onSuccess: ({ summary }) => {
+      setLastSummary(summary);
       qc.invalidateQueries({ queryKey: qk.geoOverview(pid) });
       qc.invalidateQueries({ queryKey: ["project", pid ?? "none", "geo-history"] });
       show(
@@ -289,7 +329,7 @@ export default function GeoVisibility() {
           : summary.skippedAlreadyDone > 0
             ? "Already checked today. Come back tomorrow for a new reading."
             : summary.skippedCap > 0
-              ? "Daily limit for Gemini checks reached. It resets tomorrow."
+              ? "Daily limit for checks reached. It resets tomorrow."
               : "Nothing to run.",
       );
     },
@@ -322,9 +362,11 @@ export default function GeoVisibility() {
               {overview.data.lastRunAt ? `Last run ${new Date(overview.data.lastRunAt).toLocaleDateString()}. ` : "Not run yet. "}
               Runs automatically once a week.
               {cap?.geminiAvailable && cap.geminiDailyCap !== null ? ` Gemini checks today: ${cap.geminiUsedToday} of ${cap.geminiDailyCap}.` : ""}
+              {cap?.simulatedAvailable && cap.simulatedDailyCap !== null ? ` Simulated checks today: ${cap.simulatedUsedToday} of ${cap.simulatedDailyCap}.` : ""}
               {cap && !cap.geminiAvailable && !cap.simulatedAvailable ? " No method is set up yet: add a Gemini key (or Tavily plus Groq) in Settings." : ""}
             </span>
           </div>
+          {lastSummary && <SkippedPrompts summary={lastSummary} />}
           <Prompts pid={pid} overview={overview.data} />
         </>
       )}

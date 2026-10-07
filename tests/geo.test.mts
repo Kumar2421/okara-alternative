@@ -13,18 +13,20 @@ import type { GeoRunRow } from "../lib/domain/geo/types.ts";
 
 const subject = { brand: "Marlo", domain: "marlo.app", competitors: ["hubspot.com", "semrush.com"] };
 
+const ok = (body: string) => ({ state: "ok" as const, body });
+
 const GOOD_HTML = `<html><head><script type="application/ld+json">{"@type":"Organization"}</script></head>
 <body><h1>Marlo</h1><h2>Features</h2><h2>How does it work?</h2></body></html>`;
 
 test("readiness: all good scores 100", () => {
-  const r = evaluateReadiness({ robotsTxt: "User-agent: *\nAllow: /\nSitemap: https://x/sitemap.xml", llmsTxt: "# Marlo", sitemapFound: true, homepageHtml: GOOD_HTML });
+  const r = evaluateReadiness({ robots: ok("User-agent: *\nAllow: /\nSitemap: https://x/sitemap.xml"), llms: ok("# Marlo"), sitemapXml: { state: "missing" }, homepageHtml: GOOD_HTML });
   assert.equal(r.score, 100);
   assert.equal(r.method, "readiness");
 });
 
 test("readiness: blocked crawler and missing pieces lower the score", () => {
   const robots = "User-agent: GPTBot\nDisallow: /\n\nUser-agent: *\nAllow: /";
-  const r = evaluateReadiness({ robotsTxt: robots, llmsTxt: null, sitemapFound: false, homepageHtml: "<html><h1>a</h1></html>" });
+  const r = evaluateReadiness({ robots: ok(robots), llms: { state: "missing" }, sitemapXml: { state: "missing" }, homepageHtml: "<html><h1>a</h1></html>" });
   assert.equal(r.checks.find((c) => c.id === "crawler-gptbot")?.status, "fail");
   assert.equal(r.checks.find((c) => c.id === "crawler-claudebot")?.status, "pass");
   assert.equal(r.checks.find((c) => c.id === "llms-txt")?.status, "fail");
@@ -38,7 +40,7 @@ test("readiness: named group beats wildcard, wildcard block applies to all", () 
 });
 
 test("readiness: unfetchable homepage is unknown, not a failure", () => {
-  const r = evaluateReadiness({ robotsTxt: null, llmsTxt: "x", sitemapFound: true, homepageHtml: null });
+  const r = evaluateReadiness({ robots: { state: "missing" }, llms: ok("x"), sitemapXml: ok("<urlset></urlset>"), homepageHtml: null });
   assert.equal(r.checks.find((c) => c.id === "schema")?.status, "unknown");
   assert.equal(r.score, 100);
 });
@@ -123,6 +125,8 @@ function fakePort(method: "gemini-grounded" | "simulated", counter: { n: number 
 
 function memoryStore() {
   const rows: GeoRunRow[] = [];
+  const used = new Map<string, number>();
+  let locked = false;
   return {
     rows,
     store: {
@@ -130,7 +134,21 @@ function memoryStore() {
         return rows.filter((r) => r.prompt === prompt && r.method === method && r.runAt.startsWith(date)).length;
       },
       async countMethodRunsToday(method: string, date: string) {
-        return rows.filter((r) => r.method === method && r.runAt.startsWith(date)).length;
+        return used.get(method + date) ?? 0;
+      },
+      async reserve(method: string, date: string, cap: number) {
+        const n = used.get(method + date) ?? 0;
+        if (n + 1 > cap) return false;
+        used.set(method + date, n + 1);
+        return true;
+      },
+      async tryLock() {
+        if (locked) return false;
+        locked = true;
+        return true;
+      },
+      async unlock() {
+        locked = false;
       },
       async saveRuns(more: GeoRunRow[]) {
         rows.push(...more);
@@ -176,9 +194,11 @@ test("runner: daily cap stops Gemini runs but not simulated", async () => {
     caps: { "gemini-grounded": 7 },
     now: () => new Date("2026-10-07T10:00:00Z"),
   });
-  assert.equal(g.n, 6); // two full prompts; third would need 3 but only 1 left
+  // cap 7 over 4 prompts: 1 run per prompt instead of 3, so every prompt still gets a reading
+  assert.equal(g.n, 4);
   assert.equal(s.n, 12);
-  assert.equal(summary.skippedCap, 2);
+  assert.equal(summary.runsPerPrompt["gemini-grounded"], 1);
+  assert.equal(summary.runsPerPrompt.simulated, 3);
 });
 
 test("runner: stops at the time budget", async () => {
@@ -256,7 +276,7 @@ test("simulated port is always labelled simulated and cites search hits", async 
 
 test("sqlite store: round trip, per-day counts", async () => {
   const db = new Database(":memory:");
-  db.exec(`CREATE TABLE geo_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, prompt TEXT NOT NULL, engine TEXT NOT NULL, method TEXT NOT NULL, run_at TEXT NOT NULL, mentioned INTEGER NOT NULL DEFAULT 0, cited INTEGER NOT NULL DEFAULT 0, competitors TEXT NOT NULL DEFAULT '[]', sources TEXT NOT NULL DEFAULT '[]', answer_excerpt TEXT NOT NULL DEFAULT '')`);
+  db.exec(`CREATE TABLE geo_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, prompt TEXT NOT NULL, engine TEXT NOT NULL, method TEXT NOT NULL, run_at TEXT NOT NULL, mentioned INTEGER NOT NULL DEFAULT 0, cited INTEGER NOT NULL DEFAULT 0, competitors TEXT NOT NULL DEFAULT '[]', sources TEXT NOT NULL DEFAULT '[]', answer_excerpt TEXT NOT NULL DEFAULT ''); CREATE TABLE geo_usage (method TEXT NOT NULL, day TEXT NOT NULL, used INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (method, day));`);
   const store = sqliteRunStore(db, "p1");
   await store.saveRuns([{ ...run("simulated", "2026-10-07T10:00:00.000Z", true), prompt: "q", competitors: ["x"] }]);
   assert.equal(await store.countRuns("q", "simulated", "2026-10-07"), 1);

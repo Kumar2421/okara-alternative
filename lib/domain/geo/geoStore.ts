@@ -52,10 +52,29 @@ export function sqliteRunStore(db: Database.Database, projectId: string): RunSto
       return row.n;
     },
     async countMethodRunsToday(method, date) {
-      const row = db
-        .prepare("SELECT COUNT(*) AS n FROM geo_runs WHERE project_id = ? AND method = ? AND substr(run_at, 1, 10) = ?")
-        .get(projectId, method, date) as { n: number };
-      return row.n;
+      const row = db.prepare("SELECT used FROM geo_usage WHERE method = ? AND day = ?").get(method, date) as { used: number } | undefined;
+      return row?.used ?? 0;
+    },
+    async reserve(method, date, cap) {
+      // better-sqlite3 transactions are synchronous, so check-and-increment cannot interleave.
+      return db.transaction(() => {
+        const row = db.prepare("SELECT used FROM geo_usage WHERE method = ? AND day = ?").get(method, date) as { used: number } | undefined;
+        if ((row?.used ?? 0) + 1 > cap) return false;
+        db.prepare("INSERT INTO geo_usage (method, day, used) VALUES (?, ?, 1) ON CONFLICT (method, day) DO UPDATE SET used = used + 1").run(method, date);
+        return true;
+      })();
+    },
+    async tryLock(ttlMs) {
+      const now = Date.now();
+      return db.transaction(() => {
+        const row = db.prepare("SELECT locked_until FROM geo_locks WHERE project_id = ?").get(projectId) as { locked_until: number } | undefined;
+        if (row && row.locked_until > now) return false;
+        db.prepare("INSERT INTO geo_locks (project_id, locked_until) VALUES (?, ?) ON CONFLICT (project_id) DO UPDATE SET locked_until = excluded.locked_until").run(projectId, now + ttlMs);
+        return true;
+      })();
+    },
+    async unlock() {
+      db.prepare("DELETE FROM geo_locks WHERE project_id = ?").run(projectId);
     },
     async saveRuns(rows) {
       const insert = db.prepare(

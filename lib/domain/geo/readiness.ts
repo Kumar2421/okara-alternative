@@ -1,12 +1,16 @@
 export const AI_CRAWLERS = ["GPTBot", "ClaudeBot", "PerplexityBot", "Google-Extended"] as const;
 
+/**
+ * What we learned about one file. "missing" means the server really answered
+ * 404/410. "unknown" means we could not tell (network error, timeout, 403,
+ * 5xx, blocked URL) and must never be read as pass or fail.
+ */
+export type Fetched = { state: "ok"; body: string } | { state: "missing" } | { state: "unknown" };
+
 export type ReadinessInput = {
-  /** Body of /robots.txt, or null when it could not be fetched / does not exist. */
-  robotsTxt: string | null;
-  /** Body of /llms.txt, or null when missing. */
-  llmsTxt: string | null;
-  /** True when a sitemap was found (robots.txt Sitemap line or /sitemap.xml). */
-  sitemapFound: boolean;
+  robots: Fetched;
+  llms: Fetched;
+  sitemapXml: Fetched;
   /** Homepage HTML, or null when it could not be fetched. */
   homepageHtml: string | null;
 };
@@ -30,9 +34,28 @@ export type ReadinessResult = {
   checks: ReadinessCheck[];
 };
 
-type Group = { agents: string[]; disallowAll: boolean; allowAll: boolean };
+type Rule = { allow: boolean; path: string };
+type Group = { agents: string[]; rules: Rule[] };
 
-/** Does robots.txt block this crawler from the whole site? A named group beats `*`. */
+/** Disallow values that block everything, even though only "/" literally says so. */
+const BLOCK_ALL = new Set(["/", "/*", "/*?"]);
+
+function patternRegex(path: string): RegExp {
+  const anchored = path.endsWith("$");
+  const body = (anchored ? path.slice(0, -1) : path).replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+  return new RegExp(`^${body}${anchored ? "$" : ""}`);
+}
+
+function ruleMatchesRoot(rule: Rule): boolean {
+  if (!rule.allow && BLOCK_ALL.has(rule.path)) return true;
+  return patternRegex(rule.path).test("/");
+}
+
+/**
+ * Does robots.txt block this crawler from the whole site (the root path)?
+ * A named group beats the "*" group. Within the applicable rules the longest
+ * matching pattern wins; on a tie Allow wins (the robots.txt standard).
+ */
 export function crawlerBlocked(robotsTxt: string, agent: string): boolean {
   const groups: Group[] = [];
   let current: Group | null = null;
@@ -46,7 +69,7 @@ export function crawlerBlocked(robotsTxt: string, agent: string): boolean {
     const value = line.slice(idx + 1).trim();
     if (field === "user-agent") {
       if (!current || !lastWasAgent) {
-        current = { agents: [], disallowAll: false, allowAll: false };
+        current = { agents: [], rules: [] };
         groups.push(current);
       }
       current.agents.push(value.toLowerCase());
@@ -54,13 +77,23 @@ export function crawlerBlocked(robotsTxt: string, agent: string): boolean {
       continue;
     }
     lastWasAgent = false;
-    if (!current) continue;
-    if (field === "disallow" && value === "/") current.disallowAll = true;
-    if (field === "allow" && value === "/") current.allowAll = true;
+    if (!current || !value) continue;
+    if (field === "disallow") current.rules.push({ allow: false, path: value });
+    if (field === "allow") current.rules.push({ allow: true, path: value });
   }
   const named = groups.filter((g) => g.agents.includes(agent.toLowerCase()));
   const pool = named.length > 0 ? named : groups.filter((g) => g.agents.includes("*"));
-  return pool.some((g) => g.disallowAll && !g.allowAll);
+  let bestLen = -1;
+  let blocked = false;
+  for (const rule of pool.flatMap((g) => g.rules)) {
+    if (!ruleMatchesRoot(rule)) continue;
+    const len = rule.path.length;
+    if (len > bestLen || (len === bestLen && rule.allow)) {
+      bestLen = len;
+      blocked = !rule.allow;
+    }
+  }
+  return blocked;
 }
 
 export function hasJsonLd(html: string): boolean {
@@ -89,29 +122,44 @@ export function headingStructure(html: string): { h1: number; h2: number; questi
 export function evaluateReadiness(input: ReadinessInput): ReadinessResult {
   const checks: ReadinessCheck[] = [];
 
-  checks.push(
-    input.llmsTxt && input.llmsTxt.trim().length > 0
-      ? { id: "llms-txt", label: "llms.txt file", status: "pass", detail: "Your site has an llms.txt file that tells AI tools what it is about.", fix: "", weight: 10 }
-      : { id: "llms-txt", label: "llms.txt file", status: "fail", detail: "No llms.txt file was found.", fix: "Add a short /llms.txt that summarises your product and links to your key pages.", weight: 10 },
-  );
+  const LLMS = { id: "llms-txt", label: "llms.txt file", weight: 10 };
+  if (input.llms.state === "unknown") {
+    checks.push({ ...LLMS, status: "unknown", detail: "We could not check for llms.txt (the request failed or was refused).", fix: "" });
+  } else if (input.llms.state === "ok" && input.llms.body.trim().length > 0) {
+    checks.push({ ...LLMS, status: "pass", detail: "Your site has an llms.txt file that tells AI tools what it is about.", fix: "" });
+  } else {
+    checks.push({
+      ...LLMS,
+      status: "fail",
+      detail: input.llms.state === "ok" ? "Your llms.txt file is empty." : "No llms.txt file was found.",
+      fix: "Add a short /llms.txt that summarises your product and links to your key pages.",
+    });
+  }
 
   for (const bot of AI_CRAWLERS) {
     const id = `crawler-${bot.toLowerCase()}`;
     const label = `${bot} allowed`;
-    if (input.robotsTxt === null) {
-      checks.push({ id, label, status: "pass", detail: "No robots.txt found, so nothing blocks this crawler.", fix: "", weight: 10 });
-    } else if (crawlerBlocked(input.robotsTxt, bot)) {
+    if (input.robots.state === "unknown") {
+      checks.push({ id, label, status: "unknown", detail: "We could not read your robots.txt (the request failed or was refused), so we cannot say whether this crawler is blocked.", fix: "", weight: 10 });
+    } else if (input.robots.state === "missing") {
+      checks.push({ id, label, status: "pass", detail: "Your robots.txt does not exist (404), so nothing blocks this crawler.", fix: "", weight: 10 });
+    } else if (crawlerBlocked(input.robots.body, bot)) {
       checks.push({ id, label, status: "fail", detail: `Your robots.txt blocks ${bot} from the whole site.`, fix: `Remove the "Disallow: /" rule that applies to ${bot} in robots.txt if you want AI tools to read your site.`, weight: 10 });
     } else {
       checks.push({ id, label, status: "pass", detail: `${bot} is not blocked.`, fix: "", weight: 10 });
     }
   }
 
-  checks.push(
-    input.sitemapFound
-      ? { id: "sitemap", label: "Sitemap", status: "pass", detail: "A sitemap was found.", fix: "", weight: 15 }
-      : { id: "sitemap", label: "Sitemap", status: "fail", detail: "No sitemap was found.", fix: "Publish /sitemap.xml and reference it in robots.txt so crawlers can find every page.", weight: 15 },
-  );
+  const SITEMAP = { id: "sitemap", label: "Sitemap", weight: 15 };
+  const robotsSitemap = input.robots.state === "ok" && /^\s*sitemap\s*:/im.test(input.robots.body);
+  const xmlSitemap = input.sitemapXml.state === "ok" && /<(urlset|sitemapindex)[\s>]/i.test(input.sitemapXml.body);
+  if (robotsSitemap || xmlSitemap) {
+    checks.push({ ...SITEMAP, status: "pass", detail: "A sitemap was found.", fix: "" });
+  } else if (input.sitemapXml.state === "unknown") {
+    checks.push({ ...SITEMAP, status: "unknown", detail: "We could not check for a sitemap (the request failed or was refused).", fix: "" });
+  } else {
+    checks.push({ ...SITEMAP, status: "fail", detail: "No sitemap was found.", fix: "Publish /sitemap.xml and reference it in robots.txt so crawlers can find every page." });
+  }
 
   if (input.homepageHtml === null) {
     checks.push(
