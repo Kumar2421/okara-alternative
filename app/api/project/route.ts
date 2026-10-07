@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { getActiveProjectId, setActiveProjectId } from "@/lib/domain/shared/getActiveProjectId.ts";
-import { assertPublicHttpUrl } from "@/lib/domain/seo/SEOAgent.ts";
-import { checkUrlReachable } from "@/lib/domain/shared/checkUrlReachable.ts";
+import { getActiveProjectId, setActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
+import { assertPublicHttpUrl } from "@/lib/domain/seo/SEOAgent";
+import { checkUrlReachable } from "@/lib/domain/shared/checkUrlReachable";
 import { FEATURES } from "@/lib/features";
-import { canCreateProject } from "@/lib/entitlements.ts";
+import { canCreateProject } from "@/lib/entitlements";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
 

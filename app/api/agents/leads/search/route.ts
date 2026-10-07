@@ -1,17 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getDriver } from "@/lib/llm";
-<<<<<<< HEAD
 import { LeadsAgent } from "@/lib/domain/leads/LeadsAgent";
 import { getLeadProfile } from "@/lib/domain/leads/leadProfileStore";
 import { getLeadProfile as getLeadProfileSupabase } from "@/lib/domain/leads/leadProfileStoreSupabase";
 import { verifyMissingEmails } from "@/lib/domain/leads/verifyMissingEmails";
 import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
-=======
-import { LeadsAgent } from "@/lib/domain/leads/LeadsAgent.ts";
-import { verifyMissingEmails } from "@/lib/domain/leads/verifyMissingEmails.ts";
-import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId.ts";
->>>>>>> ac2857f (feat(entitlements): add plan limits and enforcement)
 import { FEATURES } from "@/lib/features";
 import { canFetchLeadsToday } from "@/lib/entitlements";
 import { createClient } from "@/utils/supabase/server";
