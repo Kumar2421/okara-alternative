@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/search-monitor",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/geo-weekly",
+      "schedule": "0 5 * * 1"
     }
   ]
 }

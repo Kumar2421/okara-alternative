@@ -15,6 +15,7 @@
  */
 const SECRET_SETTING_KEYS = new Set([
   "tavily_api_key",
+  "gemini_api_key",
   "pagespeed_api_key",
   "google_cloud_api_key",
   "gmail_access_token",

@@ -186,6 +186,41 @@ function init(): Database.Database {
       PRIMARY KEY (project_id, snapshot_date)
     );
 
+    -- GEO / AI-visibility history (twin of supabase geo_runs / geo_prompts).
+    -- Every run is tagged with the method that produced it; see lib/domain/geo/types.ts.
+    CREATE TABLE IF NOT EXISTS geo_prompts (
+      project_id TEXT NOT NULL,
+      prompt     TEXT NOT NULL,
+      source     TEXT NOT NULL,
+      active     INTEGER NOT NULL DEFAULT 1,
+      PRIMARY KEY (project_id, prompt)
+    );
+    CREATE TABLE IF NOT EXISTS geo_runs (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id     TEXT NOT NULL,
+      prompt         TEXT NOT NULL,
+      engine         TEXT NOT NULL,
+      method         TEXT NOT NULL,
+      run_at         TEXT NOT NULL,
+      mentioned      INTEGER NOT NULL DEFAULT 0,
+      cited          INTEGER NOT NULL DEFAULT 0,
+      competitors    TEXT NOT NULL DEFAULT '[]',
+      sources        TEXT NOT NULL DEFAULT '[]',
+      answer_excerpt TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS geo_runs_project_run_at_idx ON geo_runs (project_id, run_at);
+    -- Daily call slots reserved per method (failed calls count) and a per-project in-flight lock.
+    CREATE TABLE IF NOT EXISTS geo_usage (
+      method TEXT NOT NULL,
+      day    TEXT NOT NULL,
+      used   INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (method, day)
+    );
+    CREATE TABLE IF NOT EXISTS geo_locks (
+      project_id   TEXT PRIMARY KEY,
+      locked_until INTEGER NOT NULL
+    );
+
     -- Marlo's own notifications (single local user, so user_id is always
     -- 'local'; kept so the shape matches the platform tables).
     CREATE TABLE IF NOT EXISTS notification_preferences (
