@@ -42,12 +42,14 @@ const SELF_HOST_RUN_EVERY_MS = 6 * 3600_000;
  * Self-host has no scheduler, so the in-app list refreshes itself: at most
  * once every few hours, in the background, never blocking the request.
  */
+let selfHostRunning = false;
+
 export function maybeRunSelfHostJob(now = new Date()): void {
-  if (FEATURES.PLATFORM_MODE) return;
+  if (FEATURES.PLATFORM_MODE || selfHostRunning) return;
   const db = getDb();
   const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(SELF_HOST_RUN_KEY) as { value: string } | undefined;
   if (row && now.getTime() - Date.parse(row.value) < SELF_HOST_RUN_EVERY_MS) return;
-  db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(SELF_HOST_RUN_KEY, now.toISOString());
+  selfHostRunning = true;
 
   const config = notificationConfig();
   void runNotificationJob({
@@ -58,5 +60,11 @@ export function maybeRunSelfHostJob(now = new Date()): void {
     now,
     budgetMs: 30_000,
     log: (message) => console.warn(`[notifications] ${message}`),
-  }).catch((err) => console.warn("[notifications] self-host run failed:", err instanceof Error ? err.message : "unknown error"));
+  })
+    // The throttle stamp is written only after a successful run, so a crash or failure retries on the next request.
+    .then(() => {
+      db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(SELF_HOST_RUN_KEY, now.toISOString());
+    })
+    .catch((err) => console.warn("[notifications] self-host run failed:", err instanceof Error ? err.message : "unknown error"))
+    .finally(() => { selfHostRunning = false; });
 }

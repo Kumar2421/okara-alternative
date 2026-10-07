@@ -10,6 +10,7 @@ export const LOCAL_USER_ID = "local";
 type Row = {
   id: string; user_id: string; project_id: string | null; kind: string; dedupe_key: string; title: string; body: string;
   payload: string; created_at: string; read_at: string | null; emailed_at: string | null; email_error: string | null;
+  email_attempts: number | null; last_email_attempt_at: string | null;
 };
 
 function safeJson(text: string): Record<string, unknown> {
@@ -27,6 +28,7 @@ function toNotification(row: Row): Notification | null {
     id: row.id, userId: row.user_id, projectId: row.project_id, kind: row.kind, dedupeKey: row.dedupe_key,
     title: row.title, body: row.body, payload: safeJson(row.payload), createdAt: row.created_at,
     readAt: row.read_at, emailedAt: row.emailed_at, emailError: row.email_error,
+    emailAttempts: row.email_attempts ?? 0, lastEmailAttemptAt: row.last_email_attempt_at,
   };
 }
 
@@ -91,6 +93,32 @@ export function sqliteNotificationStore(db: Database.Database): NotificationStor
       return (
         db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE user_id = ? AND kind = ? AND emailed_at >= ?").get(userId, kind, sinceIso) as { n: number }
       ).n;
+    },
+    async noteEmailAttempt(userId, id, now) {
+      db.prepare("UPDATE notifications SET email_attempts = COALESCE(email_attempts, 0) + 1, last_email_attempt_at = ? WHERE user_id = ? AND id = ?").run(now.toISOString(), userId, id);
+    },
+    async hasKey(userId, dedupeKey) {
+      return db.prepare("SELECT 1 FROM notifications WHERE user_id = ? AND dedupe_key = ?").get(userId, dedupeKey) !== undefined;
+    },
+    async lastRuns(userIds) {
+      const out = new Map<string, string | null>();
+      const stmt = db.prepare("SELECT last_run_at FROM notification_preferences WHERE user_id = ?");
+      for (const id of userIds) out.set(id, (stmt.get(id) as { last_run_at: string | null } | undefined)?.last_run_at ?? null);
+      return out;
+    },
+    async stampRun(userId, now) {
+      db.prepare(
+        `INSERT INTO notification_preferences (user_id, last_run_at, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(user_id) DO UPDATE SET last_run_at = excluded.last_run_at`,
+      ).run(userId, now.toISOString(), now.toISOString());
+    },
+    async claimTestSend(userId, now, minGapMs) {
+      db.prepare("INSERT OR IGNORE INTO notification_preferences (user_id, updated_at) VALUES (?, ?)").run(userId, now.toISOString());
+      const cutoff = new Date(now.getTime() - minGapMs).toISOString();
+      const result = db
+        .prepare("UPDATE notification_preferences SET last_test_email_at = ? WHERE user_id = ? AND (last_test_email_at IS NULL OR last_test_email_at < ?)")
+        .run(now.toISOString(), userId, cutoff);
+      return result.changes > 0;
     },
   };
 }

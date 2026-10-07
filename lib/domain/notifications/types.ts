@@ -47,4 +47,7 @@ export type Notification = NotificationDraft & {
   readAt: string | null;
   emailedAt: string | null;
   emailError: string | null;
+  /** Failed send attempts so far (retryable failures only). */
+  emailAttempts: number;
+  lastEmailAttemptAt: string | null;
 };

@@ -191,7 +191,9 @@ function init(): Database.Database {
       user_id          TEXT PRIMARY KEY,
       prefs            TEXT NOT NULL DEFAULT '{}',
       unsubscribed_all INTEGER NOT NULL DEFAULT 0,
-      updated_at       TEXT NOT NULL
+      updated_at       TEXT NOT NULL,
+      last_run_at      TEXT,
+      last_test_email_at TEXT
     );
 
     CREATE TABLE IF NOT EXISTS notifications (
@@ -207,6 +209,8 @@ function init(): Database.Database {
       read_at     TEXT,
       emailed_at  TEXT,
       email_error TEXT,
+      email_attempts INTEGER NOT NULL DEFAULT 0,
+      last_email_attempt_at TEXT,
       UNIQUE (user_id, dedupe_key)
     );
     CREATE INDEX IF NOT EXISTS notifications_user_created_idx ON notifications (user_id, created_at DESC);
@@ -346,6 +350,14 @@ function init(): Database.Database {
  * need these run explicitly. Each guarded by a columns-list check so it's
  * safe to run on every startup. */
 function migrate(db: Database.Database) {
+  // Notification bookkeeping columns added while the feature was in review.
+  const addMissing = (table: string, columns: Array<[string, string]>) => {
+    const have = new Set((db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name));
+    for (const [name, type] of columns) if (!have.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+  };
+  addMissing("notification_preferences", [["last_run_at", "TEXT"], ["last_test_email_at", "TEXT"]]);
+  addMissing("notifications", [["email_attempts", "INTEGER NOT NULL DEFAULT 0"], ["last_email_attempt_at", "TEXT"]]);
+
   const cols = db.prepare("PRAGMA table_info(provider_connections)").all() as { name: string }[];
   if (!cols.some((c) => c.name === "base_url")) {
     db.exec(`ALTER TABLE provider_connections ADD COLUMN base_url TEXT`);

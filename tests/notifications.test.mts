@@ -249,8 +249,11 @@ test("job sends no digest on an idle Monday or on other weekdays", async () => {
   assert.equal(sender.sent.length, 0);
 
   const tuesday = new Date(MONDAY.getTime() + DAY);
-  await runNotificationJob(deps(factsWith({ credits: null, integrations: [] }), store, sender, tuesday));
-  assert.ok(!store.rows.some((r) => r.kind === "weekly_digest"));
+  const busy = factsWith({ credits: null, integrations: [] });
+  await runNotificationJob(deps(busy, store, sender, MONDAY));
+  assert.equal(store.rows.filter((r) => r.kind === "weekly_digest").length, 1);
+  await runNotificationJob(deps(busy, store, sender, tuesday));
+  assert.equal(store.rows.filter((r) => r.kind === "weekly_digest").length, 1);
 });
 
 test("job digest follows the user's timezone Monday", async () => {
@@ -329,8 +332,8 @@ test("sqlite store dedupes per user, tracks read and emailed, and survives bad r
   const { default: Database } = await import("better-sqlite3");
   const { sqliteNotificationStore } = await import("../lib/domain/notifications/notificationStore.ts");
   const db = new Database(":memory:");
-  db.exec(`CREATE TABLE notification_preferences (user_id TEXT PRIMARY KEY, prefs TEXT NOT NULL DEFAULT '{}', unsubscribed_all INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);
-    CREATE TABLE notifications (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, project_id TEXT, kind TEXT NOT NULL, dedupe_key TEXT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', payload TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, read_at TEXT, emailed_at TEXT, email_error TEXT, UNIQUE (user_id, dedupe_key));`);
+  db.exec(`CREATE TABLE notification_preferences (user_id TEXT PRIMARY KEY, prefs TEXT NOT NULL DEFAULT '{}', unsubscribed_all INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL, last_run_at TEXT, last_test_email_at TEXT);
+    CREATE TABLE notifications (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, project_id TEXT, kind TEXT NOT NULL, dedupe_key TEXT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', payload TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, read_at TEXT, emailed_at TEXT, email_error TEXT, email_attempts INTEGER NOT NULL DEFAULT 0, last_email_attempt_at TEXT, UNIQUE (user_id, dedupe_key));`);
   const store = sqliteNotificationStore(db);
   const draft = { kind: "credits_low" as const, projectId: null, dedupeKey: "k", title: "t", body: "b", payload: { x: 1 } };
 
@@ -379,4 +382,179 @@ test("facts: solid verdicts, fixes made and fix PRs waiting", async () => {
   assert.equal(facts.measured.find((m) => m.actionId === "c")?.evaluatedAt, MONDAY.toISOString());
   assert.equal(facts.fixesMade.length, 3);
   assert.equal(facts.approvalsWaiting, 1);
+});
+
+// ───────── review fixes ─────────
+
+const idleFacts = (): UserFacts => ({ email: null, projects: [], credits: null, integrations: [] });
+const win = (id: string) => ({ actionId: id, actionTitle: `Fix ${id}`, status: "improved", confidence: "solid" as const, headline: "Improved.", evaluatedAt: new Date(MONDAY.getTime() - DAY).toISOString() });
+
+test("job: a missed Monday digest fires on the first run after it, once", async () => {
+  const store = new MemoryNotificationStore();
+  const sender = new FakeEmailSender();
+  const facts = factsWith({ credits: null, integrations: [] });
+  const wednesday = new Date(MONDAY.getTime() + 2 * DAY);
+  await runNotificationJob(deps(facts, store, sender, wednesday));
+  assert.equal(store.rows.filter((r) => r.kind === "weekly_digest").length, 1);
+  await runNotificationJob(deps(facts, store, sender, new Date(wednesday.getTime() + DAY)));
+  assert.equal(store.rows.filter((r) => r.kind === "weekly_digest").length, 1);
+});
+
+test("job: a daily digest is titled for the day", async () => {
+  const store = new MemoryNotificationStore();
+  await store.savePreferences("u1", normalizePrefs({ categories: { digest: "daily" } }));
+  const sender = new FakeEmailSender();
+  await runNotificationJob(deps(factsWith({ credits: null, integrations: [] }), store, sender));
+  const mail = sender.sent.find((m) => /^Your Marlo (day|week)/.test(m.subject))!;
+  assert.match(mail.subject, /^Your Marlo day:/);
+  assert.match(mail.text, /Your day in Marlo/);
+});
+
+test("job: users who waited longest go first; finished users are stamped and skipped today", async () => {
+  const store = new MemoryNotificationStore();
+  store.runs.set("b", "2026-10-03T00:00:00.000Z");
+  store.runs.set("a", "2026-10-04T00:00:00.000Z");
+  const order: string[] = [];
+  const source: NotificationSource = { listUsers: async () => [{ userId: "a" }, { userId: "b" }, { userId: "c" }], loadFacts: async (id) => { order.push(id); return idleFacts(); } };
+  const base = { source, store, sender: null, linksFor: () => LINKS, now: MONDAY, budgetMs: 10_000, oncePerDay: true };
+  await runNotificationJob(base);
+  assert.deepEqual(order, ["c", "b", "a"]);
+  assert.equal(store.runs.get("c"), MONDAY.toISOString());
+  order.length = 0;
+  const again = await runNotificationJob(base);
+  assert.deepEqual(order, []);
+  assert.equal(again.users, 0);
+});
+
+test("job: a budget that runs out mid-user leaves that user unstamped and the rotation fair", async () => {
+  const store = new MemoryNotificationStore();
+  let t = 0;
+  const source: NotificationSource = {
+    listUsers: async () => [{ userId: "a" }, { userId: "b" }],
+    loadFacts: async () => { t += 100; return factsWith(); },
+  };
+  const result = await runNotificationJob({ source, store, sender: null, linksFor: () => LINKS, now: MONDAY, budgetMs: 150, clock: () => t });
+  assert.equal(result.interrupted, 1);
+  assert.deepEqual([...store.runs.keys()], ["a"]);
+  // "a" got done on another run; "b" has waited longest and goes first.
+  store.runs.set("a", "2026-10-05T00:00:00.000Z");
+  const order: string[] = [];
+  source.loadFacts = async (id) => { order.push(id); return idleFacts(); };
+  await runNotificationJob({ source, store, sender: null, linksFor: () => LINKS, now: new Date(MONDAY.getTime() + DAY), budgetMs: 10_000 });
+  assert.deepEqual(order, ["b", "a"]);
+});
+
+test("job: a second big win is reported once, in the digest, never also emailed alone later", async () => {
+  const store = new MemoryNotificationStore();
+  const sender = new FakeEmailSender();
+  const facts = factsWith({ credits: null, integrations: [] });
+  facts.projects[0].measured = [win("a1"), win("a2")];
+  facts.projects[0].approvalsWaiting = 0;
+  await runNotificationJob(deps(facts, store, sender));
+  const digest = sender.sent.find((m) => m.subject.startsWith("Your Marlo week"))!;
+  assert.ok(digest.text.includes("Fix a2"));
+  assert.ok(!digest.text.includes("Fix a1"));
+  await runNotificationJob(deps(facts, store, sender, new Date(MONDAY.getTime() + DAY + 3600_000)));
+  assert.equal(sender.sent.filter((m) => m.subject.includes("Fix a2")).length, 0);
+});
+
+test("job: a big win whose instant email did not go out is still reported in the digest", async () => {
+  const store = new MemoryNotificationStore();
+  const sender = new FakeEmailSender();
+  sender.results = [{ ok: false, error: "Resend responded 500", retryable: true }];
+  const facts = factsWith({ credits: null, integrations: [] });
+  facts.projects[0].approvalsWaiting = 0;
+  await runNotificationJob(deps(facts, store, sender));
+  const digest = sender.sent.find((m) => m.subject.startsWith("Your Marlo week"));
+  assert.ok(digest && digest.text.includes("Rewrite title"));
+});
+
+test("job: config errors (bad key, unverified domain) keep the email pending and never block it", async () => {
+  const store = new MemoryNotificationStore();
+  const sender = new FakeEmailSender();
+  const only = factsWith({ projects: [], integrations: [] });
+  sender.results = [{ ok: false, error: "Resend responded 401", retryable: true, configError: true }];
+  const logs: string[] = [];
+  await runNotificationJob({ ...deps(only, store, sender), log: (m) => logs.push(m) });
+  assert.equal(store.rows[0].emailError, null);
+  assert.equal(store.rows[0].emailAttempts, 0);
+  assert.ok(logs.some((l) => /401/.test(l)));
+  await runNotificationJob(deps(only, store, sender, new Date(MONDAY.getTime() + 3600_000)));
+  assert.ok(store.rows[0].emailedAt);
+});
+
+test("job: a retryable failure waits before retrying and is given up on after the max attempts", async () => {
+  const store = new MemoryNotificationStore();
+  const sender = new FakeEmailSender();
+  const only = factsWith({ projects: [], integrations: [] });
+  const fail = { ok: false as const, error: "Could not reach Resend.", retryable: true };
+  sender.results = [fail, fail, fail, fail, fail];
+  await runNotificationJob(deps(only, store, sender));
+  assert.equal(store.rows[0].emailAttempts, 1);
+  await runNotificationJob(deps(only, store, sender, new Date(MONDAY.getTime() + 60_000)));
+  assert.equal(sender.sent.length, 1);
+  for (let i = 1; i <= 3; i += 1) await runNotificationJob(deps(only, store, sender, new Date(MONDAY.getTime() + i * 3600_000)));
+  assert.match(store.rows[0].emailError ?? "", /Gave up after 4 attempts/);
+  assert.equal(store.rows[0].emailedAt, null);
+});
+
+test("resend: 401/403 and unverified-domain 422 are config errors", async () => {
+  const message = { to: "a@b.co", subject: "S", html: "h", text: "t", headers: {}, idempotencyKey: "k" };
+  const make = (status: number, body: unknown) => resendSender({ apiKey: "k", from: "x", fetch: async () => ({ ok: false, status, json: async () => body }) });
+  for (const [status, body] of [[401, { message: "API key is invalid" }], [403, { message: "forbidden" }], [422, { message: "The example.com domain is not verified." }]] as const) {
+    const r = await make(status, body).send(message);
+    assert.equal(r.ok === false && r.configError, true, String(status));
+  }
+  const bad = await make(422, { message: "Invalid to field" }).send(message);
+  assert.equal(bad.ok === false && bad.configError, false);
+});
+
+test("daily digest email is titled for the day", () => {
+  const digest = buildDigest([idleProject({ approvalsWaiting: 2 })])!;
+  assert.match(renderDigestEmail(digest, LINKS, "daily").subject, /^Your Marlo day:/);
+  assert.match(renderDigestEmail(digest, LINKS).subject, /^Your Marlo week:/);
+});
+
+test("test-email claims are rate limited per user", async () => {
+  const store = new MemoryNotificationStore();
+  assert.equal(await store.claimTestSend("u1", MONDAY, 30_000), true);
+  assert.equal(await store.claimTestSend("u1", new Date(MONDAY.getTime() + 5_000), 30_000), false);
+  assert.equal(await store.claimTestSend("u2", MONDAY, 30_000), true);
+  assert.equal(await store.claimTestSend("u1", new Date(MONDAY.getTime() + 31_000), 30_000), true);
+});
+
+test("same-origin guard", async () => {
+  const { isSameOriginRequest } = await import("../lib/domain/notifications/sameOrigin.ts");
+  const h = (o: Record<string, string>) => new Headers(o);
+  assert.equal(isSameOriginRequest(h({ origin: "http://localhost:3000", host: "localhost:3000" })), true);
+  assert.equal(isSameOriginRequest(h({ origin: "https://evil.example", host: "localhost:3000" })), false);
+  assert.equal(isSameOriginRequest(h({ origin: "null", host: "localhost:3000" })), false);
+  assert.equal(isSameOriginRequest(h({ "sec-fetch-site": "same-origin", host: "x" })), true);
+  assert.equal(isSameOriginRequest(h({ "sec-fetch-site": "cross-site", host: "x" })), false);
+  assert.equal(isSameOriginRequest(h({ host: "x" })), false);
+});
+
+test("sqlite store: run stamps, attempts, keys and test-send claims", async () => {
+  const { default: Database } = await import("better-sqlite3");
+  const { sqliteNotificationStore } = await import("../lib/domain/notifications/notificationStore.ts");
+  const db = new Database(":memory:");
+  db.exec(`CREATE TABLE notification_preferences (user_id TEXT PRIMARY KEY, prefs TEXT NOT NULL DEFAULT '{}', unsubscribed_all INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL, last_run_at TEXT, last_test_email_at TEXT);
+    CREATE TABLE notifications (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, project_id TEXT, kind TEXT NOT NULL, dedupe_key TEXT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', payload TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, read_at TEXT, emailed_at TEXT, email_error TEXT, email_attempts INTEGER NOT NULL DEFAULT 0, last_email_attempt_at TEXT, UNIQUE (user_id, dedupe_key));`);
+  const store = sqliteNotificationStore(db);
+  assert.deepEqual([...(await store.lastRuns(["u1"])).entries()], [["u1", null]]);
+  await store.stampRun("u1", MONDAY);
+  await store.savePreferences("u1", normalizePrefs({ paused: true })); // must not clear the stamp
+  assert.equal((await store.lastRuns(["u1"])).get("u1"), MONDAY.toISOString());
+
+  const r = await store.record("u1", { kind: "credits_low", projectId: null, dedupeKey: "k", title: "t", body: "b", payload: {} }, MONDAY);
+  assert.equal(await store.hasKey("u1", "k"), true);
+  assert.equal(await store.hasKey("u2", "k"), false);
+  await store.noteEmailAttempt("u1", r.id!, MONDAY);
+  const [n] = await store.list("u1");
+  assert.equal(n.emailAttempts, 1);
+  assert.equal(n.lastEmailAttemptAt, MONDAY.toISOString());
+
+  assert.equal(await store.claimTestSend("u9", MONDAY, 30_000), true);
+  assert.equal(await store.claimTestSend("u9", new Date(MONDAY.getTime() + 1000), 30_000), false);
+  assert.equal(await store.claimTestSend("u9", new Date(MONDAY.getTime() + 31_000), 30_000), true);
 });

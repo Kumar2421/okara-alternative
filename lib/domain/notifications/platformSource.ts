@@ -26,9 +26,17 @@ async function snapshotD7(db: SupabaseClient, userId: string, projectId: string,
 export function platformNotificationSource(db: SupabaseClient): NotificationSource {
   return {
     async listUsers() {
-      const { data, error } = await db.from("projects").select("owner_id");
-      if (error) throw new Error(error.message);
-      return [...new Set((data ?? []).map((row) => String(row.owner_id)))].sort().map((userId) => ({ userId }));
+      // PostgREST caps a response at 1000 rows, so page through a stable order (owner, then id):
+      // an unordered, unpaged read could drop users differently on every run.
+      const PAGE = 1000;
+      const owners = new Set<string>();
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await db.from("projects").select("owner_id").order("owner_id").order("id").range(from, from + PAGE - 1);
+        if (error) throw new Error(error.message);
+        for (const row of data ?? []) owners.add(String(row.owner_id));
+        if ((data ?? []).length < PAGE) break;
+      }
+      return [...owners].sort().map((userId) => ({ userId }));
     },
 
     async loadFacts(userId, now): Promise<UserFacts> {

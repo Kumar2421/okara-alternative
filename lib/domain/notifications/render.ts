@@ -108,7 +108,8 @@ function movementLine(p: DigestProject): string | null {
   return `Compared with the week before: ${parts.join(", ")}.`;
 }
 
-export function renderDigestEmail(digest: Digest, links: EmailLinks): RenderedEmail {
+export function renderDigestEmail(digest: Digest, links: EmailLinks, cadence: "weekly" | "daily" = "weekly"): RenderedEmail {
+  const period = cadence === "daily" ? "day" : "week";
   const multi = digest.projects.length > 1;
   const sections: Section[] = [];
   for (const p of digest.projects) {
@@ -125,9 +126,9 @@ export function renderDigestEmail(digest: Digest, links: EmailLinks): RenderedEm
   }
   return layoutEmail(
     {
-      subject: `Your Marlo week: ${digest.summary.replace(/\.$/, "")}`,
+      subject: `Your Marlo ${period}: ${digest.summary.replace(/\.$/, "")}`,
       preheader: digest.summary,
-      title: "Your week in Marlo",
+      title: `Your ${period} in Marlo`,
       intro: digest.summary,
       sections,
       cta: { label: "Open Marlo", url: links.openUrl },

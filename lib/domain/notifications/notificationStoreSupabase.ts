@@ -9,6 +9,7 @@ import { isNotificationKind, type Notification } from "./types.ts";
 type Row = {
   id: string; user_id: string; project_id: string | null; kind: string; dedupe_key: string; title: string; body: string;
   payload: Record<string, unknown> | null; created_at: string; read_at: string | null; emailed_at: string | null; email_error: string | null;
+  email_attempts: number | null; last_email_attempt_at: string | null;
 };
 
 function toNotification(row: Row): Notification | null {
@@ -17,6 +18,7 @@ function toNotification(row: Row): Notification | null {
     id: row.id, userId: row.user_id, projectId: row.project_id, kind: row.kind, dedupeKey: row.dedupe_key,
     title: row.title, body: row.body, payload: row.payload ?? {}, createdAt: row.created_at,
     readAt: row.read_at, emailedAt: row.emailed_at, emailError: row.email_error,
+    emailAttempts: row.email_attempts ?? 0, lastEmailAttemptAt: row.last_email_attempt_at,
   };
 }
 
@@ -89,6 +91,48 @@ export function supabaseNotificationStore(db: SupabaseClient): NotificationStore
         .from("notifications").select("id", { count: "exact", head: true }).eq("user_id", userId).eq("kind", kind).gte("emailed_at", sinceIso);
       check(error);
       return count ?? 0;
+    },
+    async noteEmailAttempt(userId, id, now) {
+      const { data, error: readError } = await db.from("notifications").select("email_attempts").eq("user_id", userId).eq("id", id).maybeSingle();
+      check(readError);
+      const { error } = await db
+        .from("notifications")
+        .update({ email_attempts: Number(data?.email_attempts ?? 0) + 1, last_email_attempt_at: now.toISOString() })
+        .eq("user_id", userId).eq("id", id);
+      check(error);
+    },
+    async hasKey(userId, dedupeKey) {
+      const { count, error } = await db.from("notifications").select("id", { count: "exact", head: true }).eq("user_id", userId).eq("dedupe_key", dedupeKey);
+      check(error);
+      return (count ?? 0) > 0;
+    },
+    async lastRuns(userIds) {
+      const out = new Map<string, string | null>(userIds.map((id) => [id, null]));
+      // Chunked so the id list never blows the request URL length.
+      for (let i = 0; i < userIds.length; i += 100) {
+        const { data, error } = await db.from("notification_preferences").select("user_id, last_run_at").in("user_id", userIds.slice(i, i + 100));
+        check(error);
+        for (const row of data ?? []) out.set(String(row.user_id), row.last_run_at ? String(row.last_run_at) : null);
+      }
+      return out;
+    },
+    async stampRun(userId, now) {
+      const { error } = await db.from("notification_preferences").upsert({ user_id: userId, last_run_at: now.toISOString() }, { onConflict: "user_id" });
+      check(error);
+    },
+    async claimTestSend(userId, now, minGapMs) {
+      const ensure = await db.from("notification_preferences").upsert({ user_id: userId }, { onConflict: "user_id", ignoreDuplicates: true });
+      check(ensure.error);
+      const cutoff = new Date(now.getTime() - minGapMs).toISOString();
+      // One conditional UPDATE: only one concurrent caller can match the row.
+      const { data, error } = await db
+        .from("notification_preferences")
+        .update({ last_test_email_at: now.toISOString() })
+        .eq("user_id", userId)
+        .or(`last_test_email_at.is.null,last_test_email_at.lt.${cutoff}`)
+        .select("user_id");
+      check(error);
+      return (data?.length ?? 0) > 0;
     },
   };
 }

@@ -30,7 +30,7 @@ export class MemoryNotificationStore implements NotificationStore {
   async record(userId: string, draft: NotificationDraft, now: Date) {
     if (this.rows.some((r) => r.userId === userId && r.dedupeKey === draft.dedupeKey)) return { created: false, id: null };
     const id = `n${++this.seq}`;
-    this.rows.push({ ...draft, id, userId, createdAt: now.toISOString(), readAt: null, emailedAt: null, emailError: null });
+    this.rows.push({ ...draft, id, userId, createdAt: now.toISOString(), readAt: null, emailedAt: null, emailError: null, emailAttempts: 0, lastEmailAttemptAt: null });
     return { created: true, id };
   }
   async list(userId: string, opts?: { limit?: number }) {
@@ -53,5 +53,28 @@ export class MemoryNotificationStore implements NotificationStore {
   }
   async countEmailedSince(userId: string, kind: NotificationKind, sinceIso: string) {
     return this.rows.filter((r) => r.userId === userId && r.kind === kind && r.emailedAt && r.emailedAt >= sinceIso).length;
+  }
+  async noteEmailAttempt(userId: string, id: string, now: Date) {
+    const row = this.rows.find((r) => r.userId === userId && r.id === id);
+    if (!row) return;
+    row.emailAttempts += 1;
+    row.lastEmailAttemptAt = now.toISOString();
+  }
+  async hasKey(userId: string, dedupeKey: string) {
+    return this.rows.some((r) => r.userId === userId && r.dedupeKey === dedupeKey);
+  }
+  runs = new Map<string, string>();
+  async lastRuns(userIds: string[]) {
+    return new Map(userIds.map((id) => [id, this.runs.get(id) ?? null] as const));
+  }
+  async stampRun(userId: string, now: Date) {
+    this.runs.set(userId, now.toISOString());
+  }
+  private testSends = new Map<string, number>();
+  async claimTestSend(userId: string, now: Date, minGapMs: number) {
+    const last = this.testSends.get(userId);
+    if (last !== undefined && now.getTime() - last < minGapMs) return false;
+    this.testSends.set(userId, now.getTime());
+    return true;
   }
 }

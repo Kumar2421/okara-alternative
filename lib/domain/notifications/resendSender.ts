@@ -40,11 +40,16 @@ export function resendSender(config: { apiKey: string; from: string; fetch?: Fet
         const body = (await response.json().catch(() => null)) as { id?: unknown; message?: unknown } | null;
         if (response.ok && typeof body?.id === "string") return { ok: true, id: body.id };
         const detail = typeof body?.message === "string" ? body.message.slice(0, 200) : "no details";
+        // A bad key (401/403) or an unverified sending domain (422) is our setup, not this message.
+        const configError =
+          response.status === 401 || response.status === 403 ||
+          (response.status === 422 && /domain|verif/i.test(typeof body?.message === "string" ? body.message : ""));
         return {
           ok: false,
+          configError,
           error: `Resend responded ${response.status}: ${detail}`,
           // Rate limits and provider errors are worth retrying; a rejected message or bad key is not.
-          retryable: response.status === 429 || response.status === 409 || response.status >= 500,
+          retryable: configError || response.status === 429 || response.status === 409 || response.status >= 500,
         };
       } catch {
         return { ok: false, error: "Could not reach Resend.", retryable: true };

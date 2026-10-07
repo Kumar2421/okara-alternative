@@ -14,6 +14,10 @@ const FRESH_OUTCOME_DAYS = 8;
 /** Emails that could not be sent (and are worth retrying) are retried for this long. */
 const RETRY_WINDOW_DAYS = 3;
 const MAX_EMAILS_PER_USER_RUN = 5;
+/** A retryable send failure is tried again no sooner than this, and given up on after this many attempts. */
+const RETRY_DELAY_MS = 30 * 60_000;
+const MAX_EMAIL_ATTEMPTS = 4;
+const INCLUDED_IN_DIGEST = "included in digest";
 
 export type MeasuredOutcome = {
   actionId: string;
@@ -63,6 +67,10 @@ export type NotificationJobDeps = {
   linksFor: (userId: string) => EmailLinks | null;
   now?: Date;
   budgetMs: number;
+  /** Skip users the job already finished today (UTC). For a scheduled once-a-day caller; self-host reruns every few hours. */
+  oncePerDay?: boolean;
+  /** Milliseconds clock; tests inject one. */
+  clock?: () => number;
   log?: (message: string) => void;
 };
 
@@ -72,26 +80,36 @@ export type NotificationJobSummary = {
   created: number;
   emailed: number;
   emailFailed: number;
+  /** Users stopped part-way by the time budget (retried first next run). */
+  interrupted: number;
   failed: Array<{ error: string }>;
 };
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 /** Which drafts the facts call for. Pure; storage dedupe makes repeats harmless. */
-export function draftsFor(args: { facts: UserFacts; prefs: NotificationPrefs; now: Date }): { drafts: NotificationDraft[]; digest: Digest | null; digestDraft: NotificationDraft | null } {
+export function draftsFor(args: {
+  facts: UserFacts;
+  prefs: NotificationPrefs;
+  now: Date;
+  /** A digest for the current week (the user's own Monday-to-Sunday) is already stored. */
+  digestAlreadySent: boolean;
+  /** Outcomes already emailed on their own: kept out of the digest so nothing is reported twice. */
+  excludeOutcomeIds?: Set<string>;
+}): { drafts: NotificationDraft[]; digest: Digest | null; digestDraft: NotificationDraft | null; digestOutcomeIds: string[] } {
   const { facts, prefs, now } = args;
+  const exclude = args.excludeOutcomeIds ?? new Set<string>();
   const local = localParts(now, prefs.timezone);
   const drafts: NotificationDraft[] = [];
 
   // Fixes that just got a final verdict.
-  const instantOutcomeIds = new Set<string>();
   for (const project of facts.projects) {
     for (const m of project.measured) {
       if (m.status !== "improved" && m.status !== "unchanged" && m.status !== "regressed") continue;
       if (m.confidence !== "solid" || now.getTime() - Date.parse(m.evaluatedAt) > FRESH_OUTCOME_DAYS * DAY_MS) continue;
       const bigWin = isBigWin(m);
-      // Only one big win a day gets its own email; the rest wait for the digest.
-      if (bigWin && prefs.categories.outcomes === "instant" && instantOutcomeIds.size === 0) instantOutcomeIds.add(m.actionId);
+      // Which big win gets its own email is decided at send time (one a day, and only if it really goes out);
+      // the digest then covers every outcome that was not emailed.
       drafts.push({
         kind: "outcome_measured",
         projectId: project.projectId,
@@ -144,10 +162,12 @@ export function draftsFor(args: { facts: UserFacts; prefs: NotificationPrefs; no
   // The digest, on the user's own Monday (weekly) or every day (daily).
   let digest: Digest | null = null;
   let digestDraft: NotificationDraft | null = null;
+  const digestOutcomeIds: string[] = [];
   const cadence = prefs.categories.digest;
   if (cadence === "weekly" || cadence === "daily" || cadence === "instant") {
     const weekly = cadence !== "daily";
-    if (!weekly || local.weekday === 1) {
+    // Weekly: on the user's Monday, or on the first run after it if that week's digest was missed (nobody opened the app, a failed run).
+    if (!weekly || local.weekday === 1 || !args.digestAlreadySent) {
       const windowMs = (weekly ? 7 : 1) * DAY_MS;
       const since = now.getTime() - windowMs;
       const activity: ProjectActivity[] = facts.projects.map((p) => ({
@@ -155,7 +175,8 @@ export function draftsFor(args: { facts: UserFacts; prefs: NotificationPrefs; no
         projectName: p.projectName,
         newOutcomes: p.measured
           .filter((m) => (m.status === "improved" || m.status === "unchanged" || m.status === "regressed") && m.confidence === "solid")
-          .filter((m) => Date.parse(m.evaluatedAt) >= since && !instantOutcomeIds.has(m.actionId))
+          .filter((m) => Date.parse(m.evaluatedAt) >= since && !exclude.has(m.actionId))
+          .map((m) => (digestOutcomeIds.push(m.actionId), m))
           .map((m) => ({ actionTitle: m.actionTitle, status: m.status as "improved" | "unchanged" | "regressed", confidence: m.confidence, headline: m.headline })),
         fixesMade: p.fixesMade.filter((f) => Date.parse(f.implementedAt) >= since),
         latest: weekly ? p.latest : null,
@@ -170,34 +191,58 @@ export function draftsFor(args: { facts: UserFacts; prefs: NotificationPrefs; no
           dedupeKey: weekly ? digestKey(local.isoDate) : dailyDigestKey(local.isoDate),
           title: weekly ? "Your week in Marlo" : "Your day in Marlo",
           body: digest.summary,
-          payload: { digest },
+          payload: { digest, cadence: weekly ? "weekly" : "daily" },
         };
       }
     }
   }
-  return { drafts, digest, digestDraft };
+  return { drafts, digest, digestDraft, digestOutcomeIds: digest ? digestOutcomeIds : [] };
 }
 
-async function processUser(userId: string, deps: NotificationJobDeps, now: Date, tally: NotificationJobSummary): Promise<void> {
+/** Returns false when the time budget ran out part-way (nothing is lost: every step is idempotent and resumes next run). */
+async function processUser(userId: string, deps: NotificationJobDeps, now: Date, tally: NotificationJobSummary, timeUp: () => boolean): Promise<boolean> {
   const { store } = deps;
   const stored = await store.getPreferences(userId);
   const { prefs } = stored;
   const facts = await deps.source.loadFacts(userId, now);
+  if (timeUp()) return false;
 
-  const planned = draftsFor({ facts, prefs, now });
-  const all = planned.digestDraft ? [...planned.drafts, planned.digestDraft] : planned.drafts;
-  for (const draft of all) {
+  const local = localParts(now, prefs.timezone);
+  const digestAlreadySent = await store.hasKey(userId, digestKey(local.isoDate));
+
+  // Step 1: everything except the digest, emailed straight away (big win, credits, integrations).
+  const planned = draftsFor({ facts, prefs, now, digestAlreadySent });
+  for (const draft of planned.drafts) {
+    if (timeUp()) return false;
     if (!inAppEnabled(prefs, categoryOf(draft.kind))) continue;
     const result = await store.record(userId, draft, now);
     if (result.created) tally.created += 1;
   }
+  await flushEmails(userId, facts.email, stored, deps, now, tally, timeUp);
+  if (timeUp()) return false;
 
-  await flushEmails(userId, facts.email, stored, deps, now, tally);
+  // Step 2: the digest, now that we know which outcomes already went out on their own.
+  const outcomeRows = (await store.list(userId, { limit: 200 })).filter((n) => n.kind === "outcome_measured");
+  const emailed = new Set(outcomeRows.filter((n) => n.emailedAt).map((n) => String(n.payload.actionId)));
+  const withDigest = draftsFor({ facts, prefs, now, digestAlreadySent, excludeOutcomeIds: emailed });
+  if (withDigest.digestDraft && inAppEnabled(prefs, categoryOf(withDigest.digestDraft.kind))) {
+    const result = await store.record(userId, withDigest.digestDraft, now);
+    if (result.created) {
+      tally.created += 1;
+      // What the digest reports must not also be emailed alone later.
+      const inDigest = new Set(withDigest.digestOutcomeIds);
+      for (const n of outcomeRows) {
+        if (!n.emailedAt && !n.emailError && inDigest.has(String(n.payload.actionId))) await store.markEmailed(userId, n.id, now, INCLUDED_IN_DIGEST);
+      }
+    }
+  }
+  await flushEmails(userId, facts.email, stored, deps, now, tally, timeUp);
+  return !timeUp();
 }
 
 function renderFor(n: Notification, links: EmailLinks): RenderedEmail {
   const digest = n.kind === "weekly_digest" ? (n.payload.digest as Digest | undefined) : undefined;
-  return digest ? renderDigestEmail(digest, links) : renderNotificationEmail(n, links);
+  return digest ? renderDigestEmail(digest, links, n.payload.cadence === "daily" ? "daily" : "weekly") : renderNotificationEmail(n, links);
 }
 
 async function flushEmails(
@@ -207,6 +252,7 @@ async function flushEmails(
   deps: NotificationJobDeps,
   now: Date,
   tally: NotificationJobSummary,
+  timeUp: () => boolean,
 ): Promise<void> {
   const links = deps.linksFor(userId);
   if (!deps.sender || !to || !links) return;
@@ -216,8 +262,10 @@ async function flushEmails(
   let budget = MAX_EMAILS_PER_USER_RUN;
 
   for (const n of pending.sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
-    if (budget <= 0) break;
+    if (budget <= 0 || timeUp()) break;
     if (emailDecision(n, stored, now) !== "send") continue;
+    // A recent failed attempt waits before the next one.
+    if (n.lastEmailAttemptAt && now.getTime() - Date.parse(n.lastEmailAttemptAt) < RETRY_DELAY_MS) continue;
 
     const recent = await deps.store.countEmailedSince(userId, n.kind, new Date(now.getTime() - DAY_MS).toISOString());
     if (!withinEmailCap(n.kind, recent + (sentThisRun.get(n.kind) ?? 0))) continue;
@@ -232,7 +280,17 @@ async function flushEmails(
     } else {
       tally.emailFailed += 1;
       deps.log?.(`notification email failed (${n.kind}): ${result.error}`);
-      if (!result.retryable) await deps.store.markEmailed(userId, n.id, now, result.error.slice(0, 300));
+      if (result.configError) {
+        // Our setup is wrong (key, domain), not this email: keep it pending and stop; it sends once fixed.
+        return;
+      }
+      if (!result.retryable) {
+        await deps.store.markEmailed(userId, n.id, now, result.error.slice(0, 300));
+      } else if (n.emailAttempts + 1 >= MAX_EMAIL_ATTEMPTS) {
+        await deps.store.markEmailed(userId, n.id, now, `Gave up after ${MAX_EMAIL_ATTEMPTS} attempts: ${result.error}`.slice(0, 300));
+      } else {
+        await deps.store.noteEmailAttempt(userId, n.id, now);
+      }
     }
   }
 }
@@ -244,11 +302,30 @@ async function flushEmails(
  */
 export async function runNotificationJob(deps: NotificationJobDeps): Promise<NotificationJobSummary> {
   const now = deps.now ?? new Date();
-  const tally: NotificationJobSummary = { users: 0, skipped: 0, created: 0, emailed: 0, emailFailed: 0, failed: [] };
-  const users = await deps.source.listUsers();
-  const summary = await runWithBudget(users, (u) => processUser(u.userId, deps, now, tally), { budgetMs: deps.budgetMs });
-  tally.users = summary.processed;
-  tally.skipped = summary.skipped;
+  const clock = deps.clock ?? Date.now;
+  const deadline = clock() + deps.budgetMs;
+  const timeUp = () => clock() >= deadline;
+  const tally: NotificationJobSummary = { users: 0, skipped: 0, created: 0, emailed: 0, emailFailed: 0, interrupted: 0, failed: [] };
+
+  // Fair rotation: the user waiting longest goes first (never-run first), so a short budget
+  // cannot starve the same tail of users every day. A user is stamped only once fully done.
+  const listed = await deps.source.listUsers();
+  const lastRuns = await deps.store.lastRuns(listed.map((u) => u.userId));
+  const today = now.toISOString().slice(0, 10);
+  const users = listed
+    .filter((u) => !(deps.oncePerDay && lastRuns.get(u.userId)?.slice(0, 10) === today))
+    .sort((a, b) => (lastRuns.get(a.userId) ?? "").localeCompare(lastRuns.get(b.userId) ?? "") || a.userId.localeCompare(b.userId));
+
+  const summary = await runWithBudget(
+    users,
+    async (u) => {
+      if (await processUser(u.userId, deps, now, tally, timeUp)) await deps.store.stampRun(u.userId, now);
+      else tally.interrupted += 1;
+    },
+    { budgetMs: deps.budgetMs, now: clock },
+  );
+  tally.users = summary.processed - tally.interrupted;
+  tally.skipped = summary.skipped + tally.interrupted;
   tally.failed = summary.failed.map((f) => ({ error: f.error }));
   for (const f of tally.failed) deps.log?.(`notification job user failed: ${f.error}`);
   return tally;

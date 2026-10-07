@@ -5,7 +5,12 @@ create table if not exists public.notification_preferences (
   user_id uuid primary key references auth.users(id) on delete cascade,
   prefs jsonb not null default '{}'::jsonb,
   unsubscribed_all boolean not null default false,
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  -- When the daily job last finished this user: the job serves the longest-waiting
+  -- users first so a short time budget never starves the same people.
+  last_run_at timestamptz,
+  -- Last "send me a test email": a stored rate limit that survives restarts and instances.
+  last_test_email_at timestamptz
 );
 
 alter table public.notification_preferences enable row level security;
@@ -28,6 +33,8 @@ create table if not exists public.notifications (
   read_at timestamptz,
   emailed_at timestamptz,
   email_error text,
+  email_attempts integer not null default 0,
+  last_email_attempt_at timestamptz,
   unique (user_id, dedupe_key)
 );
 
@@ -40,3 +47,9 @@ alter table public.notifications enable row level security;
 drop policy if exists notifications_select_own on public.notifications;
 create policy notifications_select_own on public.notifications for select
   using ((select auth.uid()) = user_id);
+
+-- Delivery bookkeeping (email_error, attempts) is internal: owners may read only
+-- the columns the bell and the list need. The service role is unaffected.
+revoke select on public.notifications from anon, authenticated;
+grant select (id, user_id, project_id, kind, dedupe_key, title, body, payload, created_at, read_at)
+  on public.notifications to authenticated;

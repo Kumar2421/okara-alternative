@@ -14,7 +14,13 @@ export type EmailMessage = {
 export type SendResult =
   | { ok: true; id: string }
   /** `retryable`: a network or provider hiccup worth trying again later; otherwise the email is given up on. */
-  | { ok: false; error: string; retryable: boolean };
+  | {
+      ok: false;
+      error: string;
+      retryable: boolean;
+      /** Our own setup is wrong (bad key, unverified domain), not this message: never give up on the email for it. */
+      configError?: boolean;
+    };
 
 /** Sends one email. The "from" address and credentials live inside the adapter, never in messages or logs. */
 export interface EmailSender {
@@ -42,4 +48,16 @@ export interface NotificationStore extends InAppSink {
   /** Stamp as emailed, or, with an error, give up on emailing it. */
   markEmailed(userId: string, id: string, now: Date, error: string | null): Promise<void>;
   countEmailedSince(userId: string, kind: NotificationKind, sinceIso: string): Promise<number>;
+  /** Count one more failed (retryable) send attempt for this notification. */
+  noteEmailAttempt(userId: string, id: string, now: Date): Promise<void>;
+  /** Whether a notification with this dedupe key is already stored for the user. */
+  hasKey(userId: string, dedupeKey: string): Promise<boolean>;
+  /** When the daily job last finished each user (null: never). Drives fair rotation. */
+  lastRuns(userIds: string[]): Promise<Map<string, string | null>>;
+  stampRun(userId: string, now: Date): Promise<void>;
+  /**
+   * Atomically claim the right to send a test email: true when none was sent
+   * in the last `minGapMs`. Stored, so it holds across serverless instances and restarts.
+   */
+  claimTestSend(userId: string, now: Date, minGapMs: number): Promise<boolean>;
 }
