@@ -4,17 +4,17 @@ import { getDriver } from "@/lib/llm";
 import { PLATFORM_DEFAULT_MODELS, PLATFORM_PROVIDER_KEYS } from "@/lib/llm/platformKeys";
 import { FEATURES } from "@/lib/features";
 import { getUserPlan } from "@/lib/entitlements";
-import { chargeCredits, getCreditState, InsufficientCreditsError } from "@/lib/credits";
-import { canAffordCredits } from "@/lib/domain/x/draftGuards";
+import { chargeCredits, getCreditState } from "@/lib/credits";
 import { dailyDraftBatchLimit } from "@/lib/domain/x/xDraftTypes";
 import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
 import { getActiveProjectContext } from "@/lib/domain/shared/getActiveProject";
 import { getActiveProjectContextSupabase } from "@/lib/domain/shared/getActiveProjectSupabase";
 import type { ProjectContext } from "@/lib/domain/shared/ProjectContext";
-import { parseLinkedInBatch } from "@/lib/domain/social/draftParse";
+import { parseLinkedInBatch } from "@/lib/domain/social/draftParse.ts";
 import { isLinkedInDraftStatus, type LinkedInDraftPatch, type LinkedInDraftView } from "@/lib/domain/linkedin/linkedInDraftStore";
 import * as sqliteStore from "@/lib/domain/linkedin/linkedInDraftStore";
 import * as supabaseStore from "@/lib/domain/linkedin/linkedInDraftStoreSupabase";
+import { generateDraftBatch, type DraftGenerationPorts } from "@/lib/domain/social/draftGeneration.ts";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
 
@@ -84,14 +84,6 @@ export async function POST(req: NextRequest) {
   let baseUrl: string | undefined;
   let usesPlatformKey = false;
   let project: ProjectContext;
-  let reservedBatchId: string | null = null;
-
-  const release = async () => {
-    if (scope.mode === "platform" && reservedBatchId) {
-      await supabaseStore.deleteLinkedInBatch(scope.db, scope.userId, scope.projectId, reservedBatchId).catch(() => {});
-      reservedBatchId = null;
-    }
-  };
 
   try {
     if (scope.mode === "platform") {
@@ -105,20 +97,6 @@ export async function POST(req: NextRequest) {
         apiKey = PLATFORM_PROVIDER_KEYS[providerId]!;
         usesPlatformKey = true;
       }
-
-      if (usesPlatformKey) {
-        if (!canAffordCredits(await getCreditState(scope.userId, "social_draft"))) {
-          return NextResponse.json({ error: "Out of credits. Upgrade or connect your own key." }, { status: 402 });
-        }
-        const limit = dailyDraftBatchLimit(await getUserPlan(scope.userId));
-        if (limit !== -1) {
-          const slot = await supabaseStore.reserveLinkedInBatch(scope.db, scope.userId, scope.projectId, limit, startOfUtcDay());
-          if (!slot.ok) {
-            return NextResponse.json({ error: `Daily limit reached (${limit} batches). Try again tomorrow, or connect your own Groq key.`, limit }, { status: 429 });
-          }
-          reservedBatchId = slot.batchId;
-        }
-      }
       project = await getActiveProjectContextSupabase(scope.db, scope.userId);
     } else {
       const row = getDb().prepare("SELECT api_key, base_url FROM provider_connections WHERE provider_id = ?").get(providerId) as
@@ -130,12 +108,10 @@ export async function POST(req: NextRequest) {
       project = getActiveProjectContext();
     }
   } catch (err) {
-    await release();
     return fail(err);
   }
 
   if (!apiKey) {
-    await release();
     return NextResponse.json({ error: "Connect a free Groq key in Settings, then try again." }, { status: 422 });
   }
 
@@ -155,56 +131,58 @@ Reply with JSON only, no prose: {"drafts":[{"hookLine":"...","body":"...","whyTh
 ${project.description ? `\nDescription: ${project.description}` : ""}
 ${project.category ? `\nCategory: ${project.category}` : ""}`;
 
-  let text: string;
-  try {
-    const result = await driver({
-      apiKey,
-      baseUrl,
-      system,
-      model: PLATFORM_DEFAULT_MODELS[providerId],
-      stream: false,
-      messages: [{ role: "user", content: prompt }],
-    });
-    text = result.text ?? "";
-  } catch (err) {
-    await release();
-    return fail(err, 502);
-  }
-
-  const { drafts, errors } = parseLinkedInBatch(text, variants);
-  if (drafts.length === 0) {
-    await release();
-    return NextResponse.json({ error: "The model returned drafts we couldn't use. Nothing was charged; try again.", details: errors.slice(0, 3) }, { status: 502 });
-  }
-
-  const withDefaults = drafts.map((d) => ({ ...d, angle: "General", whyThisWorks: "" }));
-
-  try {
-    if (scope.mode === "platform") {
-      const batchId = reservedBatchId;
-      const created = batchId
-        ? await supabaseStore.fulfilLinkedInBatch(scope.db, scope.userId, scope.projectId, batchId, withDefaults)
-        : await supabaseStore.insertLinkedInDrafts(scope.db, scope.userId, scope.projectId, withDefaults);
-      reservedBatchId = null;
-      if (usesPlatformKey) {
-        try {
-          await chargeCredits(scope.userId, "social_draft", { projectId: scope.projectId, model: PLATFORM_DEFAULT_MODELS[providerId] });
-        } catch (err) {
-          const batch = created[0]?.batchId;
-          if (batch) await supabaseStore.deleteLinkedInBatch(scope.db, scope.userId, scope.projectId, batch).catch(() => {});
-          if (err instanceof InsufficientCreditsError) {
-            return NextResponse.json({ error: "Out of credits. Upgrade or connect your own key." }, { status: 402 });
-          }
-          throw err;
-        }
+  const ports: DraftGenerationPorts = {
+    creditState: async () => scope.mode === "platform" ? getCreditState(scope.userId, "social_draft") : { billingEnabled: false, balance: 0, cost: 0 },
+    isByok: !usesPlatformKey,
+    limit: scope.mode === "platform" && usesPlatformKey ? dailyDraftBatchLimit(await getUserPlan(scope.userId)) : -1,
+    reserveSlot: async (limit) => {
+      if (scope.mode === "platform") {
+        return supabaseStore.reserveLinkedInBatch(scope.db, scope.userId, scope.projectId, limit, startOfUtcDay());
       }
-      return NextResponse.json({ drafts: created }, { status: 201 });
-    }
-    return NextResponse.json({ drafts: sqliteStore.insertLinkedInDrafts(getDb(), scope.projectId, withDefaults) }, { status: 201 });
-  } catch (err) {
-    await release();
-    return fail(err);
-  }
+      return { ok: true, batchId: "" };
+    },
+    releaseSlot: async (batchId) => {
+      if (scope.mode === "platform" && batchId) {
+        await supabaseStore.deleteLinkedInBatch(scope.db, scope.userId, scope.projectId, batchId).catch(() => {});
+      }
+    },
+    callModel: async () => {
+      const result = await driver({
+        apiKey,
+        baseUrl,
+        system,
+        model: PLATFORM_DEFAULT_MODELS[providerId],
+        stream: false,
+        messages: [{ role: "user", content: prompt }],
+      });
+      return result.text ?? "";
+    },
+    parse: (text) => parseLinkedInBatch(text, variants),
+    filterUsable: (drafts) => drafts,
+    insertDrafts: async (batchId, drafts) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const withDefaults = (drafts as any[]).map((d) => ({ ...d, angle: "General", whyThisWorks: "" }));
+      if (scope.mode === "platform") {
+        return batchId
+          ? await supabaseStore.fulfilLinkedInBatch(scope.db, scope.userId, scope.projectId, batchId, withDefaults)
+          : await supabaseStore.insertLinkedInDrafts(scope.db, scope.userId, scope.projectId, withDefaults);
+      }
+      return sqliteStore.insertLinkedInDrafts(getDb(), scope.projectId, withDefaults);
+    },
+    deleteBatch: async (batchId) => {
+      if (scope.mode === "platform") {
+        await supabaseStore.deleteLinkedInBatch(scope.db, scope.userId, scope.projectId, batchId).catch(() => {});
+      }
+    },
+    charge: async () => {
+      if (usesPlatformKey && scope.mode === "platform") {
+        await chargeCredits(scope.userId, "social_draft", { projectId: scope.projectId, model: PLATFORM_DEFAULT_MODELS[providerId] });
+      }
+    },
+  };
+
+  const result = await generateDraftBatch(ports, { variants });
+  return NextResponse.json(result.body, { status: result.status });
 }
 
 export async function PUT(req: NextRequest) {
