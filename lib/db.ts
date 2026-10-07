@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import path from "node:path";
 import fs from "node:fs";
+import { ensureXDraftColumns } from "@/lib/domain/x/xDraftStore";
 
 /**
  * Local SQLite persistence — chosen over a hosted DB (Supabase/Postgres) for now:
@@ -320,6 +321,8 @@ function init(): Database.Database {
  * need these run explicitly. Each guarded by a columns-list check so it's
  * safe to run on every startup. */
 function migrate(db: Database.Database) {
+  ensureXDraftColumns(db);
+
   const cols = db.prepare("PRAGMA table_info(provider_connections)").all() as { name: string }[];
   if (!cols.some((c) => c.name === "base_url")) {
     db.exec(`ALTER TABLE provider_connections ADD COLUMN base_url TEXT`);
