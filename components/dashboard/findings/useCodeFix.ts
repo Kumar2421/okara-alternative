@@ -43,12 +43,23 @@ export function useCodeFix(findingId: string) {
   });
 
   const approve = useMutation({
-    mutationFn: (input: { ticket: string; changes: FixChange[]; explanation: string }) =>
-      fetchJson<{ prUrl: string; branch: string; files: string[] }>("/api/agents/codefix/finding/apply", {
+    mutationFn: async (input: { ticket: string; changes: FixChange[]; explanation: string; edited: boolean }) => {
+      let ticket = input.ticket;
+      if (input.edited) {
+        // An edited preview needs a fresh ticket bound to the edit before it can be applied.
+        const revised = await fetchJson<{ ticket: string }>("/api/agents/codefix/finding/revise", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ findingId, ticket, changes: input.changes }),
+        });
+        ticket = revised.ticket;
+      }
+      return fetchJson<{ prUrl: string; branch: string; files: string[] }>("/api/agents/codefix/finding/apply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ findingId, ...input }),
-      }),
+        body: JSON.stringify({ findingId, ticket, changes: input.changes, explanation: input.explanation }),
+      });
+    },
     onSuccess: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: qk.findingActions(project?.id, findingId) }),

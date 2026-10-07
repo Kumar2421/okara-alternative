@@ -128,14 +128,22 @@ export async function listUserInstallationIds(userToken: string, f: FetchLike = 
   return ids;
 }
 
-/** Best-effort: remove the App from the account so access ends on GitHub's side too. */
-export async function uninstallInstallation(cfg: GithubAppConfig, installationId: number, f: FetchLike = fetch): Promise<boolean> {
-  try {
-    const res = await f(`${API}/app/installations/${installationId}`, { method: "DELETE", headers: headers(createAppJwt(cfg)) });
-    return res.status === 204 || res.status === 404;
-  } catch {
-    return false;
+/**
+ * The repositories (full names) this GitHub user can actually access within one installation.
+ * Used while the throwaway user token exists, so Marlo never grants installation-wide access on
+ * installation-level proof alone. Only names are returned; the token is not kept.
+ */
+export async function listUserInstallationRepos(userToken: string, installationId: number, f: FetchLike = fetch): Promise<string[]> {
+  const names: string[] = [];
+  for (let page = 1; page <= 10; page += 1) {
+    const res = await f(`${API}/user/installations/${installationId}/repositories?per_page=100&page=${page}`, { headers: headers(userToken) });
+    if (!res.ok) throw new Error(`Couldn't check which repositories you can access: HTTP ${res.status}`);
+    const data = (await res.json()) as { repositories?: Array<{ full_name?: unknown }> };
+    const batch = data.repositories ?? [];
+    for (const r of batch) if (typeof r.full_name === "string") names.push(r.full_name);
+    if (batch.length < 100) break;
   }
+  return names;
 }
 
 // ---- install `state`: signed, short-lived, bound to the user and project ----

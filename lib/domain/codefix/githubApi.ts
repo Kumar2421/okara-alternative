@@ -86,8 +86,7 @@ export async function createBranch(token: string, repoFullName: string, baseBran
     body: JSON.stringify({ ref: `refs/heads/${newBranch}`, sha }),
   });
   if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`Couldn't create branch "${newBranch}": HTTP ${res.status}${detail ? ` — ${detail.slice(0, 200)}` : ""}`);
+    throw new Error(`Couldn't create branch "${newBranch}": HTTP ${res.status}`);
   }
 }
 
@@ -105,8 +104,7 @@ export async function putFileContent(
     body: JSON.stringify({ message, content: Buffer.from(content, "utf8").toString("base64"), branch, sha }),
   });
   if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`Couldn't commit ${path}: HTTP ${res.status}${detail ? ` — ${detail.slice(0, 200)}` : ""}`);
+    throw new Error(`Couldn't commit ${path}: HTTP ${res.status}`);
   }
 }
 
@@ -130,8 +128,7 @@ export async function createPullRequest(
     }
   }
   if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`Couldn't open PR: HTTP ${res.status}${detail ? ` — ${detail.slice(0, 200)}` : ""}`);
+    throw new Error(`Couldn't open PR: HTTP ${res.status}`);
   }
   const data = await res.json();
   return data.html_url;

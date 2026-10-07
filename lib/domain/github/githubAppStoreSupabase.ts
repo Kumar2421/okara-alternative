@@ -8,7 +8,8 @@ function parse(value: string | null | undefined): GithubAppLink | null {
   try {
     const v = JSON.parse(value) as Partial<GithubAppLink>;
     if (typeof v.installationId !== "number") return null;
-    return { installationId: v.installationId, repoFullName: typeof v.repoFullName === "string" ? v.repoFullName : null, connectedAt: typeof v.connectedAt === "string" ? v.connectedAt : "" };
+    const allowedRepos = Array.isArray(v.allowedRepos) ? v.allowedRepos.filter((r): r is string => typeof r === "string") : [];
+    return { installationId: v.installationId, allowedRepos, repoFullName: typeof v.repoFullName === "string" ? v.repoFullName : null, connectedAt: typeof v.connectedAt === "string" ? v.connectedAt : "" };
   } catch {
     return null;
   }
@@ -34,10 +35,6 @@ export function githubAppStoreSupabase(db: SupabaseClient, userId: string): Gith
     async clear(projectId) {
       const { error } = await db.from("user_settings").delete().eq("user_id", userId).eq("key", PREFIX + projectId);
       if (error) throw new Error(error.message);
-    },
-    async usedByOtherProject(projectId, installationId) {
-      const { data } = await db.from("user_settings").select("key, value").eq("user_id", userId).like("key", `${PREFIX}%`);
-      return (data ?? []).some((row: { key: string; value: string | null }) => row.key !== PREFIX + projectId && parse(row.value)?.installationId === installationId);
     },
   };
 }

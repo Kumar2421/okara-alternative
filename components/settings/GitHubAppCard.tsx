@@ -58,7 +58,7 @@ export default function GitHubAppCard() {
     try {
       await fetchJson("/api/github/app/disconnect", { method: "POST" });
       await refresh();
-      show("GitHub disconnected. Marlo no longer has access. Pull requests already opened stay open.");
+      show("GitHub disconnected from this project. To remove the Marlo app from your GitHub account, uninstall it in GitHub settings. Pull requests already opened stay open.");
     } catch (err) {
       show(err instanceof Error ? err.message : "Couldn't disconnect GitHub.");
     } finally {
@@ -124,6 +124,13 @@ export default function GitHubAppCard() {
           {gh && !gh.connected && (
             <button onClick={disconnect} disabled={busy} className="text-[11px] font-medium text-red-600 hover:underline disabled:opacity-50">Disconnect</button>
           )}
+          <p className="text-[11px] text-gray-400">
+            Disconnecting only removes the link inside Marlo. To remove the app from your GitHub account, uninstall it in{" "}
+            <a href="https://github.com/settings/installations" target="_blank" rel="noreferrer" className="underline">
+              GitHub settings
+            </a>
+            .
+          </p>
           {gh?.slug && (
             <p className="text-[11px] text-gray-400">
               Missing a repository?{" "}

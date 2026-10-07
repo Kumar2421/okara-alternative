@@ -2,19 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveFixRequest } from "@/lib/codefixFindingServer";
 import { ticketSecret } from "@/lib/githubAppServer";
 import { classifyFinding } from "@/lib/domain/codefix/fixCatalog";
-import { changedPaths } from "@/lib/domain/codefix/catalogFix";
 import { getCodeFixProvider } from "@/lib/domain/codefix/getCodeFixProvider";
-import { signPayload } from "@/lib/domain/github/signedPayload";
+import { issueTicket } from "@/lib/domain/codefix/ticket";
 
 // LLM + GitHub reads can run past the default timeout.
 export const maxDuration = 60;
 
-const TICKET_PURPOSE = "codefix-proposal";
-
 /**
  * Preview step. Reads the repo and drafts the change, but never writes: no branch, no commit, no
  * PR. Manual findings get an explanation instead of a draft (and cost no credits). The returned
- * `ticket` binds the proposal to this user, project, finding and file list for the apply step.
+ * `ticket` binds the proposal (user, project, finding, and a hash of the exact changes) for the apply step; single use.
  */
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
@@ -40,6 +37,7 @@ export async function POST(req: NextRequest) {
   if (!resolved.llm) return NextResponse.json({ error: "No model available." }, { status: 422 });
 
   try {
+    const secret = ticketSecret(); // fail closed before any credits are charged
     const charged = await resolved.charge(model);
     if (charged) return charged;
     const provider = getCodeFixProvider("contents-api", resolved.llm.driver, resolved.llm.apiKey, model, resolved.llm.baseUrl);
@@ -54,11 +52,10 @@ export async function POST(req: NextRequest) {
       },
       resolved.ctx,
     );
-    const ticket = signPayload(
-      ticketSecret(),
-      TICKET_PURPOSE,
-      { userId: resolved.userId, projectId: resolved.projectId, findingId: resolved.finding.id, paths: changedPaths(proposal.changes), kinds: verdict.kinds, label: verdict.label },
-      30 * 60 * 1000,
+    const ticket = issueTicket(
+      secret,
+      { userId: resolved.userId, projectId: resolved.projectId, findingId: resolved.finding.id },
+      { changes: proposal.changes, kinds: verdict.kinds, label: verdict.label },
     );
     return NextResponse.json({
       mode: "auto",

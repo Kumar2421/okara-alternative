@@ -186,6 +186,16 @@ export function buildPrTitle(label: string): string {
   return `fix(seo): ${label}`.slice(0, 120);
 }
 
+/** Makes untrusted text inert inside a GitHub PR body: no HTML, links, mentions, issue refs or markdown structure. */
+export function sanitizeProse(text: string, max = 500): string {
+  return text
+    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, max)
+    .replace(/[&<>@#`[\]!*_]/g, (c) => `&#${c.charCodeAt(0)};`);
+}
+
 export function buildPrBody(meta: CatalogApplyMeta, changes: FixChange[]): string {
   const files = changedPaths(changes).map((p) => {
     const isNew = changes.some((c) => c.path === p && c.type === "create");
@@ -193,11 +203,11 @@ export function buildPrBody(meta: CatalogApplyMeta, changes: FixChange[]): strin
   });
   return [
     "## What",
-    meta.explanation,
+    sanitizeProse(meta.explanation),
     "",
     "## Why",
-    `Marlo flagged this on ${meta.pageUrl ?? "your site"}: **${meta.label}**.`,
-    meta.recommendation ? `\n> ${meta.recommendation.replace(/\n+/g, " ")}` : "",
+    `Marlo flagged this on ${sanitizeProse(meta.pageUrl ?? "your site", 300)}: **${sanitizeProse(meta.label, 120)}**.`,
+    meta.recommendation ? `\n> ${sanitizeProse(meta.recommendation, 600)}` : "",
     "",
     "## Files changed",
     ...files,

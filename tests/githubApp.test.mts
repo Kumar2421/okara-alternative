@@ -18,6 +18,7 @@ import {
 import { signPayload, verifyPayload } from "../lib/domain/github/signedPayload.ts";
 import {
   completeInstall,
+  listSelectableRepos,
   disconnectGithubApp,
   resolveGithubAccess,
   selectRepository,
@@ -39,7 +40,6 @@ function memoryStore(initial: Record<string, GithubAppLink> = {}) {
     async get(id) { return data.get(id) ?? null; },
     async set(id, link) { data.set(id, link); },
     async clear(id) { data.delete(id); },
-    async usedByOtherProject(id, installationId) { return [...data.entries()].some(([k, v]) => k !== id && v.installationId === installationId); },
   };
   return { data, port };
 }
@@ -123,11 +123,12 @@ test("lists installation repositories", async () => {
 
 // ---- install flow ----
 
-function githubFake(opts: { userInstallations?: number[]; repos?: string[]; goneInstallation?: boolean } = {}) {
+function githubFake(opts: { userInstallations?: number[]; repos?: string[]; userRepos?: string[]; goneInstallation?: boolean } = {}) {
   const calls: string[] = [];
   const f: FetchLike = async (url, init) => {
     calls.push(`${init?.method ?? "GET"} ${url}`);
     if (url === "https://github.com/login/oauth/access_token") return json({ access_token: "ghu_user" });
+    if (/\/user\/installations\/\d+\/repositories/.test(url)) return json({ repositories: (opts.userRepos ?? ["acme/site", "acme/blog"]).map((full_name) => ({ full_name })) });
     if (url.startsWith("https://api.github.com/user/installations")) return json({ installations: (opts.userInstallations ?? [42]).map((id) => ({ id })) });
     if (url.includes("/access_tokens")) return opts.goneInstallation ? json({}, 404) : json({ token: "ghs_inst", expires_at: "x" }, 201);
     if (url.startsWith("https://api.github.com/installation/repositories")) {
@@ -150,7 +151,8 @@ test("completeInstall saves only installation id when state, user and ownership 
   const saved = data.get("p1")!;
   assert.equal(saved.installationId, 42);
   assert.equal(saved.repoFullName, null);
-  assert.deepEqual(Object.keys(saved).sort(), ["connectedAt", "installationId", "repoFullName"]);
+  assert.deepEqual(saved.allowedRepos, ["acme/site", "acme/blog"]);
+  assert.deepEqual(Object.keys(saved).sort(), ["allowedRepos", "connectedAt", "installationId", "repoFullName"]);
 });
 
 test("completeInstall fails closed: bad state, other user, forged installation, no code", async () => {
@@ -170,7 +172,7 @@ test("completeInstall fails closed: bad state, other user, forged installation, 
 });
 
 test("repo selection: only repos the installation shares, one per project", async () => {
-  const { port, data } = memoryStore({ p1: { installationId: 42, repoFullName: null, connectedAt: "t" } });
+  const { port, data } = memoryStore({ p1: { installationId: 42, allowedRepos: ["acme/site", "acme/blog"], repoFullName: null, connectedAt: "t" } });
   const { f } = githubFake({ repos: ["acme/site", "acme/blog"] });
   const deps = { cfg, store: port, fetch: f };
   assert.deepEqual(await selectRepository(deps, "p1", "acme/site"), { ok: true, repoFullName: "acme/site" });
@@ -183,39 +185,54 @@ test("repo selection: only repos the installation shares, one per project", asyn
 });
 
 test("resolveGithubAccess mints a token for the chosen repo; uninstalled app is cleared gracefully", async () => {
-  const ready = memoryStore({ p1: { installationId: 42, repoFullName: "acme/site", connectedAt: "t" } });
+  const ready = memoryStore({ p1: { installationId: 42, allowedRepos: ["acme/site", "acme/blog"], repoFullName: "acme/site", connectedAt: "t" } });
   const access = await resolveGithubAccess({ cfg, store: ready.port, fetch: githubFake().f }, "p1");
   assert.deepEqual(access, { status: "ready", installationId: 42, repoFullName: "acme/site", token: "ghs_inst" });
   assert.ok(!JSON.stringify([...ready.data.values()]).includes("ghs_inst"), "token must never be persisted");
 
-  const gone = memoryStore({ p1: { installationId: 42, repoFullName: "acme/site", connectedAt: "t" } });
+  const gone = memoryStore({ p1: { installationId: 42, allowedRepos: ["acme/site", "acme/blog"], repoFullName: "acme/site", connectedAt: "t" } });
   assert.deepEqual(await resolveGithubAccess({ cfg, store: gone.port, fetch: githubFake({ goneInstallation: true }).f }, "p1"), { status: "disconnected" });
   assert.equal(gone.data.size, 0);
 
-  const none = memoryStore({ p1: { installationId: 42, repoFullName: null, connectedAt: "t" } });
+  const none = memoryStore({ p1: { installationId: 42, allowedRepos: ["acme/site", "acme/blog"], repoFullName: null, connectedAt: "t" } });
   assert.equal((await resolveGithubAccess({ cfg, store: none.port, fetch: githubFake().f }, "p1")).status, "no_repo");
   assert.deepEqual(await resolveGithubAccess({ cfg, store: none.port, fetch: githubFake().f }, "missing"), { status: "disconnected" });
 });
 
-test("disconnect clears immediately and uninstalls only when no other project uses the installation", async () => {
-  const solo = memoryStore({ p1: { installationId: 42, repoFullName: "acme/site", connectedAt: "t" } });
+test("disconnect clears only Marlo's link and never uninstalls the app", async () => {
+  const solo = memoryStore({ p1: { installationId: 42, allowedRepos: ["acme/site"], repoFullName: "acme/site", connectedAt: "t" } });
   const fake = githubFake();
-  assert.deepEqual(await disconnectGithubApp({ cfg, store: solo.port, fetch: fake.f }, "p1"), { uninstalled: true });
+  await disconnectGithubApp({ cfg, store: solo.port, fetch: fake.f }, "p1");
   assert.equal(solo.data.size, 0);
-  assert.ok(fake.calls.some((c) => c.startsWith("DELETE https://api.github.com/app/installations/42")));
+  assert.deepEqual(fake.calls, [], "no GitHub call at all, in particular no DELETE of the installation");
+});
 
-  const shared = memoryStore({
-    p1: { installationId: 42, repoFullName: "acme/site", connectedAt: "t" },
-    p2: { installationId: 42, repoFullName: "acme/blog", connectedAt: "t" },
-  });
-  const fake2 = githubFake();
-  assert.deepEqual(await disconnectGithubApp({ cfg, store: shared.port, fetch: fake2.f }, "p1"), { uninstalled: false });
-  assert.equal(shared.data.has("p1"), false);
-  assert.equal(shared.data.has("p2"), true);
-  assert.equal(fake2.calls.some((c) => c.startsWith("DELETE")), false);
+test("callback stores only the repos the connecting user can access (not the whole installation)", async () => {
+  const { port, data } = memoryStore();
+  const { f, calls } = githubFake({ userInstallations: [42], repos: ["acme/site", "acme/secret"], userRepos: ["acme/site"] });
+  const state = new URL((startInstall(cfg, { userId: "u1", projectId: "p1" }) as { url: string }).url).searchParams.get("state");
+  const res = await completeInstall({ cfg, store: port, fetch: f }, { userId: "u1", state, installationId: "42", code: "c" });
+  assert.equal(res.ok, true);
+  assert.deepEqual(data.get("p1")!.allowedRepos, ["acme/site"]);
+  assert.ok(calls.some((c) => c.includes("/user/installations/42/repositories")));
+  assert.ok(!JSON.stringify([...data.values()]).includes("ghu_user"), "user token must not be stored");
+});
 
-  // Access is gone even if GitHub is unreachable.
-  const offline = memoryStore({ p1: { installationId: 42, repoFullName: "acme/site", connectedAt: "t" } });
-  await disconnectGithubApp({ cfg, store: offline.port, fetch: async () => { throw new Error("offline"); } }, "p1");
-  assert.equal(offline.data.size, 0);
+test("a repo the installation shares but the user cannot read is rejected and not listed", async () => {
+  const { port, data } = memoryStore({ p1: { installationId: 42, allowedRepos: ["acme/site"], repoFullName: null, connectedAt: "t" } });
+  const { f } = githubFake({ repos: ["acme/site", "acme/secret"] });
+  const deps = { cfg, store: port, fetch: f };
+  const bad = await selectRepository(deps, "p1", "acme/secret");
+  assert.equal(bad.ok, false);
+  assert.equal(data.get("p1")!.repoFullName, null);
+  const listed = await listSelectableRepos(deps, "p1");
+  assert.deepEqual(listed.ok ? listed.repos.map((r) => r.fullName) : null, ["acme/site"]);
+  assert.equal((await selectRepository(deps, "p1", "ACME/Site")).ok, true);
+});
+
+test("a stored repo outside the allowlist (legacy link) gets no token", async () => {
+  const legacy = memoryStore({ p1: { installationId: 42, allowedRepos: [], repoFullName: "acme/secret", connectedAt: "t" } });
+  const fake = githubFake();
+  assert.equal((await resolveGithubAccess({ cfg, store: legacy.port, fetch: fake.f }, "p1")).status, "no_repo");
+  assert.ok(!fake.calls.some((c) => c.includes("/access_tokens")));
 });

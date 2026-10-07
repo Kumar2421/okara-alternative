@@ -3,14 +3,8 @@ import { getDb } from "@/lib/db";
 import { getDriver } from "@/lib/llm";
 import { resolveCodeFixContext, findFinding } from "@/lib/domain/codefix/resolveContext";
 import { getCodeFixProvider } from "@/lib/domain/codefix/getCodeFixProvider";
-import type { CodeFixContext, ProposedFix } from "@/lib/domain/codefix/types";
-import type { Finding } from "@/lib/domain/seo/SEOAgent";
+import type { ProposedFix } from "@/lib/domain/codefix/types";
 import { FEATURES } from "@/lib/features";
-import { createClient } from "@/utils/supabase/server";
-import { createServiceClient } from "@/utils/supabase/serviceClient";
-import { linkPullRequest } from "@/lib/domain/fixes/linkPullRequest";
-import { listProjectActions, setActionResult } from "@/lib/domain/actions/actionStore";
-import { listProjectActions as listProjectActionsSupabase, setActionResult as setActionResultSupabase } from "@/lib/domain/actions/actionStoreSupabase";
 
 // Vercel: LLM/crawl calls can run past the 10s default — allow up to the
 // platform max for this route (Hobby plan caps at 60s; Pro allows more).
@@ -34,143 +28,12 @@ export async function POST(req: NextRequest) {
   }
 
   if (FEATURES.PLATFORM_MODE) {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-
-    const db = createServiceClient();
-
-    try {
-      const { data: setting } = await db
-        .from("user_settings")
-        .select("value")
-        .eq("user_id", user.id)
-        .eq("key", "active_project_id")
-        .maybeSingle();
-      const activeId = setting?.value;
-      if (!activeId) return NextResponse.json({ error: "No active project — add a website first." }, { status: 422 });
-
-      const { data: project } = await db
-        .from("projects")
-        .select("id, name, url")
-        .eq("id", activeId)
-        .eq("owner_id", user.id)
-        .maybeSingle();
-      if (!project) return NextResponse.json({ error: "No active project — add a website first." }, { status: 422 });
-
-      // GitHub PAT + repo — same storage convention as propose/route.ts:
-      // PAT in provider_connections (provider_id "github", vault-encrypted),
-      // repo full name in the generic user_settings key/value table.
-      const { data: githubConn } = await db
-        .from("provider_connections")
-        .select("api_key_secret_id")
-        .eq("user_id", user.id)
-        .eq("provider_id", "github")
-        .maybeSingle();
-      const { data: repoSetting } = await db
-        .from("user_settings")
-        .select("value")
-        .eq("user_id", user.id)
-        .eq("key", "github_repo")
-        .maybeSingle();
-
-      if (!githubConn?.api_key_secret_id || !repoSetting?.value) {
-        return NextResponse.json({ error: "GitHub isn't connected — connect it in Settings → API Credentials." }, { status: 422 });
-      }
-
-      const { data: githubTokenSecret } = await db.rpc("vault_get_secret", { p_id: githubConn.api_key_secret_id });
-      const githubToken = (githubTokenSecret as string) ?? "";
-      if (!githubToken) {
-        return NextResponse.json({ error: "GitHub isn't connected — connect it in Settings → API Credentials." }, { status: 422 });
-      }
-
-      const ctx: CodeFixContext = {
-        projectId: project.id,
-        projectName: project.name,
-        projectUrl: project.url,
-        repoFullName: repoSetting.value,
-        githubToken,
-      };
-
-      // Look up the finding from the findings table (platform mode uses
-      // Supabase findings table; self-host uses seo_audits payload).
-      const { data: findingRow } = await db
-        .from("findings")
-        .select("evidence")
-        .eq("project_id", ctx.projectId)
-        .eq("entity_id", issueId)
-        .eq("source", "seo")
-        .maybeSingle();
-
-      if (!findingRow) {
-        return NextResponse.json(
-          { error: "That finding wasn't found — it may have already been fixed or no SEO audit has been run." },
-          { status: 422 }
-        );
-      }
-
-      // Reconstruct a Finding-like object from the Supabase row for compatibility
-      // with the code fix provider. The provider needs just the issueId and autoFixable fields.
-      const finding: Finding = {
-        issueId,
-        autoFixable: true, // Platform mode only shows findings that are auto-fixable
-        // Other fields would be populated from findingRow if needed
-      } as unknown as Finding;
-
-      const driver = getDriver(providerId);
-      if (!driver) return NextResponse.json({ error: `${providerId} isn't wired to a real model yet.` }, { status: 501 });
-
-      const { data: llmConn } = await db
-        .from("provider_connections")
-        .select("api_key_secret_id, base_url")
-        .eq("user_id", user.id)
-        .eq("provider_id", providerId)
-        .maybeSingle();
-      if (!llmConn?.api_key_secret_id) {
-        return NextResponse.json(
-          { error: `${providerId} isn't connected yet. Connect it in Settings → LLM Providers.` },
-          { status: 422 }
-        );
-      }
-      const { data: llmSecret } = await db.rpc("vault_get_secret", { p_id: llmConn.api_key_secret_id });
-      const llmApiKey = (llmSecret as string) ?? "";
-      if (!llmApiKey) {
-        return NextResponse.json(
-          { error: `${providerId} isn't connected yet. Connect it in Settings → LLM Providers.` },
-          { status: 422 }
-        );
-      }
-
-      const provider = getCodeFixProvider("contents-api", driver, llmApiKey, model, llmConn.base_url ?? undefined);
-      const { prUrl, branch } = await provider.applyFix(proposed, ctx, finding);
-
-      const { data: existingFix } = await db
-        .from("code_fixes")
-        .select("created_at")
-        .eq("project_id", ctx.projectId)
-        .eq("issue_id", issueId)
-        .maybeSingle();
-
-      const now = new Date().toISOString();
-      const { error: upsertError } = await db.from("code_fixes").upsert(
-        {
-          user_id: user.id,
-          project_id: ctx.projectId,
-          issue_id: issueId,
-          status: "pr_open",
-          pr_url: prUrl,
-          file_path: proposed.filePath,
-          created_at: existingFix?.created_at ?? now,
-          updated_at: now,
-        },
-        { onConflict: "project_id,issue_id" }
-      );
-      if (upsertError) return NextResponse.json({ error: upsertError.message }, { status: 500 });
-
-      return NextResponse.json({ prUrl, branch });
-    } catch (err) {
-      return NextResponse.json({ error: err instanceof Error ? err.message : "Failed to open PR." }, { status: 500 });
-    }
+    // Retired on hosted deployments: this flow trusted client-supplied content. Use the preview and
+    // approve flow (/api/agents/codefix/finding/prepare, then /apply) which is ticketed and checked.
+    return NextResponse.json(
+      { error: "This endpoint was retired. Open the finding and use Fix in code: Marlo now shows a preview before opening a pull request." },
+      { status: 410 },
+    );
   }
 
   try {

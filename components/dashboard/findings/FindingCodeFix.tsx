@@ -80,7 +80,7 @@ function PreviewPanel({
   const submit = () => {
     log(`Opening a pull request on ${fix.repoFullName} for ${finding.entityId}...`);
     approve.mutate(
-      { ticket: fix.ticket, changes, explanation: fix.explanation },
+      { ticket: fix.ticket, changes, explanation: fix.explanation, edited: JSON.stringify(changes) !== JSON.stringify(fix.changes) },
       {
         onSuccess: (data) => logDone(`Applied fix: ${fix.label}. Pull request opened: ${data.prUrl}`),
         onError: (error) => logDone(`Couldn't open the pull request: ${error.message}`),

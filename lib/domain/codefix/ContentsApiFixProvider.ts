@@ -10,10 +10,11 @@ import {
   buildPrTitle,
   changedPaths,
   newFilePathFor,
+  sanitizeProse,
   parseCatalogResponse,
   validateProposal,
 } from "./catalogFix.ts";
-import { MAX_FIX_FILES, MAX_SOURCE_FILE_BYTES, plannedTargets } from "./fixCatalog.ts";
+import { MAX_FIX_FILES, MAX_NEW_FILE_BYTES, MAX_SOURCE_FILE_BYTES, isSafeRepoPath, plannedTargets } from "./fixCatalog.ts";
 
 /** Finds the real source file most likely to render `projectUrl`'s path —
  * grounded in GitHub's real Code Search, never guessed. Homepage is tried
@@ -41,7 +42,9 @@ async function locateFile(token: string, repoFullName: string, defaultBranch: st
   if (results.length === 0) {
     throw new Error(`Couldn't find a file matching "${pathname}" in ${repoFullName} — search didn't return anything. Fix it manually.`);
   }
-  const best = results.find((r) => r.path.includes(`/${segment}/`) || r.path.includes(`/${segment}.`)) ?? results[0];
+  const safe = results.filter((r) => isSafeRepoPath(r.path));
+  const best = safe.find((r) => r.path.includes(`/${segment}/`) || r.path.includes(`/${segment}.`)) ?? safe[0];
+  if (!best) throw new Error(`Couldn't find a file Marlo may edit for "${pathname}". Fix it manually.`);
   return best.path;
 }
 
@@ -90,7 +93,9 @@ export class ContentsApiFixProvider implements CodeFixProvider {
   async proposeFix(finding: Finding, ctx: CodeFixContext): Promise<ProposedFix> {
     const repo = await getRepo(ctx.githubToken, ctx.repoFullName);
     const filePath = await locateFile(ctx.githubToken, ctx.repoFullName, repo.defaultBranch, ctx.projectUrl);
+    if (!isSafeRepoPath(filePath)) throw new Error("That file can't be changed automatically. Fix it manually.");
     const file = await getFileContent(ctx.githubToken, ctx.repoFullName, filePath, repo.defaultBranch);
+    if (Buffer.byteLength(file.content, "utf8") > MAX_SOURCE_FILE_BYTES) throw new Error(`${filePath} is too large for an automatic fix. Make this change manually.`);
 
     const system = `You are a senior engineer making one small, surgical fix to a real source file for a real SEO issue. Output ONLY the exact format requested, nothing else. Never touch anything unrelated to this one issue.`;
     const prompt = `Repo: ${ctx.repoFullName}
@@ -143,6 +148,8 @@ The OLD block must exist character-for-character in the file above — copy it e
   }
 
   async applyFix(fix: ProposedFix, ctx: CodeFixContext, finding: Finding): Promise<{ prUrl: string; branch: string }> {
+    if (typeof fix.filePath !== "string" || !isSafeRepoPath(fix.filePath)) throw new Error("That file can't be changed automatically.");
+    if (typeof fix.after !== "string" || Buffer.byteLength(fix.after, "utf8") > MAX_SOURCE_FILE_BYTES) throw new Error("The change is too large for an automatic fix.");
     const repo = await getRepo(ctx.githubToken, ctx.repoFullName);
     const branch = `fix/${finding.issueId}-${Date.now().toString(36)}`;
 
@@ -153,7 +160,7 @@ The OLD block must exist character-for-character in the file above — copy it e
       ctx.githubToken,
       ctx.repoFullName,
       `fix: ${finding.label}`,
-      `${fix.explanation}\n\nAutomatically generated from a real SEO audit finding on ${ctx.projectUrl}.\n\n**File:** \`${fix.filePath}\`\n**Issue:** ${finding.label}\n\nOpened as a draft — review before merging.`,
+      `${sanitizeProse(String(fix.explanation ?? ""))}\n\nAutomatically generated from a real SEO audit finding on ${sanitizeProse(ctx.projectUrl, 300)}.\n\n**File:** \`${fix.filePath}\`\n**Issue:** ${sanitizeProse(finding.label, 120)}\n\nOpened as a draft - review before merging.`,
       branch,
       repo.defaultBranch
     );
@@ -168,6 +175,8 @@ The OLD block must exist character-for-character in the file above — copy it e
     let pageContent: string | null = null;
     if (pageKinds.length > 0) {
       pagePath = await locateFile(ctx.githubToken, ctx.repoFullName, repo.defaultBranch, input.pageUrl ?? ctx.projectUrl);
+      // Checked before the file is read or any LLM call is made.
+      if (!isSafeRepoPath(pagePath)) throw new Error("The page source is in a place Marlo won't edit. Make this change manually.");
       const file = await getFileContent(ctx.githubToken, ctx.repoFullName, pagePath, repo.defaultBranch);
       if (Buffer.byteLength(file.content, "utf8") > MAX_SOURCE_FILE_BYTES) {
         throw new Error(`${pagePath} is too large for an automatic fix. Make this change manually.`);
@@ -207,6 +216,7 @@ The OLD block must exist character-for-character in the file above — copy it e
     const repo = await getRepo(ctx.githubToken, ctx.repoFullName);
     const paths = changedPaths(changes);
     if (paths.length > MAX_FIX_FILES) throw new Error("This fix would touch too many files.");
+    if (!paths.every(isSafeRepoPath)) throw new Error("That change targets a file Marlo won't edit.");
 
     // Re-read every file now, so what is committed is the reviewed edit applied to the current file.
     const writes: { path: string; content: string; sha?: string }[] = [];
@@ -214,12 +224,16 @@ The OLD block must exist character-for-character in the file above — copy it e
       const creates = changes.filter((c): c is Extract<FixChange, { type: "create" }> => c.type === "create" && c.path === path);
       if (creates.length > 0) {
         if (await pathExists(ctx.githubToken, ctx.repoFullName, path, repo.defaultBranch)) throw new Error(`${path} now exists in the repo. Prepare the fix again.`);
+        if (Buffer.byteLength(creates[0].content, "utf8") > MAX_NEW_FILE_BYTES) throw new Error("A new file is too large for an automatic fix.");
         writes.push({ path, content: creates[0].content });
         continue;
       }
       const file = await getFileContent(ctx.githubToken, ctx.repoFullName, path, repo.defaultBranch);
+      if (Buffer.byteLength(file.content, "utf8") > MAX_SOURCE_FILE_BYTES) throw new Error(`${path} is too large for an automatic fix. Make this change manually.`);
       const edits = changes.filter((c): c is Extract<FixChange, { type: "edit" }> => c.type === "edit" && c.path === path);
-      writes.push({ path, content: applyEditsToContent(file.content, edits), sha: file.sha });
+      const content = applyEditsToContent(file.content, edits);
+      if (Buffer.byteLength(content, "utf8") > MAX_SOURCE_FILE_BYTES) throw new Error(`${path} would be too large after this change.`);
+      writes.push({ path, content, sha: file.sha });
     }
 
     const branch = branchNameFor(meta.label);
