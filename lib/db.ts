@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import path from "node:path";
 import fs from "node:fs";
+import { ensureXDraftColumns } from "@/lib/domain/x/xDraftStore";
 
 /**
  * Local SQLite persistence — chosen over a hosted DB (Supabase/Postgres) for now:
@@ -350,6 +351,8 @@ function init(): Database.Database {
  * need these run explicitly. Each guarded by a columns-list check so it's
  * safe to run on every startup. */
 function migrate(db: Database.Database) {
+  ensureXDraftColumns(db);
+
   // Notification bookkeeping columns added while the feature was in review.
   const addMissing = (table: string, columns: Array<[string, string]>) => {
     const have = new Set((db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name));

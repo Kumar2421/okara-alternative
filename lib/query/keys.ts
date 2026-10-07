@@ -29,6 +29,9 @@ export const qk = {
   findingActions: (projectId: string | undefined, findingId: string) =>
     [...scope(projectId), "findings", findingId, "actions"] as const,
   leadProfile: (projectId: string | undefined) => [...scope(projectId), "lead-profile"] as const,
+  automation: (projectId: string | undefined) => [...scope(projectId), "automation"] as const,
   searchOpportunities: (projectId: string | undefined) => [...scope(projectId), "search-opportunities"] as const,
+  xDrafts: (projectId: string | undefined, view: "current" | "archived") => [...scope(projectId), "x-drafts", view] as const,
+  xDraftsAll: (projectId: string | undefined) => [...scope(projectId), "x-drafts"] as const,
   searchOverview: (projectId: string | undefined) => [...scope(projectId), "search-overview"] as const,
 };

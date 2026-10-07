@@ -69,6 +69,14 @@ export async function transitionAction(db: SupabaseClient, userId: string, proje
   return mapRow(data);
 }
 
+/** Merge keys into an action's parameters without changing its status. */
+export async function mergeActionParameters(db: SupabaseClient, userId: string, projectId: string, id: string, extra: Record<string, unknown>): Promise<void> {
+  const existing = await getProjectAction(db, userId, projectId, id);
+  if (!existing) return;
+  const { error } = await db.from("actions").update({ parameters: { ...existing.parameters, ...extra } }).eq("project_id", projectId).eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
 /** Replace an action's saved result without changing its status (used to keep proof and verdicts). */
 export async function setActionResult(db: SupabaseClient, userId: string, projectId: string, id: string, result: Record<string, unknown>): Promise<void> {
   if (!(await getProjectAction(db, userId, projectId, id))) return;

@@ -21,7 +21,7 @@ export async function saveSnapshot(
 }
 
 export async function getLatestSnapshot(db: SupabaseClient, userId: string, projectId: string): Promise<StoredSnapshot | null> {
-  const { data } = await db
+  const { data, error } = await db
     .from("search_snapshots")
     .select("snapshot_date, captured_at, payload")
     .eq("project_id", projectId)
@@ -29,6 +29,7 @@ export async function getLatestSnapshot(db: SupabaseClient, userId: string, proj
     .order("snapshot_date", { ascending: false })
     .limit(1)
     .maybeSingle();
+  if (error) throw new Error(`Could not load search snapshot: ${error.message}`);
   if (!data) return null;
   return { snapshotDate: String(data.snapshot_date), capturedAt: String(data.captured_at), payload: data.payload as SearchSnapshotPayload };
 }

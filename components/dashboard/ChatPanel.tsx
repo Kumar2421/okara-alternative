@@ -29,6 +29,8 @@ type Msg = {
   list?: string[];
   goodToKnow?: string[];
   footer?: string;
+  /** Which stored data the answer looked at (from the chat tools). */
+  lookedAt?: string[];
 };
 
 function ModelSelector() {
@@ -130,7 +132,10 @@ export default function ChatPanel({
         return;
       }
 
-      setMessages((m) => [...m, { role: "assistant", text: data.reply }]);
+      setMessages((m) => [
+        ...m,
+        { role: "assistant", text: data.reply, lookedAt: Array.isArray(data.lookedAt) ? data.lookedAt : undefined },
+      ]);
     } catch {
       setMessages((m) => [
         ...m,
@@ -187,6 +192,9 @@ export default function ChatPanel({
           ) : (
             <div key={i} className="space-y-3 text-[13px] leading-relaxed text-gray-700">
               <p>{msg.text}</p>
+              {msg.lookedAt && msg.lookedAt.length > 0 && (
+                <p className="text-[11px] text-gray-400">Looked at: {msg.lookedAt.join(", ")}</p>
+              )}
               {msg.list && (
                 <ol className="list-decimal space-y-1.5 pl-5">
                   {msg.list.map((item, j) => (

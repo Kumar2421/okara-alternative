@@ -8,7 +8,7 @@ import { useToast } from "./Toast";
 import ArticleAgentModal from "./agents/articles/ArticleAgentModal";
 import HNAgentModal from "./agents/hn/HNAgentModal";
 import RedditAgentModal from "./agents/reddit/RedditAgentModal";
-import XAgentModal from "./agents/x/XAgentModal";
+import XWriterPanel from "./agents/x/XWriterPanel";
 import LinkedInAgentModal from "./agents/linkedin/LinkedInAgentModal";
 import GitHubAgentModal from "./agents/github/GitHubAgentModal";
 
@@ -183,7 +183,7 @@ export default function AgentsFeedPanel({
       {activeModal === "articles" && <ArticleAgentModal isOpen={true} onClose={() => setActiveModal(null)} />}
       {activeModal === "hn" && <HNAgentModal isOpen={true} onClose={() => setActiveModal(null)} />}
       {activeModal === "reddit" && <RedditAgentModal onClose={() => setActiveModal(null)} />}
-      {activeModal === "x" && <XAgentModal onClose={() => setActiveModal(null)} />}
+      {activeModal === "x" && <XWriterPanel onClose={() => setActiveModal(null)} />}
       {activeModal === "linkedin" && <LinkedInAgentModal onClose={() => setActiveModal(null)} />}
       {activeModal === "github" && <GitHubAgentModal onClose={() => setActiveModal(null)} />}
     </div>
