@@ -61,6 +61,15 @@ export async function getFileContent(token: string, repoFullName: string, path: 
   return { content: Buffer.from(data.content, "base64").toString("utf8"), sha: data.sha };
 }
 
+/** True when a file or folder exists at `path` on `ref` (404 means no; anything else unexpected throws). */
+export async function pathExists(token: string, repoFullName: string, path: string, ref?: string): Promise<boolean> {
+  const suffix = ref ? `?ref=${encodeURIComponent(ref)}` : "";
+  const res = await githubFetch(token, `/repos/${repoFullName}/contents/${path}${suffix}`);
+  if (res.status === 404) return false;
+  if (!res.ok) throw new Error(`Couldn't check ${path} in ${repoFullName}: HTTP ${res.status}`);
+  return true;
+}
+
 async function getRefSha(token: string, repoFullName: string, branch: string): Promise<string> {
   const res = await githubFetch(token, `/repos/${repoFullName}/git/ref/heads/${branch}`);
   if (!res.ok) throw new Error(`Couldn't read branch "${branch}": HTTP ${res.status}`);
@@ -77,8 +86,7 @@ export async function createBranch(token: string, repoFullName: string, baseBran
     body: JSON.stringify({ ref: `refs/heads/${newBranch}`, sha }),
   });
   if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`Couldn't create branch "${newBranch}": HTTP ${res.status}${detail ? ` — ${detail.slice(0, 200)}` : ""}`);
+    throw new Error(`Couldn't create branch "${newBranch}": HTTP ${res.status}`);
   }
 }
 
@@ -96,8 +104,7 @@ export async function putFileContent(
     body: JSON.stringify({ message, content: Buffer.from(content, "utf8").toString("base64"), branch, sha }),
   });
   if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`Couldn't commit ${path}: HTTP ${res.status}${detail ? ` — ${detail.slice(0, 200)}` : ""}`);
+    throw new Error(`Couldn't commit ${path}: HTTP ${res.status}`);
   }
 }
 
@@ -109,13 +116,19 @@ export async function createPullRequest(
   head: string,
   base: string
 ): Promise<string> {
-  const res = await githubFetch(token, `/repos/${repoFullName}/pulls`, {
+  let res = await githubFetch(token, `/repos/${repoFullName}/pulls`, {
     method: "POST",
     body: JSON.stringify({ title, body, head, base, draft: true }),
   });
+  if (res.status === 422) {
+    // Some plans/repos don't support draft PRs; a normal PR is still human-merge-only.
+    const detail = await res.clone().text().catch(() => "");
+    if (/draft/i.test(detail)) {
+      res = await githubFetch(token, `/repos/${repoFullName}/pulls`, { method: "POST", body: JSON.stringify({ title, body, head, base }) });
+    }
+  }
   if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`Couldn't open PR: HTTP ${res.status}${detail ? ` — ${detail.slice(0, 200)}` : ""}`);
+    throw new Error(`Couldn't open PR: HTTP ${res.status}`);
   }
   const data = await res.json();
   return data.html_url;

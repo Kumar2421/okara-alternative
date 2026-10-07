@@ -1,4 +1,7 @@
 import type { Finding } from "@/lib/domain/seo/SEOAgent";
+import type { CatalogApplyMeta, CatalogFixInput, CatalogProposal, FixChange } from "./catalogFix.ts";
+
+export type { CatalogApplyMeta, CatalogFixInput, CatalogProposal, FixChange };
 
 export type CodeFixContext = {
   projectId: string;
@@ -37,4 +40,8 @@ export type ProposedFix = {
 export interface CodeFixProvider {
   proposeFix(finding: Finding, ctx: CodeFixContext): Promise<ProposedFix>;
   applyFix(fix: ProposedFix, ctx: CodeFixContext, finding: Finding): Promise<{ prUrl: string; branch: string }>;
+  /** Catalog fixes (see fixCatalog.ts): may span several files. Proposing never writes anything. */
+  proposeCatalogFix(input: CatalogFixInput, ctx: CodeFixContext): Promise<CatalogProposal>;
+  /** Writes the (reviewed, possibly user-edited) changes to a new branch and opens a pull request. Never merges. */
+  applyCatalogFix(changes: FixChange[], ctx: CodeFixContext, meta: CatalogApplyMeta): Promise<{ prUrl: string; branch: string; files: string[] }>;
 }

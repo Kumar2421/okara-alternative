@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Check, ChevronRight, CircleDot, Loader2, RefreshCw } from "lucide-react";
 import type { Finding, FindingStatus } from "@/lib/domain/findings/findingTypes";
 import { countFindings, findingTitle, pagePath } from "@/lib/domain/findings/findingDisplay";
@@ -45,6 +45,19 @@ export default function FindingsWorkspace() {
   const findings = useMemo(() => list.data ?? [], [list.data]);
   const counts = useMemo(() => countFindings(findings), [findings]);
   const selected = findings.find((f) => f.id === selectedId) ?? null;
+
+  // Coming back from GitHub (?finding=<id>) reopens that finding.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const wanted = params.get("finding");
+    if (!wanted) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelectedId(wanted);
+    params.delete("finding");
+    params.delete("github");
+    const query = params.toString();
+    window.history.replaceState(null, "", window.location.pathname + (query ? `?${query}` : ""));
+  }, []);
 
   const select = (id: string | null) => {
     setSelectedId(id);

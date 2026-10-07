@@ -5,6 +5,7 @@ import type { Finding, FindingStatus } from "@/lib/domain/findings/findingTypes"
 import { evidenceRowsForFinding, whyItMattersForFinding } from "@/lib/domain/findings/evidenceDisplay";
 import { SkeletonLines } from "@/components/shared/Skeleton";
 import FindingActionsSection from "../FindingActionsSection";
+import FindingCodeFix from "./FindingCodeFix";
 import { useFindingWork } from "./useFindings";
 
 export const STATUS_LABEL: Record<FindingStatus, string> = {
@@ -109,6 +110,11 @@ export default function FindingDetail({
       <section>
         <SectionTitle>What to do</SectionTitle>
         <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-[12px] leading-5 text-gray-700">{finding.recommendation}</div>
+      </section>
+
+      <section>
+        <SectionTitle hint="Marlo can open a pull request for simple copy and markup fixes. You review and merge it.">Fix in code</SectionTitle>
+        <FindingCodeFix finding={finding} actions={work.actions.data ?? []} />
       </section>
 
       <section>
