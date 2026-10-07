@@ -3,13 +3,14 @@ import { Info } from "lucide-react";
 import ComingSoonCard from "@/components/settings/ComingSoonCard";
 import GitHubCodeFixCard from "@/components/settings/GitHubCodeFixCard";
 import WordPressCard from "@/components/settings/WordPressCard";
+import WebflowCard from "@/components/settings/WebflowCard";
 import XConnectCard from "@/components/settings/XConnectCard";
 import GoogleAnalyticsCard from "@/components/settings/GoogleAnalyticsCard";
 import GmailCard from "@/components/settings/GmailCard";
 import { FEATURES } from "@/lib/features";
 import { cmsIntegrations, socialIntegrations, codeRepoIntegrations } from "@/lib/mock-integrations";
 
-// Real, secure connections exist for WordPress (self-hosted), GitHub, and X
+// Real, secure connections exist for WordPress (self-hosted), Webflow, GitHub, and X
 // — everything else on this page is an honest "coming soon" rather than a
 // fake toggle that stores nothing and resets on reload. GitHub is one real
 // connection shared between the CMS "publish to repo" slot and the
@@ -28,6 +29,7 @@ export default function IntegrationsPage() {
       <div className="mb-8 grid grid-cols-2 gap-3">
         {cmsIntegrations.map((i) => {
           if (i.id === "wordpress-self") return <WordPressCard key={i.id} />;
+          if (i.id === "webflow") return <WebflowCard key={i.id} />;
           if (i.id === "github-articles") return <GitHubCodeFixCard key={i.id} />;
           return <ComingSoonCard key={i.id} name={i.name} desc={i.desc} icon={i.icon} color={i.color} />;
         })}

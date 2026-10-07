@@ -3,6 +3,7 @@ import { getDb } from "@/lib/db";
 import { FEATURES } from "@/lib/features";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
+import { disconnectHostedProvider } from "@/lib/hostedConnections";
 import { PLATFORM_PROVIDER_KEYS, PLATFORM_DEFAULT_MODELS } from "@/lib/llm/platformKeys";
 
 /**
@@ -198,13 +199,9 @@ export async function DELETE(req: NextRequest) {
     const user = await requireUser();
     if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-    const db = createServiceClient();
-    const { error } = await db
-      .from("provider_connections")
-      .delete()
-      .eq("user_id", user.id)
-      .eq("provider_id", providerId);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    // Also removes the Vault secret the row points at (WordPress and every other provider).
+    const result = await disconnectHostedProvider(user.id, providerId);
+    if (!result.ok) return NextResponse.json({ error: "Couldn't disconnect. Try again." }, { status: 500 });
 
     return NextResponse.json({ ok: true });
   }

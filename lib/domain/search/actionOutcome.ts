@@ -11,7 +11,7 @@ import type { SearchSnapshotPayload, SnapshotQuery } from "./searchSnapshot.ts";
  * or a merged GitHub pull request (or a CMS publish) set `implementedAt`
  * tomorrow. Only `via` and the optional `change` proof differ.
  */
-export type ImplementationVia = "manual" | "github_pr";
+export type ImplementationVia = "manual" | "github_pr" | "cms_publish";
 
 export type OutcomeBaseline = {
   capturedAt: string;
@@ -105,7 +105,7 @@ function fingerprintOf(value: unknown): PageFingerprint | null {
 export function implementationOf(result: Record<string, unknown> | null | undefined): ImplementationRecord | null {
   const raw = result?.implementation as Partial<ImplementationRecord> | undefined;
   if (!raw || typeof raw.implementedAt !== "string" || Number.isNaN(Date.parse(raw.implementedAt))) return null;
-  const via: ImplementationVia = raw.via === "github_pr" ? "github_pr" : "manual";
+  const via: ImplementationVia = raw.via === "github_pr" || raw.via === "cms_publish" ? raw.via : "manual";
   const b = raw.baseline as Partial<OutcomeBaseline> | null | undefined;
   const baseline: OutcomeBaseline | null =
     b && typeof b.query === "string" && [b.impressions, b.clicks, b.ctr, b.position].every((n) => typeof n === "number")

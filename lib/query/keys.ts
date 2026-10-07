@@ -36,6 +36,7 @@ export const qk = {
   redditSettings: (projectId: string | undefined) => [...scope(projectId), "reddit-settings"] as const,
   automation: (projectId: string | undefined) => [...scope(projectId), "automation"] as const,
   searchOpportunities: (projectId: string | undefined) => [...scope(projectId), "search-opportunities"] as const,
+  cmsStatus: () => [...account, "cms-status"] as const,
   githubStatus: (projectId: string | undefined) => [...scope(projectId), "github-status"] as const,
   xDrafts: (projectId: string | undefined, view: "current" | "archived") => [...scope(projectId), "x-drafts", view] as const,
   xDraftsAll: (projectId: string | undefined) => [...scope(projectId), "x-drafts"] as const,

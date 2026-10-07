@@ -1,7 +1,7 @@
 export const cmsIntegrations = [
   { id: "wordpress", name: "WordPress", desc: "Publish articles to WordPress.com", icon: "W", color: "#21759b" },
   { id: "wordpress-self", name: "WordPress (Self-Hosted)", desc: "Connect via application password", icon: "W", color: "#21759b" },
-  { id: "webflow", name: "Webflow", desc: "Publish to Webflow CMS collections", icon: "W", color: "#4353ff" },
+  { id: "webflow", name: "Webflow", desc: "Update SEO fields in a Webflow CMS collection", icon: "W", color: "#4353ff" },
   { id: "framer", name: "Framer", desc: "Publish to Framer CMS collections", icon: "F", color: "#0055ff" },
   { id: "wix", name: "Wix", desc: "Publish articles to your Wix site blog", icon: "WIX", color: "#000000" },
   { id: "sanity", name: "Sanity", desc: "Publish articles to your Sanity dataset", icon: "S", color: "#f03e2f" },
