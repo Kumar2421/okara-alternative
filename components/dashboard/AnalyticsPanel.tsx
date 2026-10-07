@@ -210,6 +210,12 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
+  // Returning from the GitHub App install lands on the finding that started it.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (searchParams.get("finding")) setTab("Findings");
+  }, [searchParams]);
+
   const handleInspectRankingPage = async (url: string) => {
     if (pageEvidence[url]) return;
 

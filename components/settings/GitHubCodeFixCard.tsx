@@ -5,6 +5,7 @@ import { Check, ExternalLink } from "lucide-react";
 import { useToast } from "@/components/dashboard/Toast";
 import BrandIcon from "@/components/settings/BrandIcon";
 import { FEATURES } from "@/lib/features";
+import GitHubAppCard from "@/components/settings/GitHubAppCard";
 
 /** Real GitHub PAT + repo, validated live against the GitHub API before
  * either is saved (same honesty pattern as every other credential card
@@ -28,6 +29,17 @@ export default function GitHubCodeFixCard() {
   const [repoInput, setRepoInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  // Hosted: use the GitHub App flow when this deployment has the App configured, else the legacy OAuth card below.
+  const [appConfigured, setAppConfigured] = useState<boolean | null>(FEATURES.PLATFORM_MODE ? null : false);
+
+  useEffect(() => {
+    if (FEATURES.PLATFORM_MODE) {
+      fetch("/api/github/app/status")
+        .then((r) => r.json())
+        .then((d: { configured?: boolean }) => setAppConfigured(Boolean(d.configured)))
+        .catch(() => setAppConfigured(false));
+    }
+  }, []);
 
   useEffect(() => {
     if (FEATURES.PLATFORM_MODE) {
@@ -162,6 +174,9 @@ export default function GitHubCodeFixCard() {
       setBusy(false);
     }
   }
+
+  if (FEATURES.PLATFORM_MODE && appConfigured === null) return <div className="h-24 animate-pulse rounded-xl bg-gray-100" aria-busy="true" />;
+  if (FEATURES.PLATFORM_MODE && appConfigured) return <GitHubAppCard />;
 
   if (FEATURES.PLATFORM_MODE) {
     return (

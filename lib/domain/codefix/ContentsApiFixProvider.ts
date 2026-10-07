@@ -1,7 +1,19 @@
 import type { LlmDriver } from "@/lib/llm";
 import type { Finding } from "@/lib/domain/seo/SEOAgent";
-import type { CodeFixContext, CodeFixProvider, ProposedFix } from "@/lib/domain/codefix/types";
-import { getRepo, searchCode, getFileContent, createBranch, putFileContent, createPullRequest } from "@/lib/domain/codefix/githubApi";
+import type { CatalogApplyMeta, CatalogFixInput, CatalogProposal, CodeFixContext, CodeFixProvider, FixChange, ProposedFix } from "./types.ts";
+import { getRepo, searchCode, getFileContent, createBranch, putFileContent, createPullRequest, pathExists } from "./githubApi.ts";
+import {
+  applyEditsToContent,
+  branchNameFor,
+  buildCatalogPrompt,
+  buildPrBody,
+  buildPrTitle,
+  changedPaths,
+  newFilePathFor,
+  parseCatalogResponse,
+  validateProposal,
+} from "./catalogFix.ts";
+import { MAX_FIX_FILES, MAX_SOURCE_FILE_BYTES, plannedTargets } from "./fixCatalog.ts";
 
 /** Finds the real source file most likely to render `projectUrl`'s path —
  * grounded in GitHub's real Code Search, never guessed. Homepage is tried
@@ -62,7 +74,18 @@ function parsePatchResponse(raw: string): ParsedPatch {
  * types.ts's CodeFixProvider doc for why (and the future OpenHands seam).
  */
 export class ContentsApiFixProvider implements CodeFixProvider {
-  constructor(private llmDriver: LlmDriver, private llmApiKey: string, private llmModel: string, private llmBaseUrl?: string) {}
+  private llmDriver: LlmDriver;
+  private llmApiKey: string;
+  private llmModel: string;
+  private llmBaseUrl?: string;
+
+  // Explicit fields (not parameter properties) so this file also runs under Node's type stripping in tests.
+  constructor(llmDriver: LlmDriver, llmApiKey: string, llmModel: string, llmBaseUrl?: string) {
+    this.llmDriver = llmDriver;
+    this.llmApiKey = llmApiKey;
+    this.llmModel = llmModel;
+    this.llmBaseUrl = llmBaseUrl;
+  }
 
   async proposeFix(finding: Finding, ctx: CodeFixContext): Promise<ProposedFix> {
     const repo = await getRepo(ctx.githubToken, ctx.repoFullName);
@@ -136,5 +159,75 @@ The OLD block must exist character-for-character in the file above — copy it e
     );
 
     return { prUrl, branch };
+  }
+  async proposeCatalogFix(input: CatalogFixInput, ctx: CodeFixContext): Promise<CatalogProposal> {
+    const repo = await getRepo(ctx.githubToken, ctx.repoFullName);
+    const { pageKinds, newFileKinds } = plannedTargets(input.kinds);
+
+    let pagePath: string | null = null;
+    let pageContent: string | null = null;
+    if (pageKinds.length > 0) {
+      pagePath = await locateFile(ctx.githubToken, ctx.repoFullName, repo.defaultBranch, input.pageUrl ?? ctx.projectUrl);
+      const file = await getFileContent(ctx.githubToken, ctx.repoFullName, pagePath, repo.defaultBranch);
+      if (Buffer.byteLength(file.content, "utf8") > MAX_SOURCE_FILE_BYTES) {
+        throw new Error(`${pagePath} is too large for an automatic fix. Make this change manually.`);
+      }
+      pageContent = file.content;
+    }
+
+    const newFiles: { kind: (typeof newFileKinds)[number]; path: string }[] = [];
+    if (newFileKinds.length > 0) {
+      const hasPublicDir = await pathExists(ctx.githubToken, ctx.repoFullName, "public", repo.defaultBranch);
+      for (const kind of newFileKinds) {
+        const path = newFilePathFor(kind, hasPublicDir);
+        if (await pathExists(ctx.githubToken, ctx.repoFullName, path, repo.defaultBranch)) {
+          throw new Error(`${path} already exists in ${ctx.repoFullName}. Update it manually.`);
+        }
+        newFiles.push({ kind, path });
+      }
+    }
+    if ((pagePath ? 1 : 0) + newFiles.length > MAX_FIX_FILES) throw new Error("This fix would touch too many files.");
+
+    const { system, prompt } = buildCatalogPrompt({
+      repoFullName: ctx.repoFullName,
+      projectName: ctx.projectName,
+      projectUrl: ctx.projectUrl,
+      input,
+      pagePath,
+      pageContent,
+      newFiles,
+    });
+    const result = await this.llmDriver({ apiKey: this.llmApiKey, model: this.llmModel, system, messages: [{ role: "user", content: prompt }], baseUrl: this.llmBaseUrl });
+    const parsed = parseCatalogResponse(result.text ?? "");
+    const changes = validateProposal(parsed, { pagePath, pageContent, newFilePaths: newFiles.map((f) => f.path) });
+    return { changes, explanation: parsed.explanation };
+  }
+
+  async applyCatalogFix(changes: FixChange[], ctx: CodeFixContext, meta: CatalogApplyMeta): Promise<{ prUrl: string; branch: string; files: string[] }> {
+    const repo = await getRepo(ctx.githubToken, ctx.repoFullName);
+    const paths = changedPaths(changes);
+    if (paths.length > MAX_FIX_FILES) throw new Error("This fix would touch too many files.");
+
+    // Re-read every file now, so what is committed is the reviewed edit applied to the current file.
+    const writes: { path: string; content: string; sha?: string }[] = [];
+    for (const path of paths) {
+      const creates = changes.filter((c): c is Extract<FixChange, { type: "create" }> => c.type === "create" && c.path === path);
+      if (creates.length > 0) {
+        if (await pathExists(ctx.githubToken, ctx.repoFullName, path, repo.defaultBranch)) throw new Error(`${path} now exists in the repo. Prepare the fix again.`);
+        writes.push({ path, content: creates[0].content });
+        continue;
+      }
+      const file = await getFileContent(ctx.githubToken, ctx.repoFullName, path, repo.defaultBranch);
+      const edits = changes.filter((c): c is Extract<FixChange, { type: "edit" }> => c.type === "edit" && c.path === path);
+      writes.push({ path, content: applyEditsToContent(file.content, edits), sha: file.sha });
+    }
+
+    const branch = branchNameFor(meta.label);
+    await createBranch(ctx.githubToken, ctx.repoFullName, repo.defaultBranch, branch);
+    for (const w of writes) {
+      await putFileContent(ctx.githubToken, ctx.repoFullName, w.path, w.content, buildPrTitle(meta.label), branch, w.sha);
+    }
+    const prUrl = await createPullRequest(ctx.githubToken, ctx.repoFullName, buildPrTitle(meta.label), buildPrBody(meta, changes), branch, repo.defaultBranch);
+    return { prUrl, branch, files: paths };
   }
 }

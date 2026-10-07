@@ -14,6 +14,7 @@ import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
 import { reconcileFixPullRequests } from "@/lib/domain/fixes/reconcileFixPullRequests";
 import { fixDeliveryGithub } from "@/lib/domain/fixes/fixDeliveryGithub";
+import { hostedGithubToken } from "@/lib/githubAppServer";
 
 async function platformPorts(db: ReturnType<typeof createServiceClient>, userId: string, projectId: string): Promise<OutcomePorts> {
   const { data: project } = await db.from("projects").select("url").eq("id", projectId).eq("owner_id", userId).maybeSingle();
@@ -49,21 +50,13 @@ export async function GET(req: NextRequest) {
     const actions = await listProjectActionsSupabase(db, user.id, projectId, findingId);
     // Reconcile merged PRs lazily (best effort, non-blocking)
     try {
-      const { data: githubConn } = await db
-        .from("provider_connections")
-        .select("api_key_secret_id")
-        .eq("user_id", user.id)
-        .eq("provider_id", "github")
-        .maybeSingle();
-      if (githubConn?.api_key_secret_id) {
-        const { data: githubTokenSecret } = await db.rpc("vault_get_secret", { p_id: githubConn.api_key_secret_id });
-        const githubToken = (githubTokenSecret as string) ?? "";
-        if (githubToken) {
-          const fixDelivery = fixDeliveryGithub(githubToken);
-          reconcileFixPullRequests(ports, fixDelivery, actions).catch(() => {
-            // Silently ignore reconciliation errors to not block GET
-          });
-        }
+      // GitHub App installation token when connected (short-lived, never stored), else the legacy token.
+      const githubToken = await hostedGithubToken(db, user.id, projectId);
+      if (githubToken) {
+        const fixDelivery = fixDeliveryGithub(githubToken);
+        reconcileFixPullRequests(ports, fixDelivery, actions).catch(() => {
+          // Silently ignore reconciliation errors to not block GET
+        });
       }
     } catch {
       // Silently ignore reconciliation errors
