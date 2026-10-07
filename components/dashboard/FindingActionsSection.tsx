@@ -211,6 +211,12 @@ export default function FindingActionsSection({
               {recommendation.implementation.description}
             </div>
 
+            {action?.status === "approved" && action.parameters?.autoApproved === true && (
+              <div className="mt-2 text-[10px] font-medium text-blue-700" data-testid="auto-approved-note">
+                Auto-approved by Marlo (a safe fix: nothing changes on your site until you act)
+              </div>
+            )}
+
             {action && (action.status === "proposed" || action.status === "approved") && (
               <>
                 <ImplementControl key={action.id} action={action} busy={busy} onImplement={onImplement} />

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FEATURES } from "@/lib/features";
 import { isAuthorizedCron, runWithBudget } from "@/lib/jobs/jobRunner";
+import { runPlatformDailyProposals } from "@/lib/domain/actions/dailyProposalPorts";
 import { captureProjectSnapshotPlatform } from "@/lib/domain/search/captureForProject";
 import { selectDueProjects } from "@/lib/domain/search/dueProjects";
 import { isoDate } from "@/lib/domain/search/searchSnapshot";
@@ -42,10 +43,28 @@ export async function GET(req: NextRequest) {
     new Set((done ?? []).map((row) => String(row.project_id))),
   );
 
+  const dueIds = new Set(due.map((d) => d.projectId));
+  // Daily proposals run for every connected project after its snapshot (new, or
+  // already captured earlier today), so a run that stopped early or a failed
+  // proposal step is picked up on the next invocation. The job is idempotent.
+  const all = selectDueProjects(
+    (connections ?? []).map((c) => ({ projectId: String(c.project_id), userId: String(c.user_id) })),
+    new Set(),
+  );
+  const proposalSummary = { proposed: 0, approved: 0 };
+  const proposalFailures: Array<{ projectId: string; error: string }> = [];
+
   const summary = await runWithBudget(
-    due,
+    all,
     async ({ projectId, userId }) => {
-      await captureProjectSnapshotPlatform(db, userId, projectId);
+      if (dueIds.has(projectId)) await captureProjectSnapshotPlatform(db, userId, projectId);
+      const result = await runPlatformDailyProposals(db, userId, projectId);
+      if ("error" in result) proposalFailures.push({ projectId, error: result.error });
+      else {
+        proposalSummary.proposed += result.proposed;
+        proposalSummary.approved += result.approved;
+        if (result.errors.length > 0) proposalFailures.push({ projectId, error: result.errors[0] });
+      }
     },
     { budgetMs: BUDGET_MS },
   );
@@ -55,5 +74,6 @@ export async function GET(req: NextRequest) {
     processed: summary.processed,
     skipped: summary.skipped,
     failed: summary.failed.map(({ item, error: message }) => ({ projectId: item.projectId, error: message })),
+    proposals: { ...proposalSummary, failed: proposalFailures },
   });
 }
