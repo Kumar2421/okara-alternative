@@ -6,6 +6,7 @@ import SidePanel from "@/components/shared/SidePanel";
 import { SkeletonLine } from "@/components/shared/Skeleton";
 import { useToast } from "@/components/dashboard/Toast";
 import { getPlatformConfig } from "@/lib/domain/social/platforms";
+import { isNoSubredditError } from "@/lib/domain/social/errorDetection";
 import { useSocialDraftList, useSocialDraftActions, type AnyDraft, type SocialPlatform, type DraftView } from "./useSocialDrafts";
 import DraftPreviewCard from "./DraftPreviewCard";
 
@@ -67,11 +68,12 @@ function DraftRow({ draft, platform, onOpen }: { draft: AnyDraft; platform: Soci
 
 function DraftDetail({ draft, platform, onClose, onChange }: { draft: AnyDraft; platform: SocialPlatform; onClose: () => void; onChange: (draft: AnyDraft | null) => void }) {
   const { show } = useToast();
-  const { update, remove } = useSocialDraftActions(platform);
+  const { update, remove, generate } = useSocialDraftActions(platform);
   const config = getPlatformConfig(platform);
   const [editing, setEditing] = useState(false);
+  const [regenerateError, setRegenerateError] = useState<string | null>(null);
 
-  const busy = update.isPending || remove.isPending;
+  const busy = update.isPending || remove.isPending || generate.isPending;
   const isCurrent = draft.status === "draft";
 
   const copy = async () => {
@@ -130,6 +132,20 @@ function DraftDetail({ draft, platform, onClose, onChange }: { draft: AnyDraft; 
     });
   };
 
+  const regenerate = () => {
+    setRegenerateError(null);
+    const params = platform === "reddit" ? { variants: 1, subreddit: "subreddit" in draft ? draft.subreddit.replace(/^r\//, "") : "" } : { variants: 1 };
+    generate.mutate(params, {
+      onSuccess: () => {
+        show("1 new draft generated. Check the Current list.");
+      },
+      onError: (error) => {
+        const msg = errorMessage(error, "Couldn't regenerate draft.");
+        setRegenerateError(msg);
+      },
+    });
+  };
+
   const toolbar = (
     <div className="flex flex-wrap items-center gap-2">
       {isCurrent ? (
@@ -141,6 +157,9 @@ function DraftDetail({ draft, platform, onClose, onChange }: { draft: AnyDraft; 
           <Undo2 size={13} /> Move to Current
         </button>
       )}
+      <button type="button" className={BTN} onClick={regenerate} disabled={editing || busy}>
+        {generate.isPending ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />} Regenerate
+      </button>
       <button type="button" className={BTN} onClick={post} disabled={editing || busy}>
         <Send size={13} /> Post
       </button>
@@ -170,6 +189,12 @@ function DraftDetail({ draft, platform, onClose, onChange }: { draft: AnyDraft; 
       <div className="space-y-5">
         <DraftPreviewCard draft={draft} platform={platform} editing={editing} onEditChange={setEditing} onSave={(updated) => onChange(updated)} />
 
+        {regenerateError && (
+          <div role="alert" className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-[12px] text-amber-800">
+            <span className="flex-1">{regenerateError}</span>
+          </div>
+        )}
+
         {draft.whyThisWorks && (
           <section className="rounded-xl border border-gray-200 bg-gray-50 p-4">
             <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Why this works</h3>
@@ -197,7 +222,9 @@ export default function SocialWriterPanel({ platform, onClose }: { platform: Soc
         setView("current");
         show(`${created.length} new draft${created.length === 1 ? "" : "s"} ready to review.`);
       },
-      onError: (err) => show(errorMessage(err, "Couldn't generate drafts.")),
+      onError: () => {
+        // Error handling is done in the UI below, just silent for toast
+      },
     });
   };
 
@@ -256,12 +283,24 @@ export default function SocialWriterPanel({ platform, onClose }: { platform: Soc
       ) : (
         <div className="space-y-3">
           {generate.isError && (
-            <div role="alert" className="flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-[12px] text-amber-800">
-              <span>{errorMessage(generate.error, "Couldn't generate drafts.")}</span>
-              <button type="button" onClick={runGenerate} className="shrink-0 font-medium underline">
-                Retry
-              </button>
-            </div>
+            (() => {
+              const msg = errorMessage(generate.error, "Couldn't generate drafts.");
+              const noSub = isNoSubredditError(generate.error);
+              return (
+                <div role="alert" className="flex items-start justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-[12px] text-amber-800">
+                  <span>{msg}</span>
+                  {noSub ? (
+                    <a href="/settings/agents" className="shrink-0 whitespace-nowrap font-medium underline hover:no-underline">
+                      Open Settings
+                    </a>
+                  ) : (
+                    <button type="button" onClick={runGenerate} className="shrink-0 whitespace-nowrap font-medium underline">
+                      Retry
+                    </button>
+                  )}
+                </div>
+              );
+            })()
           )}
           {generate.isPending && <DraftSkeleton />}
           {drafts.length === 0 && !generate.isPending ? (

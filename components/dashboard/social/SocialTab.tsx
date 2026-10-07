@@ -40,6 +40,7 @@ function PlatformCard({ platform, onOpen }: { platform: SocialPlatform; onOpen: 
   const currentCount = currentList.data?.length ?? 0;
   const archivedCount = archivedList.data?.length ?? 0;
   const loading = currentList.isPending || archivedList.isPending;
+  const error = currentList.isError || archivedList.isError;
 
   let latestDraft = currentList.data?.[0];
   if (!latestDraft && archivedList.data) {
@@ -60,6 +61,17 @@ function PlatformCard({ platform, onOpen }: { platform: SocialPlatform; onOpen: 
     return "No preview";
   };
 
+  const getErrorMsg = () => {
+    if (currentList.isError) return currentList.error instanceof Error ? currentList.error.message : "Couldn't load drafts";
+    if (archivedList.isError) return archivedList.error instanceof Error ? archivedList.error.message : "Couldn't load drafts";
+    return "Couldn't load drafts";
+  };
+
+  const handleRetry = () => {
+    currentList.refetch();
+    archivedList.refetch();
+  };
+
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-4">
       <div className="mb-4 flex items-start justify-between">
@@ -74,30 +86,45 @@ function PlatformCard({ platform, onOpen }: { platform: SocialPlatform; onOpen: 
         </div>
       </div>
 
-      <div className="mb-3 flex items-center gap-4 text-[12px] text-gray-600">
-        <span>{currentCount} current</span>
-        <span>{archivedCount} archived</span>
-      </div>
-
-      {loading ? (
-        <div className="mb-3 h-12 rounded-lg bg-gray-50 animate-pulse" />
-      ) : latestDraft ? (
-        <div className="mb-3 rounded-lg bg-gray-50 p-2.5 text-[12px] leading-relaxed text-gray-700">
-          <p className="line-clamp-2">{getPreview()}</p>
+      {error ? (
+        <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-[12px] text-amber-800">
+          <span className="flex-1 line-clamp-2">{getErrorMsg()}</span>
+          <button
+            type="button"
+            onClick={handleRetry}
+            className="shrink-0 whitespace-nowrap font-medium underline hover:no-underline"
+          >
+            Retry
+          </button>
         </div>
       ) : (
-        <div className="mb-3 rounded-lg bg-gray-50 p-2.5 text-[12px] text-gray-500">No drafts yet</div>
+        <>
+          <div className="mb-3 flex items-center gap-4 text-[12px] text-gray-600">
+            <span>{currentCount} current</span>
+            <span>{archivedCount} archived</span>
+          </div>
+
+          {loading ? (
+            <div className="mb-3 h-12 rounded-lg bg-gray-50 animate-pulse" />
+          ) : latestDraft ? (
+            <div className="mb-3 rounded-lg bg-gray-50 p-2.5 text-[12px] leading-relaxed text-gray-700">
+              <p className="line-clamp-2">{getPreview()}</p>
+            </div>
+          ) : (
+            <div className="mb-3 rounded-lg bg-gray-50 p-2.5 text-[12px] text-gray-500">No drafts yet</div>
+          )}
+        </>
       )}
 
       <div className="flex gap-2">
         <button
           onClick={onOpen}
-          disabled={generate.isPending}
+          disabled={generate.isPending || error}
           className="flex-1 rounded-lg bg-[#111111] px-3 py-2 text-[12px] font-medium text-white hover:bg-black disabled:opacity-50"
         >
           {generate.isPending ? <Loader2 size={12} className="inline animate-spin mr-1" /> : "Draft posts"}
         </button>
-        {currentCount > 0 && (
+        {currentCount > 0 && !error && (
           <button
             onClick={onOpen}
             className="rounded-lg border border-gray-200 px-3 py-2 text-[12px] font-medium text-gray-700 hover:bg-gray-50"

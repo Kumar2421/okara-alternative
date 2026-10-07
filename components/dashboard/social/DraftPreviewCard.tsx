@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { fetchJson } from "@/lib/query/fetchJson";
 import { useProject } from "@/lib/project-store";
 import { getPlatformConfig } from "@/lib/domain/social/platforms";
 import { useSocialDraftActions, type AnyDraft, type SocialPlatform } from "./useSocialDrafts";
@@ -80,6 +82,10 @@ function RedditCard({ subreddit, title, body }: { subreddit: string; title: stri
   );
 }
 
+interface RedditSettings {
+  settings: { subreddits: string[] };
+}
+
 export default function DraftPreviewCard({
   draft,
   platform,
@@ -97,10 +103,25 @@ export default function DraftPreviewCard({
   const { update } = useSocialDraftActions(platform);
   const config = getPlatformConfig(platform);
   const name = project?.name ?? "Your product";
+  const redditSettingsQuery = useQuery({
+    queryKey: ["redditSettings"],
+    queryFn: () => fetchJson<RedditSettings>("/api/agents/reddit/settings"),
+    enabled: platform === "reddit",
+  });
+
+  const getDefaultSubreddit = () => {
+    if (redditSettingsQuery.data?.settings.subreddits.length) {
+      return redditSettingsQuery.data.settings.subreddits[0].replace(/^r\//, "");
+    }
+    return "";
+  };
+
   const [values, setValues] = useState<Record<string, string>>(() => {
     if (platform === "x" && "text" in draft) return { text: draft.text } as Record<string, string>;
     if (platform === "linkedin" && "hookLine" in draft) return { hookLine: draft.hookLine, body: draft.body } as Record<string, string>;
-    if (platform === "reddit" && "subreddit" in draft) return { subreddit: draft.subreddit, title: draft.title, body: draft.body } as Record<string, string>;
+    if (platform === "reddit" && "subreddit" in draft) {
+      return { subreddit: draft.subreddit || getDefaultSubreddit(), title: draft.title, body: draft.body } as Record<string, string>;
+    }
     return {};
   });
 

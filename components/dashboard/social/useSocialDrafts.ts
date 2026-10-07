@@ -80,10 +80,14 @@ export function useSocialDraftActions(platform: SocialPlatform) {
       fetchJson<{ drafts: AnyDraft[] }>(url, {
         method: "POST",
         headers: JSON_HEADERS,
-        body: JSON.stringify({ variants: params?.variants ?? 3, ...(params?.subreddit && { subreddit: params.subreddit }) }),
+        body: JSON.stringify({ variants: clampVariants(params?.variants), ...(params?.subreddit && { subreddit: params.subreddit }) }),
       }),
     onSuccess: refresh,
   });
+
+  function clampVariants(v?: number): number {
+    return Math.min(3, Math.max(1, Math.floor(v ?? 3)));
+  }
 
   const update = useMutation({
     mutationFn: (payload: { id: string; patch: Record<string, unknown> }) =>
