@@ -16,7 +16,7 @@ export default function AutomationCard({ projectId }: { projectId: string }) {
     <section className="rounded-xl border border-gray-200 bg-white p-4" data-testid="automation-card">
       <h4 className="text-[12px] font-semibold text-gray-700">Automation</h4>
       <p className="mt-1 text-[11px] leading-4 text-gray-500">
-        Marlo suggests up to 3 fixes a day. Safe ones are pre-approved. Nothing changes on your site or gets sent without your click.
+        Marlo suggests up to 3 fixes a day. &ldquo;Ask me&rdquo; leaves them for you to approve; &ldquo;Auto-approve safe fixes&rdquo; pre-approves the low-risk ones. Nothing changes on your site or gets sent without your click.
       </p>
       <div role="radiogroup" aria-label="Automation" className="mt-3 inline-flex rounded-lg border border-gray-200 p-0.5">
         {OPTIONS.map((option) => {

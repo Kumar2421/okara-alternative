@@ -52,7 +52,6 @@ export async function runDailyProposals(
   const summary: DailyProposalSummary = { mode: "off", findingsCreated: 0, proposed: 0, approved: 0, errors: [] };
   const mode = await ports.getMode();
   summary.mode = mode;
-  if (mode === "off") return summary;
 
   const snapshot = await ports.getSnapshot();
   if (!snapshot) return summary;

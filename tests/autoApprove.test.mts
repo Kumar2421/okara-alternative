@@ -48,9 +48,10 @@ test("isLowRisk is false when the action targets a repo or carries PR/email para
   assert.equal(isLowRisk({ type: "rewrite_snippet", target: { url: "https://example.com" }, parameters: { autoProposed: true } }), true);
 });
 
-test("off mode proposes and approves nothing", () => {
-  const result = plan({ mode: "off", opportunities: [opp("ctr", "a")] });
-  assert.deepEqual(result.proposals, []);
+test("ask-me mode proposes but approves nothing", () => {
+  const result = plan({ mode: "off", opportunities: [opp("ctr", "a"), opp("ranking", "b")] });
+  assert.ok(result.proposals.length > 0);
+  assert.ok(result.proposals.every((p) => p.approve === false));
 });
 
 test("auto mode proposes ctr (rewrite_snippet) and approves it as low risk", () => {
@@ -164,12 +165,12 @@ function fakePorts(mode: "off" | "auto_approve_safe") {
 
 const PROJECT = { id: "p1", name: "Marlo", url: "https://example.com" };
 
-test("job: off mode writes nothing", async () => {
+test("job: ask-me mode proposes up to 3 but approves none", async () => {
   const f = fakePorts("off");
   const summary = await runDailyProposals(f.ports, PROJECT, NOW);
-  assert.equal(summary.proposed, 0);
-  assert.equal(f.findings.length, 0);
-  assert.equal(f.actions.length, 0);
+  assert.ok(summary.proposed > 0 && summary.proposed <= 3);
+  assert.equal(summary.approved, 0);
+  assert.ok(f.actions.every((a) => a.status !== "approved"));
 });
 
 test("job: auto mode proposes at most 3, approves only low-risk, and a rerun the same day adds nothing", async () => {

@@ -1,7 +1,7 @@
 /** Stored as an `automation_settings` row in project_documents (JSON content), so no schema change is needed in either mode. */
 export const AUTOMATION_DOC = "automation_settings";
 
-/** "off" = Ask me (Marlo proposes nothing on its own). */
+/** "off" = Ask me: Marlo still suggests up to 3 fixes a day but approves none. "auto_approve_safe" also pre-approves the safe ones. */
 export type AutomationMode = "off" | "auto_approve_safe";
 
 export type AutomationSettings = { mode: AutomationMode; updatedAt: string | null };

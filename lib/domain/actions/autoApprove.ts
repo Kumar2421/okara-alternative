@@ -84,7 +84,6 @@ export function planDailyProposals(args: {
   capturedAt: string;
 }): DailyPlan {
   const cap = args.cap ?? DAILY_PROPOSAL_CAP;
-  if (args.mode === "off") return { proposals: [], remainingToday: 0 };
 
   const today = utcDay(args.now);
   const proposedToday = args.existingActions.filter((a) => a.parameters?.[AUTO_PROPOSED_KEY] === true && utcDay(a.createdAt) === today).length;
