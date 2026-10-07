@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
+import { runPlatformDailyProposals, runSelfHostDailyProposals } from "@/lib/domain/actions/dailyProposalPorts";
 import { captureProjectSnapshotPlatform, captureProjectSnapshotSelfHost } from "@/lib/domain/search/captureForProject";
 import { countSnapshots, getLatestSnapshot } from "@/lib/domain/search/searchSnapshotStore";
 import {
@@ -45,6 +46,10 @@ export async function POST() {
     const payload = supabase && userId
       ? await captureProjectSnapshotPlatform(supabase, userId, projectId)
       : await captureProjectSnapshotSelfHost(projectId);
+    // Same daily step the cron runs after a snapshot (self-host has no cron). Isolated: never fails the refresh.
+    // It only proposes inside Marlo, and does nothing unless the project opted in.
+    if (supabase && userId) await runPlatformDailyProposals(supabase, userId, projectId);
+    else await runSelfHostDailyProposals(projectId);
     return NextResponse.json({ snapshot: { capturedAt: payload.capturedAt, queries: payload.windows.d28.queries.length } });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 502 });

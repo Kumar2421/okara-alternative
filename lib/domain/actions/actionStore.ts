@@ -69,6 +69,12 @@ export function setActionResult(projectId: string, id: string, result: Record<st
 }
 
 /** Undo a completion: back to proposed with no result. Only the outcome service calls this (it enforces the undo window). */
+export function mergeActionParameters(projectId: string, id: string, extra: Record<string, unknown>): void {
+  const existing = getProjectAction(projectId, id);
+  if (!existing) return;
+  getDb().prepare("UPDATE actions SET parameters = ? WHERE project_id = ? AND id = ?").run(JSON.stringify({ ...existing.parameters, ...extra }), projectId, id);
+}
+
 export function resetAction(projectId: string, id: string): Action | null {
   if (!getProjectAction(projectId, id)) return null;
   getDb().prepare("UPDATE actions SET status = 'proposed', result = NULL, started_at = NULL, completed_at = NULL WHERE project_id = ? AND id = ?").run(projectId, id);

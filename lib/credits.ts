@@ -35,3 +35,21 @@ export async function chargeCredits(
 
   return data;
 }
+
+/**
+ * Read-only balance check used BEFORE an expensive call on the platform key.
+ * Mirrors spend_credits(): nothing blocks while billing_enabled is false.
+ */
+export async function getCreditState(userId: string, agentType: string): Promise<{ billingEnabled: boolean; balance: number; cost: number }> {
+  const db = createServiceClient();
+  const [{ data: profile }, { data: config }, { data: cost }] = await Promise.all([
+    db.from("profiles").select("credits_balance").eq("id", userId).maybeSingle(),
+    db.from("app_config").select("billing_enabled").eq("id", true).maybeSingle(),
+    db.from("credit_costs").select("credits").eq("agent_type", agentType).maybeSingle(),
+  ]);
+  return {
+    billingEnabled: config?.billing_enabled ?? false,
+    balance: profile?.credits_balance ?? 0,
+    cost: cost?.credits ?? 0,
+  };
+}
