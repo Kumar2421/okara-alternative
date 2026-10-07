@@ -1,5 +1,6 @@
 import type { LlmDriver } from "@/lib/llm";
 import type { ProjectContext } from "@/lib/domain/shared/ProjectContext";
+import type { RedditSearchPlan } from "@/lib/domain/reddit/redditSettings";
 import { buildProjectContextBlock } from "@/lib/domain/shared/projectContextPrompt";
 
 export type RedditThread = {
@@ -17,6 +18,8 @@ export type RedditRequest = {
   brandVoice: string;
   model: string;
   project: ProjectContext;
+  /** Saved per-project focus (see redditSettings.ts). Omitted or empty queries keep the default behaviour. */
+  searchPlan?: RedditSearchPlan;
 };
 
 const MOCK_THREADS: RedditThread[] = [
@@ -53,6 +56,11 @@ export class RedditAgent {
   async findOpportunities(req: RedditRequest): Promise<{ opportunities: RedditOpportunity[]; usedMockThreads: boolean }> {
     const threads = MOCK_THREADS;
     const opportunities: RedditOpportunity[] = [];
+    const plan = req.searchPlan;
+    const usOnly = plan?.country === "us" ? "\nOnly relevant for a United States audience." : "";
+    const focusBlock = plan && plan.queries.length > 0
+      ? `\nSearch focus (the user's saved priorities): ${plan.queries.join(" | ")}${usOnly}`
+      : usOnly;
 
     for (const thread of threads) {
       const system = `You are an expert community manager acting on behalf of a specific product —
@@ -61,7 +69,7 @@ speak from real knowledge of it, never generically:
 ${buildProjectContextBlock(req.project)}
 
 Brand Voice: ${req.brandVoice}
-Keywords of interest: ${req.keywords}`;
+Keywords of interest: ${req.keywords}${focusBlock}`;
 
       const prompt = `Review this Reddit thread:
 Subreddit: ${thread.subreddit}
