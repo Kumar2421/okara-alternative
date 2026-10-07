@@ -4,7 +4,8 @@ import { getDriver } from "@/lib/llm";
 import { PLATFORM_DEFAULT_MODELS, PLATFORM_PROVIDER_KEYS } from "@/lib/llm/platformKeys";
 import { FEATURES } from "@/lib/features";
 import { getUserPlan } from "@/lib/entitlements";
-import { chargeCredits, InsufficientCreditsError } from "@/lib/credits";
+import { chargeCredits, getCreditState, InsufficientCreditsError } from "@/lib/credits";
+import { canAffordCredits } from "@/lib/domain/x/draftGuards";
 import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
 import { getActiveProjectContext } from "@/lib/domain/shared/getActiveProject";
 import { getActiveProjectContextSupabase } from "@/lib/domain/shared/getActiveProjectSupabase";
@@ -84,6 +85,13 @@ export async function POST(req: NextRequest) {
   let baseUrl: string | undefined;
   let usesPlatformKey = false;
   let project: ProjectContext;
+  let reservedBatchId: string | null = null;
+  const release = async () => {
+    if (scope.mode === "platform" && reservedBatchId) {
+      await supabaseStore.deleteXBatch(scope.db, scope.userId, scope.projectId, reservedBatchId).catch(() => {});
+      reservedBatchId = null;
+    }
+  };
 
   try {
     if (scope.mode === "platform") {
@@ -99,12 +107,18 @@ export async function POST(req: NextRequest) {
       }
 
       if (usesPlatformKey) {
+        // Never spend platform tokens for a user who can't pay, whatever their plan.
+        if (!canAffordCredits(await getCreditState(scope.userId, "social_draft"))) {
+          return NextResponse.json({ error: "Out of credits. Upgrade or connect your own key." }, { status: 402 });
+        }
         const limit = dailyDraftBatchLimit(await getUserPlan(scope.userId));
         if (limit !== -1) {
-          const used = await supabaseStore.countXBatchesSince(scope.db, scope.userId, scope.projectId, startOfUtcDay());
-          if (used >= limit) {
+          // Claim the slot before the model call so parallel requests can't exceed the cap.
+          const slot = await supabaseStore.reserveXBatch(scope.db, scope.userId, scope.projectId, limit, startOfUtcDay());
+          if (!slot.ok) {
             return NextResponse.json({ error: `Daily limit reached (${limit} batches). Try again tomorrow, or connect your own Groq key.`, limit }, { status: 429 });
           }
+          reservedBatchId = slot.batchId;
         }
       }
       project = await getActiveProjectContextSupabase(scope.db, scope.userId);
@@ -118,10 +132,12 @@ export async function POST(req: NextRequest) {
       project = getActiveProjectContext();
     }
   } catch (err) {
+    await release();
     return fail(err);
   }
 
   if (!apiKey) {
+    await release();
     return NextResponse.json({ error: "Connect a free Groq key in Settings, then try again." }, { status: 422 });
   }
 
@@ -142,31 +158,42 @@ export async function POST(req: NextRequest) {
     });
     text = result.text ?? "";
   } catch (err) {
+    await release();
     return fail(err, 502);
   }
 
   const { drafts, errors } = parseDraftBatch(text, variants);
   const usable = drafts.filter((d) => isWithinLimit(d.text));
   if (usable.length === 0) {
+    await release();
     return NextResponse.json({ error: "The model returned drafts we couldn't use. Nothing was charged; try again.", details: errors.slice(0, 3) }, { status: 502 });
   }
 
   try {
     if (scope.mode === "platform") {
+      // Save first, then charge; if the charge fails the drafts are rolled back, so nobody pays for nothing or gets free output.
+      const batchId = reservedBatchId;
+      const created = batchId
+        ? await supabaseStore.fulfilXBatch(scope.db, scope.userId, scope.projectId, batchId, usable)
+        : await supabaseStore.insertXDrafts(scope.db, scope.userId, scope.projectId, usable);
+      reservedBatchId = null;
       if (usesPlatformKey) {
         try {
           await chargeCredits(scope.userId, "social_draft", { projectId: scope.projectId, model: PLATFORM_DEFAULT_MODELS[providerId] });
         } catch (err) {
+          const batch = created[0]?.batchId;
+          if (batch) await supabaseStore.deleteXBatch(scope.db, scope.userId, scope.projectId, batch).catch(() => {});
           if (err instanceof InsufficientCreditsError) {
             return NextResponse.json({ error: "Out of credits. Upgrade or connect your own key." }, { status: 402 });
           }
           throw err;
         }
       }
-      return NextResponse.json({ drafts: await supabaseStore.insertXDrafts(scope.db, scope.userId, scope.projectId, usable) }, { status: 201 });
+      return NextResponse.json({ drafts: created }, { status: 201 });
     }
     return NextResponse.json({ drafts: sqliteStore.insertXDrafts(getDb(), scope.projectId, usable) }, { status: 201 });
   } catch (err) {
+    await release();
     return fail(err);
   }
 }

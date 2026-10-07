@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { NewXDraft, XDraft, XDraftPatch, XDraftStatus, XDraftView } from "./xDraftTypes";
 import { statusesForView } from "./xDraftTypes";
+import { countActiveBatches, reserveBatchSlot, type Reservation } from "./draftGuards";
 
 function map(row: Record<string, unknown>): XDraft {
   return {
@@ -19,8 +20,8 @@ export async function listXDrafts(db: SupabaseClient, userId: string, projectId:
   return (data ?? []).map(map);
 }
 
-export async function insertXDrafts(db: SupabaseClient, userId: string, projectId: string, drafts: NewXDraft[], topic = "X post"): Promise<XDraft[]> {
-  const batchId = `xb_${crypto.randomUUID()}`;
+export async function insertXDrafts(db: SupabaseClient, userId: string, projectId: string, drafts: NewXDraft[], topic = "X post", batchIdOverride?: string): Promise<XDraft[]> {
+  const batchId = batchIdOverride ?? `xb_${crypto.randomUUID()}`;
   const createdAt = new Date().toISOString();
   const { data, error } = await db.from("x_drafts").insert(
     drafts.map((d) => ({
@@ -56,8 +57,40 @@ export async function deleteXDraft(db: SupabaseClient, userId: string, projectId
 }
 
 export async function countXBatchesSince(db: SupabaseClient, userId: string, projectId: string, sinceIso: string): Promise<number> {
-  const { data, error } = await db.from("x_drafts").select("batch_id").eq("user_id", userId).eq("project_id", projectId)
+  const { data, error } = await db.from("x_drafts").select("batch_id, status, created_at").eq("user_id", userId).eq("project_id", projectId)
     .not("batch_id", "is", null).gte("created_at", sinceIso);
   if (error) throw new Error(error.message);
-  return new Set((data ?? []).map((r) => r.batch_id)).size;
+  return countActiveBatches((data ?? []) as { batch_id: string | null; status: string | null; created_at: string }[], sinceIso, Date.now());
+}
+
+/** Remove every row of a batch (a placeholder, or drafts that must be rolled back). */
+export async function deleteXBatch(db: SupabaseClient, userId: string, projectId: string, batchId: string): Promise<void> {
+  const { error } = await db.from("x_drafts").delete().eq("user_id", userId).eq("project_id", projectId).eq("batch_id", batchId);
+  if (error) throw new Error(error.message);
+}
+
+/** Claim one of today's batch slots before the model call. A placeholder row ('pending') holds it. */
+export function reserveXBatch(db: SupabaseClient, userId: string, projectId: string, limit: number, sinceIso: string): Promise<Reservation> {
+  return reserveBatchSlot(
+    {
+      insert: async (batchId) => {
+        const { error } = await db.from("x_drafts").insert({
+          user_id: userId, project_id: projectId, topic: "X post", body: "", status: "pending", edited: false, batch_id: batchId,
+        });
+        if (error) throw new Error(error.message);
+      },
+      count: () => countXBatchesSince(db, userId, projectId, sinceIso),
+      remove: (batchId) => deleteXBatch(db, userId, projectId, batchId),
+    },
+    limit,
+    () => `xb_${crypto.randomUUID()}`
+  );
+}
+
+/** Swap the placeholder for the real drafts under the same batch id. Rolls the drafts back if the swap fails. */
+export async function fulfilXBatch(db: SupabaseClient, userId: string, projectId: string, batchId: string, drafts: NewXDraft[]): Promise<XDraft[]> {
+  const inserted = await insertXDrafts(db, userId, projectId, drafts, "X post", batchId);
+  const { error } = await db.from("x_drafts").delete().eq("user_id", userId).eq("project_id", projectId).eq("batch_id", batchId).eq("status", "pending");
+  if (error) throw new Error(error.message);
+  return inserted;
 }

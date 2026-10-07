@@ -38,16 +38,55 @@ export type PostPublisher = {
 };
 
 const URL_PATTERN = /https?:\/\/[^\s]+/g;
+/** Bare domains such as marlo.ai or example.com/path; X turns these into links too. */
+const TLDS = "com|net|org|io|ai|co|app|dev|xyz|me|so|sh|gg|ly|to|tv|fm|cc|us|uk|de|fr|nl|ca|au|in|info|biz|tech|cloud|site|online|store|page|link|club|pro|inc|ing|run|new";
+const BARE_DOMAIN_PATTERN = new RegExp(
+  String.raw`(?<![\w@#./-])(?:[a-z0-9-]+\.)+(?:${TLDS})(?![\w-])(?::\d+)?(?:/[^\s]*)?`,
+  "gi"
+);
 
-/** Length as X counts it: links are 23, characters outside the BMP (emoji) are 2. */
+/** twitter-text weights: ranges 0-4351, 8192-8205, 8208-8223 and 8242-8247 count 1; everything else counts 2. */
+function codePointWeight(cp: number): number {
+  if (cp <= 0x10ff) return 1;
+  if (cp >= 0x2000 && cp <= 0x200d) return 1;
+  if (cp >= 0x2010 && cp <= 0x201f) return 1;
+  if (cp >= 0x2032 && cp <= 0x2037) return 1;
+  return 2;
+}
+
+/**
+ * Length as X counts it: links (with or without a scheme) are 23, code points
+ * above U+10FF are 2, and a ZWJ emoji sequence is one 2-weight glyph.
+ */
 export function countTweetChars(text: string): number {
   let count = 0;
-  const withoutUrls = text.replace(URL_PATTERN, () => {
+  const strip = () => {
     count += URL_CHAR_COUNT;
-    return "";
-  });
-  for (const ch of withoutUrls) count += (ch.codePointAt(0) ?? 0) > 0xffff ? 2 : 1;
+    return " ";
+  };
+  const withoutUrls = text.replace(URL_PATTERN, strip).replace(BARE_DOMAIN_PATTERN, strip);
+  // Each replaced link left one placeholder space behind; it is not real text.
+  count -= (withoutUrls.match(/ /g) ?? []).length - (text.replace(URL_PATTERN, "").replace(BARE_DOMAIN_PATTERN, "").match(/ /g) ?? []).length;
+  const cps = Array.from(withoutUrls);
+  for (let i = 0; i < cps.length; i++) {
+    const cp = cps[i].codePointAt(0) ?? 0;
+    count += codePointWeight(cp);
+    // Variation selectors and skin tones attach to the previous glyph; a ZWJ joins the next glyph into one emoji.
+    if (cp === 0x200d && i + 1 < cps.length) {
+      const next = cps[i + 1].codePointAt(0) ?? 0;
+      if (next > 0x2000) {
+        count -= 1; // the ZWJ itself is free inside a sequence
+        count -= codePointWeight(next);
+        i++;
+        while (i + 1 < cps.length && isEmojiModifier(cps[i + 1].codePointAt(0) ?? 0)) i++;
+      }
+    }
+  }
   return count;
+}
+
+function isEmojiModifier(cp: number): boolean {
+  return cp === 0xfe0f || cp === 0xfe0e || (cp >= 0x1f3fb && cp <= 0x1f3ff);
 }
 
 export function isWithinLimit(text: string): boolean {
