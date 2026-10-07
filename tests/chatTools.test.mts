@@ -251,3 +251,54 @@ test("secrets in stored data never reach the model via the summary or tools", as
   assert.ok(!r.content.includes("RT-123"));
   assert.ok(r.content.includes("ok"));
 });
+
+test("transient provider error after tools ran retries once on context path", async () => {
+  let calls = 0;
+  const driver: DriverLike = async (req) => {
+    calls++;
+    if (req.tools) {
+      await req.tools[0].execute({});
+      throw Object.assign(new Error("Too Many Requests"), { status: 429 });
+    }
+    return { text: "plain" };
+  };
+  const r = await runChatTurn({ driver, apiKey: "k", model: "m", system: "S", messages: [], ports: fakePorts(), supportsTools: true });
+  assert.equal(r.mode, "context");
+  assert.equal(calls, 2);
+  // second failure surfaces
+  const bad: DriverLike = async (req) => { if (req.tools) await req.tools[0].execute({}); throw new Error("503 unavailable"); };
+  await assert.rejects(runChatTurn({ driver: bad, apiKey: "k", model: "m", system: "S", messages: [], ports: fakePorts(), supportsTools: true }));
+  // transient error before any tool ran is not retried
+  let n = 0;
+  const early: DriverLike = async () => { n++; throw new Error("429 rate limit"); };
+  await assert.rejects(runChatTurn({ driver: early, apiKey: "k", model: "m", system: "S", messages: [], ports: fakePorts(), supportsTools: true }));
+  assert.equal(n, 1);
+});
+
+test("groq tool_use_failed counts as tool-unsupported", () => {
+  assert.equal(isToolUnsupportedError(new Error("400 tool_use_failed: Failed to call a function")), true);
+  assert.equal(isToolUnsupportedError(new Error("Failed to call a function. Please adjust your prompt")), true);
+});
+
+test("lead summary flags truncation and DB errors throw", async () => {
+  const rows = Array.from({ length: 2000 }, (_, i) => ({
+    name: "n", title: null, company: null, location: null, lead_type: null, email: null, email_verified: null,
+    emailed_at: null, last_reply_at: null, created_at: `2026-01-01T00:00:${i}`,
+  }));
+  assert.equal(summarizeLeads(rows, 1).truncated, true);
+  assert.equal(summarizeLeads(rows.slice(0, 3), 1).truncated, false);
+  const r = await runTool(fakePorts({ getLeadSummary: async () => ({ ...summarizeLeads(rows, 1) }) }), "list_leads");
+  assert.match(r.content, /2000\+/);
+  const chain: Record<string, unknown> = {};
+  chain.select = () => chain; chain.eq = () => chain; chain.order = () => chain;
+  chain.limit = async () => ({ data: null, error: { message: "boom" } });
+  await assert.rejects(supabaseLeadSummary({ from: () => chain } as never, "u", "p", 5), /boom/);
+});
+
+test("total result cap holds under parallel calls", async () => {
+  const big = fakePorts({ listFindings: async () => Array.from({ length: 200 }, (_, i) => finding(`f${i}`, "new", { note: "x".repeat(300) })) });
+  const used: string[] = [];
+  const tool = buildToolDefs(big, used).find((t) => t.name === "list_findings")!;
+  const outs = await Promise.all(Array.from({ length: 8 }, () => tool.execute({})));
+  assert.ok(outs.reduce((s, o) => s + o.length, 0) <= MAX_TOTAL_RESULT_CHARS + 8 * 80);
+});

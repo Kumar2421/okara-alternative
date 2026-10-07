@@ -19,6 +19,8 @@ export type ActionWithOutcomeLite = Action & { outcome: Outcome | null };
 
 export type LeadSummary = {
   total: number;
+  /** True when total is capped by the scan limit (real count is higher). */
+  truncated?: boolean;
   withEmail: number;
   emailVerified: number;
   emailed: number;
@@ -224,7 +226,11 @@ export async function runTool(ports: ChatPorts, name: string, args: Record<strin
       case "list_leads": {
         const s = await ports.getLeadSummary(MAX_ROWS);
         if (s.total === 0) return noData("leads", "No leads yet for this project.");
-        return pack({ ...s, recent: s.recent.slice(0, MAX_ROWS) });
+        return pack({
+          ...s,
+          ...(s.truncated ? { totalDisplay: `${s.total}+`, note: "Counts cover only the most recent leads scanned; the real totals are higher." } : {}),
+          recent: s.recent.slice(0, MAX_ROWS),
+        });
       }
       case "get_geo_status": {
         const g = await ports.getGeoStatus();

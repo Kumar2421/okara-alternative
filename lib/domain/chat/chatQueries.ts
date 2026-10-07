@@ -16,6 +16,7 @@ export function summarizeLeads(rows: LeadRow[], recentLimit: number): LeadSummar
   const sorted = [...rows].sort((a, b) => b.created_at.localeCompare(a.created_at));
   return {
     total: rows.length,
+    truncated: rows.length >= LEAD_SCAN_LIMIT,
     withEmail: rows.filter((r) => !!r.email).length,
     emailVerified: rows.filter((r) => !!r.email_verified).length,
     emailed: rows.filter((r) => !!r.emailed_at).length,
@@ -31,23 +32,25 @@ export function summarizeLeads(rows: LeadRow[], recentLimit: number): LeadSummar
 const LEAD_COLUMNS = "name, title, company, location, lead_type, email, email_verified, emailed_at, last_reply_at, created_at";
 
 export async function supabaseLeadSummary(db: SupabaseClient, userId: string, projectId: string, recentLimit: number): Promise<LeadSummary> {
-  const { data } = await db
+  const { data, error } = await db
     .from("leads")
     .select(LEAD_COLUMNS)
     .eq("user_id", userId)
     .eq("project_id", projectId)
     .order("created_at", { ascending: false })
     .limit(LEAD_SCAN_LIMIT);
+  if (error) throw new Error(`Could not load leads: ${error.message}`);
   return summarizeLeads((data ?? []) as LeadRow[], recentLimit);
 }
 
 export async function supabaseGeoStatus(db: SupabaseClient, userId: string, projectId: string): Promise<GeoStatus> {
-  const { data } = await db
+  const { data, error } = await db
     .from("geo_checks")
     .select("payload, checked_at")
     .eq("user_id", userId)
     .eq("project_id", projectId)
     .maybeSingle();
+  if (error) throw new Error(`Could not load GEO check: ${error.message}`);
   return geoFromRow(data ? { payload: data.payload, checked_at: String(data.checked_at) } : null);
 }
 

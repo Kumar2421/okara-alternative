@@ -1,4 +1,4 @@
-import { CHAT_TOOLS, runTool, type ChatPorts } from "./tools.ts";
+import { CHAT_TOOLS, MAX_RESULT_CHARS, runTool, type ChatPorts } from "./tools.ts";
 
 /** Minimal slice of the LlmDriver contract this module needs (structural, so it can be faked). */
 export type ToolDefLike = {
@@ -50,10 +50,19 @@ export function buildToolDefs(ports: ChatPorts, used: string[]): ToolDefLike[] {
       if (calls >= MAX_TOOL_CALLS || chars >= MAX_TOTAL_RESULT_CHARS) return BUDGET_MESSAGE;
       calls += 1;
       if (!used.includes(spec.name)) used.push(spec.name);
-      const result = await runTool(ports, spec.name, input && typeof input === "object" ? input : {});
-      const room = MAX_TOTAL_RESULT_CHARS - chars;
-      const content = result.content.length > room ? `${result.content.slice(0, Math.max(room - 20, 0))}...[truncated]` : result.content;
-      chars += content.length;
+      // Reserve budget BEFORE awaiting so parallel calls cannot overshoot the cap.
+      const reserved = Math.min(MAX_RESULT_CHARS, MAX_TOTAL_RESULT_CHARS - chars);
+      chars += reserved;
+      let content: string;
+      try {
+        const result = await runTool(ports, spec.name, input && typeof input === "object" ? input : {});
+        content = result.content.length > reserved ? `${result.content.slice(0, Math.max(reserved - 20, 0))}...[truncated]` : result.content;
+        content = content.slice(0, reserved);
+      } catch (err) {
+        chars -= reserved;
+        throw err;
+      }
+      chars -= reserved - content.length;
       return content;
     },
   }));
@@ -92,7 +101,7 @@ export async function buildAutoSummary(ports: ChatPorts): Promise<string> {
   }
 
   const leads = await safe(() => ports.getLeadSummary(0));
-  if (leads) lines.push(`Leads: ${leads.total} total, ${leads.emailed} emailed, ${leads.replied} replied.`);
+  if (leads) lines.push(`Leads: ${leads.truncated ? `${leads.total}+` : leads.total} total, ${leads.emailed} emailed, ${leads.replied} replied.`);
 
   const geo = await safe(() => ports.getGeoStatus());
   lines.push(geo ? `GEO check (${geo.checkedAt.slice(0, 10)}): cited for ${geo.rows.filter((r) => r.found).length} of ${geo.rows.length} queries.` : "GEO check: not run yet.");
@@ -116,7 +125,10 @@ export async function runChatTurn(input: ChatRunInput): Promise<ChatRunResult> {
     } catch (err) {
       // A model/server that rejects tool calling (some local models) degrades to the
       // context path. Auth, rate-limit and other errors still surface to the caller.
-      if (!isToolUnsupportedError(err)) throw err;
+      // A transient provider failure after tools ran (rate limit, 5xx, timeout) gets ONE
+      // retry on the cheaper no-tools path, inside the same turn (one credit).
+      const retryable = isToolUnsupportedError(err) || (used.length > 0 && isTransientProviderError(err));
+      if (!retryable) throw err;
     }
   }
 
@@ -139,5 +151,15 @@ export function labelsFor(names: string[]): string[] {
 
 export function isToolUnsupportedError(err: unknown): boolean {
   const raw = err instanceof Error ? err.message : String(err);
+  if (/tool_use_failed|failed to call a function/i.test(raw)) return true;
   return /tool|function.?call/i.test(raw) && /(not support|unsupported|does not support|invalid)/i.test(raw);
+}
+
+/** 429 / 5xx / timeout / overloaded style provider errors. */
+export function isTransientProviderError(err: unknown): boolean {
+  const e = err as { status?: unknown; code?: unknown } | null;
+  const status = typeof e?.status === "number" ? e.status : NaN;
+  if (status === 429 || (status >= 500 && status < 600)) return true;
+  const raw = `${err instanceof Error ? err.message : String(err)} ${typeof e?.code === "string" ? e.code : ""}`;
+  return /(429|5\d\d)|rate.?limit|too many requests|overloaded|timed? ?out|timeout|ETIMEDOUT|ECONNRESET|unavailable|bad gateway/i.test(raw);
 }
