@@ -185,6 +185,32 @@ function init(): Database.Database {
       PRIMARY KEY (project_id, snapshot_date)
     );
 
+    -- Marlo's own notifications (single local user, so user_id is always
+    -- 'local'; kept so the shape matches the platform tables).
+    CREATE TABLE IF NOT EXISTS notification_preferences (
+      user_id          TEXT PRIMARY KEY,
+      prefs            TEXT NOT NULL DEFAULT '{}',
+      unsubscribed_all INTEGER NOT NULL DEFAULT 0,
+      updated_at       TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS notifications (
+      id          TEXT PRIMARY KEY,
+      user_id     TEXT NOT NULL,
+      project_id  TEXT,
+      kind        TEXT NOT NULL,
+      dedupe_key  TEXT NOT NULL,
+      title       TEXT NOT NULL,
+      body        TEXT NOT NULL DEFAULT '',
+      payload     TEXT NOT NULL DEFAULT '{}',
+      created_at  TEXT NOT NULL,
+      read_at     TEXT,
+      emailed_at  TEXT,
+      email_error TEXT,
+      UNIQUE (user_id, dedupe_key)
+    );
+    CREATE INDEX IF NOT EXISTS notifications_user_created_idx ON notifications (user_id, created_at DESC);
+
     -- Real leads (outreach prospects) — row-per-lead, not a JSON blob, since
     -- per-row state (email sent/not, notes) is coming in a later phase. Every
     -- row must carry a real source_url it was extracted from; email is

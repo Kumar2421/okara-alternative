@@ -5,11 +5,20 @@ import { captureProjectSnapshotPlatform } from "@/lib/domain/search/captureForPr
 import { selectDueProjects } from "@/lib/domain/search/dueProjects";
 import { isoDate } from "@/lib/domain/search/searchSnapshot";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
+import { runNotificationJob, type NotificationJobSummary } from "@/lib/domain/notifications/job";
+import { supabaseNotificationStore } from "@/lib/domain/notifications/notificationStoreSupabase";
+import { platformNotificationSource } from "@/lib/domain/notifications/platformSource";
+import { emailLinksFor, notificationConfig } from "@/lib/domain/notifications/runtime";
 
 // Hobby caps cron functions at 60s. Stop a little short of it and resume on
 // the next run rather than being killed mid-project.
 export const maxDuration = 60;
 const BUDGET_MS = 45_000;
+// Notifications run after the snapshots (they read the fresh ones) in whatever
+// is left of the 60s function limit. Hobby allows only two crons, so this
+// rides along instead of being a third.
+const NOTIFY_DEADLINE_MS = 57_000;
+const NOTIFY_MIN_BUDGET_MS = 2_000;
 
 /**
  * Daily Search Console snapshot for every project with GSC connected —
@@ -25,6 +34,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const startedAt = Date.now();
   const db = createServiceClient();
   const today = isoDate(new Date());
 
@@ -50,7 +60,31 @@ export async function GET(req: NextRequest) {
     { budgetMs: BUDGET_MS },
   );
 
+  // Failures here never fail the snapshot run, and never carry secrets into the response.
+  let notifications: Pick<NotificationJobSummary, "users" | "skipped" | "created" | "emailed" | "emailFailed"> & { failed: number } | { error: string };
+  const notifyBudget = NOTIFY_DEADLINE_MS - (Date.now() - startedAt);
+  if (notifyBudget < NOTIFY_MIN_BUDGET_MS) {
+    notifications = { error: "No time left; will run tomorrow." };
+  } else {
+    try {
+      const config = notificationConfig();
+      const result = await runNotificationJob({
+        source: platformNotificationSource(db),
+        store: supabaseNotificationStore(db),
+        sender: config.sender,
+        linksFor: (userId) => emailLinksFor(userId, config),
+        budgetMs: notifyBudget,
+        log: (message) => console.warn(`[notifications] ${message}`),
+      });
+      notifications = { users: result.users, skipped: result.skipped, created: result.created, emailed: result.emailed, emailFailed: result.emailFailed, failed: result.failed.length };
+    } catch (err) {
+      console.warn("[notifications] job failed:", err instanceof Error ? err.message : "unknown error");
+      notifications = { error: "Notification job failed." };
+    }
+  }
+
   return NextResponse.json({
+    notifications,
     due: due.length,
     processed: summary.processed,
     skipped: summary.skipped,
