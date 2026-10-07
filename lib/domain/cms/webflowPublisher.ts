@@ -47,6 +47,12 @@ const MAX_ALT_IMAGES = 10;
 type Write = { kind: "text"; slug: string } | { kind: "image"; slug: string; index: number | null };
 type Plan = { candidates: CmsCandidate[]; unsupported: CmsUnsupported[]; writes: Map<string, Write> };
 
+const stripWww = (host: string) => host.toLowerCase().replace(/^www\./, "");
+
+function slugify(v: unknown): string {
+  return typeof v === "string" ? v.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") : "";
+}
+
 function textOf(v: unknown): string {
   return typeof v === "string" ? v : "";
 }
@@ -122,8 +128,12 @@ export class WebflowPublisher implements CmsPublisher {
     return res;
   }
 
+  private async collection(): Promise<{ fields?: WfField[]; slug?: string; singularName?: string }> {
+    return (await this.call(`/collections/${encodeURIComponent(this.cfg.collectionId)}`)).json() as { fields?: WfField[]; slug?: string; singularName?: string };
+  }
+
   private async fields(): Promise<WfField[]> {
-    const col = (await this.call(`/collections/${encodeURIComponent(this.cfg.collectionId)}`)).json() as { fields?: WfField[] };
+    const col = await this.collection();
     return Array.isArray(col.fields) ? col.fields.filter((f) => typeof f?.slug === "string" && typeof f?.type === "string") : [];
   }
 
@@ -132,6 +142,33 @@ export class WebflowPublisher implements CmsPublisher {
     return (list.items ?? []).find((i) => textOf(i.fieldData?.slug) === slug && !i.isArchived) ?? null;
   }
 
+  /** Hostnames this site serves: its custom domains plus the default webflow.io one (www is ignored). */
+  private async siteHosts(): Promise<Set<string>> {
+    const site = (await this.call(`/sites/${encodeURIComponent(this.cfg.siteId)}`)).json() as {
+      customDomains?: { url?: string }[];
+      shortName?: string;
+    };
+    const hosts = new Set<string>();
+    const add = (raw: unknown) => {
+      if (typeof raw !== "string" || !raw.trim()) return;
+      try {
+        hosts.add(stripWww(new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`).hostname));
+      } catch {
+        // ignore an unparsable domain entry
+      }
+    };
+    for (const d of Array.isArray(site.customDomains) ? site.customDomains : []) add(d?.url);
+    if (typeof site.shortName === "string" && site.shortName) add(`${site.shortName}.webflow.io`);
+    return hosts;
+  }
+
+  /**
+   * Maps a page URL to an item of the connected collection. The URL host must be one of THIS
+   * site's domains (otherwise a slug could match an unrelated page), and the path must be
+   * /<collection slug or singular name>/<item slug>, the shape Webflow gives collection pages.
+   * Webflow's API doesn't expose the template page's path, so a different path prefix is refused
+   * with a "confirm the page" error instead of guessing from the slug alone.
+   */
   async locate(pageUrl: string): Promise<CmsItemRef | null> {
     let page: URL;
     try {
@@ -139,8 +176,19 @@ export class WebflowPublisher implements CmsPublisher {
     } catch {
       return null;
     }
-    const slug = page.pathname.split("/").filter(Boolean).pop() ?? "";
+    const hosts = await this.siteHosts();
+    if (!hosts.has(stripWww(page.hostname))) throw new CmsError("This page isn't on your connected Webflow site.", 422);
+    const parts = page.pathname.split("/").filter(Boolean);
+    const slug = parts[parts.length - 1] ?? "";
     if (!/^[A-Za-z0-9._~-]+$/.test(slug)) return null;
+    const col = await this.collection();
+    const prefixes = new Set([col.slug, slugify(col.singularName)].filter((v): v is string => Boolean(v)));
+    if (parts.length !== 2 || !prefixes.has(parts[0].toLowerCase())) {
+      throw new CmsError(
+        `Marlo can't confirm that ${page.pathname} is the page for the connected collection (its pages are expected at /${[...prefixes][0] ?? "collection"}/<slug>). Confirm the page in Webflow and fix it by hand, or connect the collection that owns it.`,
+        422,
+      );
+    }
     const item = await this.bySlug(slug);
     if (!item) return null;
     return { cms: "webflow", id: item.id, kind: "items", title: textOf(item.fieldData?.name) || slug, slug, url: pageUrl, collectionId: this.cfg.collectionId };
@@ -162,6 +210,12 @@ export class WebflowPublisher implements CmsPublisher {
       if (after && after !== c.before) changes.push({ ...c, after });
     }
     return { item, candidates: plan.candidates, changes, unsupported: plan.unsupported };
+  }
+
+  async liveBefore(item: CmsItemRef, changes: readonly CmsChange[]) {
+    const [fields, current] = [await this.fields(), await this.read(item)];
+    const plan = planFor(fields, current, [...new Set(changes.map((c) => c.field))]);
+    return plan.candidates.map((c) => ({ field: c.field, ...(c.target ? { target: c.target } : {}), before: c.before }));
   }
 
   async apply(item: CmsItemRef, changes: readonly CmsChange[]): Promise<CmsApplyResult> {

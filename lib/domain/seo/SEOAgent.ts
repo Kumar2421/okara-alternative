@@ -2,6 +2,7 @@ import * as cheerio from "cheerio";
 import { request as httpRequest, type IncomingHttpHeaders } from "http";
 import { request as httpsRequest } from "https";
 import { jinaRead, extractMarkdownLinks } from "@/lib/domain/shared/jinaReader";
+import { assertPublicHostLiteral } from "@/lib/domain/net/ssrf";
 import { extractTitle } from "@/lib/domain/seo/extractTitle";
 import { fetchPageSpeed, type CwvSnapshot, type LighthouseIssue } from "@/lib/domain/seo/pageSpeedInsights";
 
@@ -150,18 +151,12 @@ export function assertPublicHttpUrl(raw: string): URL {
     throw new Error("Only http/https URLs are allowed");
   }
 
-  const host = parsed.hostname.toLowerCase();
-  const isPrivate =
-    host === "localhost" ||
-    host === "0.0.0.0" ||
-    host.endsWith(".local") ||
-    /^127\./.test(host) ||
-    /^10\./.test(host) ||
-    /^192\.168\./.test(host) ||
-    /^169\.254\./.test(host) ||
-    /^172\.(1[6-9]|2\d|3[01])\./.test(host);
-
-  if (isPrivate) {
+  // Trailing dots, *.localhost/*.internal/*.local, metadata names and every private, loopback,
+  // link-local, CGNAT and ULA IP literal (IPv6 and IPv4-mapped too). DNS is NOT resolved here:
+  // use assertPublicHttpUrlResolved (lib/domain/net/ssrf) when the caller can be async.
+  try {
+    assertPublicHostLiteral(parsed.hostname);
+  } catch {
     throw new Error("URLs pointing to local/private addresses are not allowed");
   }
 

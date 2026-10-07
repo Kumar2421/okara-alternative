@@ -49,6 +49,8 @@ function OutcomeCard({ action, outcome, onUndo, busy }: { action: ActionWithOutc
   const canUndo = action.canUndo;
   const via = implementation.via === "github_pr" ? "via GitHub PR" : implementation.via === "cms_publish" ? "via your CMS" : "by you";
   const prUrl = implementation.change?.prUrl as string | undefined;
+  // For a CMS publish or a GitHub PR, "undo" only resets tracking: the change stays on the site.
+  const stopTrackingOnly = implementation.via === "cms_publish" || implementation.via === "github_pr";
 
   return (
     <div className="mt-2 rounded-lg border border-gray-100 bg-gray-50/60 p-2.5" data-testid="outcome-card">
@@ -66,10 +68,15 @@ function OutcomeCard({ action, outcome, onUndo, busy }: { action: ActionWithOutc
         )}
         {canUndo && (
           <button type="button" onClick={onUndo} disabled={busy} className="ml-auto text-[10px] text-gray-500 hover:text-gray-800 hover:underline disabled:opacity-50">
-            Undo
+            {stopTrackingOnly ? "Stop tracking" : "Undo"}
           </button>
         )}
       </div>
+      {canUndo && stopTrackingOnly && (
+        <p className="mt-1 text-[10px] leading-4 text-gray-400" data-testid="stop-tracking-note">
+          This only stops tracking the result. It does not change your site back.
+        </p>
+      )}
       {outcome && <p className="mt-1.5 text-[12px] leading-5 text-gray-800">{outcome.headline}</p>}
       {outcome?.pageNote && <p className="mt-1 text-[11px] leading-4 text-gray-500">{outcome.pageNote}</p>}
       {prUrl && (

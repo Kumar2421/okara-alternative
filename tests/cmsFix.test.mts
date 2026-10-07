@@ -269,7 +269,8 @@ function wfRoutes(item = wfItem(), fields = WF_FIELDS) {
     if (u.hostname !== "api.webflow.com") return { status: 500 };
     if (c.headers.Authorization !== "Bearer tok") return { status: 401 };
     if (c.method === "GET" && u.pathname === "/v2/sites") return { body: { sites: [{ id: "s1", displayName: "My site" }] } };
-    if (c.method === "GET" && u.pathname === "/v2/collections/c1") return { body: { fields } };
+    if (c.method === "GET" && u.pathname === "/v2/sites/s1") return { body: { id: "s1", shortName: "my-site", customDomains: [{ id: "d1", url: "example.com" }] } };
+    if (c.method === "GET" && u.pathname === "/v2/collections/c1") return { body: { fields, slug: "blog", singularName: "Post" } };
     if (c.method === "GET" && u.pathname === "/v2/collections/c1/items") return { body: { items: u.searchParams.get("slug") === "post" ? [item] : [] } };
     if (c.method === "PATCH" && u.pathname === "/v2/collections/c1/items/i1") return { body: item };
     if (c.method === "POST" && u.pathname === "/v2/collections/c1/items/publish") return { status: 202, body: { publishedItemIds: ["i1"] } };
@@ -283,7 +284,7 @@ test("webflow: validate token via sites, locate by slug, preview, apply patches 
   assert.deepEqual(await listWebflowSites("tok", { assertUrl, fetchImpl: f.impl }), [{ id: "s1", name: "My site" }]);
   await assert.rejects(listWebflowSites("nope", { assertUrl, fetchImpl: f.impl }), /rejected/);
   const p = wf(f);
-  const it = (await p.locate("https://example.com/blog/post"))!;
+  const it = (await p.locate("https://www.example.com/blog/post"))!;
   assert.equal(it.collectionId, "c1");
   assert.equal(await p.locate("https://example.com/blog/missing"), null);
   const prev = await p.preview(it, { kinds: ["title", "meta_description", "alt_text", "open_graph"], draft: { fields: { title: "New", meta_description: "Desc." }, alt: { hero: "A hero" } } });
@@ -301,7 +302,7 @@ test("webflow: validate token via sites, locate by slug, preview, apply patches 
 test("webflow: draft items stay drafts, wrong collection or missing field is refused", async () => {
   const f = wfRoutes(wfItem({ isDraft: true, lastPublished: null }));
   const p = wf(f);
-  const it = (await p.locate("https://example.com/post"))!;
+  const it = (await p.locate("https://example.com/blog/post"))!;
   const res = await p.apply(it, [{ field: "title", before: "", after: "New" }]);
   assert.match(res.note ?? "", /draft/);
   assert.equal(f.calls.filter((c) => c.method === "POST").length, 0);
@@ -333,6 +334,7 @@ test("port: a bare fake publisher satisfies the service", async () => {
     cms: "wordpress",
     locate: async () => item,
     preview: async (it, { draft }) => ({ item: it, candidates: [{ field: "title", before: "a" }], changes: draft.fields.title ? [{ field: "title", before: "a", after: draft.fields.title }] : [], unsupported: [] }),
+    liveBefore: async () => [{ field: "title", before: "a" }],
     apply: async () => ({ applied: ["title"], liveUrl: item.url }),
   };
   const out = await prepareCmsFix({ publisher: fake, pageUrl: item.url, kinds: ["title"], draftCopy: async () => ({ fields: { title: "Better" } }) });

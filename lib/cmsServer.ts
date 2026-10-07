@@ -16,6 +16,7 @@ import { createAction as createActionSupabase, listProjectActions as listProject
 import { deriveActionType } from "@/lib/domain/actions/deriveActionType";
 import { implementAction, type OutcomePorts } from "@/lib/domain/search/outcomeService";
 import { platformOutcomePorts, selfHostOutcomePorts } from "@/lib/domain/search/outcomePorts";
+import { assertResolvesPublic } from "@/lib/domain/net/ssrf";
 import { assertPublicCmsUrl, type CmsFetchOptions } from "@/lib/domain/cms/cmsFetch";
 import { CMS_LABEL, type CmsId, type CmsPublisher } from "@/lib/domain/cms/cmsFixCatalog";
 import { WordPressPublisher } from "@/lib/domain/cms/wordpressPublisher";
@@ -29,7 +30,10 @@ import { WebflowPublisher } from "@/lib/domain/cms/webflowPublisher";
  * Secrets are never logged or returned.
  */
 
-export const cmsNet: CmsFetchOptions = { assertUrl: (u) => void assertPublicCmsUrl(u, assertPublicHttpUrl) };
+export const cmsNet: CmsFetchOptions = {
+  assertUrl: (u) => void assertPublicCmsUrl(u, assertPublicHttpUrl),
+  resolve: (host) => assertResolvesPublic(host),
+};
 
 const fail = (error: string, status: number) => NextResponse.json({ error }, { status });
 

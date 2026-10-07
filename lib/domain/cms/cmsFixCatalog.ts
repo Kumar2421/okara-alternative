@@ -142,7 +142,16 @@ export type CmsPreview = {
   unsupported: CmsUnsupported[];
 };
 
-export type CmsApplyResult = { applied: CmsField[]; liveUrl: string; note?: string };
+/** A change that did not land (the rest of a partial apply did). */
+export type CmsFailedChange = { field: CmsField; target?: string; reason: string };
+
+/** `failed` is set only on a partial success: `applied` is already live, `failed` is not. */
+export type CmsApplyResult = { applied: CmsField[]; failed?: CmsFailedChange[]; liveUrl: string; note?: string };
+
+/** Stable identity of one change slot, used to bind a ticket to the (field, target) set. */
+export function changeKey(c: { field: string; target?: string }): string {
+  return `${c.field}:${c.target ?? ""}`;
+}
 
 /** An error whose message is safe to show the user. */
 export class CmsError extends Error {
@@ -160,7 +169,12 @@ export interface CmsPublisher {
   locate(pageUrl: string): Promise<CmsItemRef | null>;
   /** Read-only: current values and the before/after for `draft`. Never writes. */
   preview(item: CmsItemRef, fix: { kinds: readonly CmsFixKind[]; draft: CmsDraft }): Promise<CmsPreview>;
-  /** Writes exactly `changes` (already validated and approved). */
+  /** Read-only: what the item holds RIGHT NOW for each change slot (before values), for the stale-page check. A slot that no longer exists is omitted. */
+  liveBefore(item: CmsItemRef, changes: readonly CmsChange[]): Promise<Array<{ field: CmsField; target?: string; before: string }>>;
+  /**
+   * Writes exactly `changes` (already validated and approved). Throws only when NOTHING was written.
+   * If a later write fails after an earlier one landed, returns a partial result with `failed`.
+   */
   apply(item: CmsItemRef, changes: readonly CmsChange[]): Promise<CmsApplyResult>;
 }
 

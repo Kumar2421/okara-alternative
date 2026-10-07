@@ -24,7 +24,7 @@ export type PreparedCmsFix =
       ticket: string;
     };
 
-export type AppliedCmsFix = { liveUrl: string; applied: string[]; note: string | null; summary: string; tracked: boolean; cmsLabel: string };
+export type AppliedCmsFix = { liveUrl: string; applied: string[]; failed?: { field: string; target?: string; reason: string }[]; partial?: boolean; note: string | null; summary: string; tracked: boolean; cmsLabel: string };
 
 /** Which CMSs (WordPress, Webflow) are connected. Names only, never a credential. */
 export function useCmsStatus(enabled = true) {

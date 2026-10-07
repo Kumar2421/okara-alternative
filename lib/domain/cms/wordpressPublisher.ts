@@ -6,6 +6,7 @@ import {
   type CmsApplyResult,
   type CmsCandidate,
   type CmsChange,
+  type CmsFailedChange,
   type CmsDraft,
   type CmsField,
   type CmsFixKind,
@@ -227,21 +228,45 @@ export class WordPressPublisher implements CmsPublisher {
     return { item, candidates: plan.candidates, changes, unsupported: plan.unsupported };
   }
 
+  async liveBefore(item: CmsItemRef, changes: readonly CmsChange[]) {
+    const plan = planFor(await this.read(item), [...new Set(changes.map((c) => c.field))]);
+    return plan.candidates.map((c) => ({ field: c.field, ...(c.target ? { target: c.target } : {}), before: c.before }));
+  }
+
   async apply(item: CmsItemRef, changes: readonly CmsChange[]): Promise<CmsApplyResult> {
     const rec = await this.read(item);
     const plan = planFor(rec, [...new Set(changes.map((c) => c.field))]);
     const body: { title?: string; meta?: Record<string, string> } = {};
-    const media: { id: string; alt: string }[] = [];
+    const media: { id: string; alt: string; change: CmsChange }[] = [];
+    const postFields: CmsField[] = [];
     for (const change of changes) {
       const write = plan.writes.get(change.field === "alt_text" ? `alt_text:${change.target}` : change.field);
       if (!write) throw new CmsError(`This site can no longer take the ${change.field.replace(/_/g, " ")} change. Prepare the fix again.`, 409);
-      if (write.kind === "title") body.title = change.after;
-      else if (write.kind === "meta") body.meta = { ...(body.meta ?? {}), [write.key]: change.after };
-      else media.push({ id: write.id, alt: change.after });
+      if (write.kind === "title") {
+        body.title = change.after;
+        postFields.push(change.field);
+      } else if (write.kind === "meta") {
+        body.meta = { ...(body.meta ?? {}), [write.key]: change.after };
+        postFields.push(change.field);
+      } else media.push({ id: write.id, alt: change.after, change });
     }
     // Nothing is written above this line: every change was checked against the live item first.
+    // The post write is first: if it fails nothing has landed and the error propagates (the ticket is released).
+    // Media alt texts are separate calls; once the post is live a later failure is reported as a partial result.
     if (body.title !== undefined || body.meta) await this.call(`${item.kind}/${item.id}`, { method: "POST", body });
-    for (const m of media) await this.call(`media/${m.id}`, { method: "POST", body: { alt_text: m.alt } });
-    return { applied: changes.map((c) => c.field), liveUrl: item.url };
+    const applied: CmsField[] = [...postFields];
+    const failed: CmsFailedChange[] = [];
+    let firstError: unknown = null;
+    for (const m of media) {
+      try {
+        await this.call(`media/${m.id}`, { method: "POST", body: { alt_text: m.alt } });
+        applied.push("alt_text");
+      } catch (err) {
+        firstError ??= err;
+        failed.push({ field: "alt_text", target: m.change.target, reason: err instanceof CmsError ? err.message : "WordPress didn't accept this image's alt text." });
+      }
+    }
+    if (applied.length === 0) throw firstError; // nothing at all was written
+    return { applied, ...(failed.length ? { failed } : {}), liveUrl: item.url };
   }
 }
