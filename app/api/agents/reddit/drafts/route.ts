@@ -5,14 +5,17 @@ import { PLATFORM_DEFAULT_MODELS, PLATFORM_PROVIDER_KEYS } from "@/lib/llm/platf
 import { FEATURES } from "@/lib/features";
 import { getUserPlan } from "@/lib/entitlements";
 import { chargeCredits, getCreditState } from "@/lib/credits";
+import { dailyDraftBatchLimit } from "@/lib/domain/x/xDraftTypes";
 import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
 import { getActiveProjectContext } from "@/lib/domain/shared/getActiveProject";
 import { getActiveProjectContextSupabase } from "@/lib/domain/shared/getActiveProjectSupabase";
 import type { ProjectContext } from "@/lib/domain/shared/ProjectContext";
-import { buildDraftPrompt, clampVariants, isWithinLimit, parseDraftBatch } from "@/lib/domain/x/draftPost";
-import { dailyDraftBatchLimit, isXDraftStatus, type XDraftPatch, type XDraftView } from "@/lib/domain/x/xDraftTypes";
-import * as sqliteStore from "@/lib/domain/x/xDraftStore";
-import * as supabaseStore from "@/lib/domain/x/xDraftStoreSupabase";
+import { parseRedditBatch } from "@/lib/domain/social/draftParse.ts";
+import { isRedditDraftStatus, type RedditDraftPatch, type RedditDraftView } from "@/lib/domain/reddit/redditDraftStore";
+import { getRedditSettings } from "@/lib/domain/reddit/redditSettingsStore";
+import { getRedditSettings as getRedditSettingsSupabase } from "@/lib/domain/reddit/redditSettingsStoreSupabase";
+import * as sqliteStore from "@/lib/domain/reddit/redditDraftStore";
+import * as supabaseStore from "@/lib/domain/reddit/redditDraftStoreSupabase";
 import { generateDraftBatch, type DraftGenerationPorts } from "@/lib/domain/social/draftGeneration.ts";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
@@ -21,7 +24,7 @@ export const maxDuration = 60;
 
 const NO_PROJECT = { error: "No active project." };
 
-function viewOf(req: NextRequest): XDraftView {
+function viewOf(req: NextRequest): RedditDraftView {
   return req.nextUrl.searchParams.get("view") === "archived" ? "archived" : "current";
 }
 
@@ -35,7 +38,6 @@ type Scope =
   | { mode: "platform"; db: ReturnType<typeof createServiceClient>; userId: string; projectId: string }
   | { mode: "selfhost"; projectId: string };
 
-/** Resolve who is asking and which project; a NextResponse means "stop here". */
 async function resolveScope(): Promise<Scope | NextResponse> {
   if (FEATURES.PLATFORM_MODE) {
     const supabase = await createClient();
@@ -62,18 +64,17 @@ export async function GET(req: NextRequest) {
   try {
     const view = viewOf(req);
     const drafts = scope.mode === "platform"
-      ? await supabaseStore.listXDrafts(scope.db, scope.userId, scope.projectId, view)
-      : sqliteStore.listXDrafts(getDb(), scope.projectId, view);
+      ? await supabaseStore.listRedditDrafts(scope.db, scope.userId, scope.projectId, view)
+      : sqliteStore.listRedditDrafts(getDb(), scope.projectId, view);
     return NextResponse.json({ drafts });
   } catch (err) {
     return fail(err);
   }
 }
 
-/** Generate a batch of 1 to 3 drafts from the project's product info. */
 export async function POST(req: NextRequest) {
-  const body = (await req.json().catch(() => null)) as { variants?: number } | null;
-  const variants = clampVariants(body?.variants);
+  const body = (await req.json().catch(() => null)) as { variants?: number; subreddit?: string } | null;
+  const variants = Math.min(3, Math.max(1, Math.floor(body?.variants ?? 1)));
   const scope = await resolveScope();
   if (scope instanceof NextResponse) return scope;
 
@@ -85,6 +86,7 @@ export async function POST(req: NextRequest) {
   let baseUrl: string | undefined;
   let usesPlatformKey = false;
   let project: ProjectContext;
+  let defaultSubreddit = "";
 
   try {
     if (scope.mode === "platform") {
@@ -99,6 +101,16 @@ export async function POST(req: NextRequest) {
         usesPlatformKey = true;
       }
       project = await getActiveProjectContextSupabase(scope.db, scope.userId);
+
+      // Try to get default subreddit from saved Reddit settings
+      try {
+        const settings = await getRedditSettingsSupabase(scope.db, scope.userId, scope.projectId);
+        if (settings.subreddits.length > 0) {
+          defaultSubreddit = settings.subreddits[0].replace(/^r\//, "");
+        }
+      } catch {
+        // Ignore errors; defaultSubreddit stays empty
+      }
     } else {
       const row = getDb().prepare("SELECT api_key, base_url FROM provider_connections WHERE provider_id = ?").get(providerId) as
         | { api_key: string; base_url: string | null } | undefined;
@@ -107,6 +119,16 @@ export async function POST(req: NextRequest) {
         baseUrl = row.base_url ?? undefined;
       }
       project = getActiveProjectContext();
+
+      // Try to get default subreddit from saved Reddit settings
+      try {
+        const settings = getRedditSettings(getDb(), scope.projectId);
+        if (settings.subreddits.length > 0) {
+          defaultSubreddit = settings.subreddits[0].replace(/^r\//, "");
+        }
+      } catch {
+        // Ignore errors; defaultSubreddit stays empty
+      }
     }
   } catch (err) {
     return fail(err);
@@ -116,14 +138,28 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Connect a free Groq key in Settings, then try again." }, { status: 422 });
   }
 
-  const { system, prompt } = buildDraftPrompt({
-    name: project.name,
-    description: project.description,
-    category: project.category,
-    productInfo: project.productInfo,
-    marketingStrategy: project.marketingStrategy,
-    variants,
-  });
+  const requestedSubreddit = body?.subreddit ? (body.subreddit as string).replace(/^r\//, "") : defaultSubreddit;
+  if (!requestedSubreddit) {
+    return NextResponse.json({ error: "Specify a subreddit or configure one in Settings." }, { status: 422 });
+  }
+
+  if (!/^[A-Za-z0-9_]{2,21}$/.test(requestedSubreddit)) {
+    return NextResponse.json({ error: `Invalid subreddit: '${requestedSubreddit}'. Use 2-21 alphanumeric characters and underscores.` }, { status: 400 });
+  }
+
+  const system = `You are a Reddit contributor writing posts for r/${requestedSubreddit} about ${project.name}.
+Be conversational and community-friendly; match the subreddit's tone.
+Rules:
+- Title: 1-300 characters, clear and engaging (no clickbait).
+- Body: 1-40000 characters, natural discussion (no spam or hard sales).
+- No invented statistics, customer names, or quotes.
+- Be helpful and ask for feedback, not selling.
+
+Reply with JSON only, no prose: {"drafts":[{"subreddit":"${requestedSubreddit}","title":"...","body":"...","whyThisWorks":"...","angle":"..."}]}`;
+
+  const prompt = `Write ${variants} Reddit post${variants === 1 ? "" : "s"} for r/${requestedSubreddit} about: ${project.name}
+${project.description ? `\nDescription: ${project.description}` : ""}
+${project.category ? `\nCategory: ${project.category}` : ""}`;
 
   const ports: DraftGenerationPorts = {
     creditState: async () => scope.mode === "platform" ? getCreditState(scope.userId, "social_draft") : { billingEnabled: false, balance: 0, cost: 0 },
@@ -131,13 +167,13 @@ export async function POST(req: NextRequest) {
     limit: scope.mode === "platform" && usesPlatformKey ? dailyDraftBatchLimit(await getUserPlan(scope.userId)) : -1,
     reserveSlot: async (limit) => {
       if (scope.mode === "platform") {
-        return supabaseStore.reserveXBatch(scope.db, scope.userId, scope.projectId, limit, startOfUtcDay());
+        return supabaseStore.reserveRedditBatch(scope.db, scope.userId, scope.projectId, limit, startOfUtcDay());
       }
       return { ok: true, batchId: "" };
     },
     releaseSlot: async (batchId) => {
       if (scope.mode === "platform" && batchId) {
-        await supabaseStore.deleteXBatch(scope.db, scope.userId, scope.projectId, batchId).catch(() => {});
+        await supabaseStore.deleteRedditBatch(scope.db, scope.userId, scope.projectId, batchId).catch(() => {});
       }
     },
     callModel: async () => {
@@ -151,23 +187,21 @@ export async function POST(req: NextRequest) {
       });
       return result.text ?? "";
     },
-    parse: (text) => parseDraftBatch(text, variants),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    filterUsable: (drafts) => (drafts as any[]).filter((d) => isWithinLimit(d.text)),
+    parse: (text) => parseRedditBatch(text, variants),
+    filterUsable: (drafts) => drafts,
     insertDrafts: async (batchId, drafts) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const withDefaults = (drafts as any[]).map((d) => ({ ...d, angle: "General", whyThisWorks: "" }));
       if (scope.mode === "platform") {
         return batchId
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          ? await supabaseStore.fulfilXBatch(scope.db, scope.userId, scope.projectId, batchId, drafts as any)
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          : await supabaseStore.insertXDrafts(scope.db, scope.userId, scope.projectId, drafts as any);
+          ? await supabaseStore.fulfilRedditBatch(scope.db, scope.userId, scope.projectId, batchId, withDefaults)
+          : await supabaseStore.insertRedditDrafts(scope.db, scope.userId, scope.projectId, withDefaults);
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return sqliteStore.insertXDrafts(getDb(), scope.projectId, drafts as any);
+      return sqliteStore.insertRedditDrafts(getDb(), scope.projectId, withDefaults);
     },
     deleteBatch: async (batchId) => {
       if (scope.mode === "platform") {
-        await supabaseStore.deleteXBatch(scope.db, scope.userId, scope.projectId, batchId).catch(() => {});
+        await supabaseStore.deleteRedditBatch(scope.db, scope.userId, scope.projectId, batchId).catch(() => {});
       }
     },
     charge: async () => {
@@ -181,29 +215,42 @@ export async function POST(req: NextRequest) {
   return NextResponse.json(result.body, { status: result.status });
 }
 
-/** Edit the text and/or move a draft between Current and Archived. */
 export async function PUT(req: NextRequest) {
-  const body = (await req.json().catch(() => null)) as { id?: unknown; text?: unknown; status?: unknown } | null;
+  const body = (await req.json().catch(() => null)) as { id?: unknown; subreddit?: unknown; title?: unknown; body?: unknown; status?: unknown } | null;
   if (!body || typeof body.id !== "string") return NextResponse.json({ error: "id is required." }, { status: 400 });
 
-  const patch: XDraftPatch = {};
-  if (body.text !== undefined) {
-    if (typeof body.text !== "string" || !body.text.trim()) return NextResponse.json({ error: "Text can't be empty." }, { status: 400 });
-    if (!isWithinLimit(body.text)) return NextResponse.json({ error: "Text is over the 280 character limit." }, { status: 400 });
-    patch.text = body.text.trim();
+  const patch: RedditDraftPatch = {};
+  if (body.subreddit !== undefined) {
+    if (typeof body.subreddit !== "string" || !body.subreddit.trim()) return NextResponse.json({ error: "Subreddit can't be empty." }, { status: 400 });
+    if (!/^[A-Za-z0-9_]{2,21}$/.test(body.subreddit.trim())) {
+      return NextResponse.json({ error: "Invalid subreddit name." }, { status: 400 });
+    }
+    patch.subreddit = body.subreddit.trim();
+  }
+  if (body.title !== undefined) {
+    if (typeof body.title !== "string" || !body.title.trim()) return NextResponse.json({ error: "Title can't be empty." }, { status: 400 });
+    if (body.title.trim().length > 300) return NextResponse.json({ error: "Title is over 300 characters." }, { status: 400 });
+    patch.title = body.title.trim();
+  }
+  if (body.body !== undefined) {
+    if (typeof body.body !== "string" || !body.body.trim()) return NextResponse.json({ error: "Body can't be empty." }, { status: 400 });
+    if (body.body.trim().length > 40000) return NextResponse.json({ error: "Body is over 40000 characters." }, { status: 400 });
+    patch.body = body.body.trim();
   }
   if (body.status !== undefined) {
-    if (!isXDraftStatus(body.status)) return NextResponse.json({ error: "Invalid status." }, { status: 400 });
+    if (!isRedditDraftStatus(body.status)) return NextResponse.json({ error: "Invalid status." }, { status: 400 });
     patch.status = body.status;
   }
-  if (patch.text === undefined && patch.status === undefined) return NextResponse.json({ error: "Nothing to update." }, { status: 400 });
+  if (patch.subreddit === undefined && patch.title === undefined && patch.body === undefined && patch.status === undefined) {
+    return NextResponse.json({ error: "Nothing to update." }, { status: 400 });
+  }
 
   const scope = await resolveScope();
   if (scope instanceof NextResponse) return scope;
   try {
     const draft = scope.mode === "platform"
-      ? await supabaseStore.updateXDraft(scope.db, scope.userId, scope.projectId, body.id, patch)
-      : sqliteStore.updateXDraft(getDb(), scope.projectId, body.id, patch);
+      ? await supabaseStore.updateRedditDraft(scope.db, scope.userId, scope.projectId, body.id, patch)
+      : sqliteStore.updateRedditDraft(getDb(), scope.projectId, body.id, patch);
     return draft ? NextResponse.json({ draft }) : NextResponse.json({ error: "Draft not found." }, { status: 404 });
   } catch (err) {
     return fail(err);
@@ -217,8 +264,8 @@ export async function DELETE(req: NextRequest) {
   if (scope instanceof NextResponse) return scope;
   try {
     const removed = scope.mode === "platform"
-      ? await supabaseStore.deleteXDraft(scope.db, scope.userId, scope.projectId, id)
-      : sqliteStore.deleteXDraft(getDb(), scope.projectId, id);
+      ? await supabaseStore.deleteRedditDraft(scope.db, scope.userId, scope.projectId, id)
+      : sqliteStore.deleteRedditDraft(getDb(), scope.projectId, id);
     return removed ? NextResponse.json({ success: true }) : NextResponse.json({ error: "Draft not found." }, { status: 404 });
   } catch (err) {
     return fail(err);

@@ -40,5 +40,9 @@ export const qk = {
   githubStatus: (projectId: string | undefined) => [...scope(projectId), "github-status"] as const,
   xDrafts: (projectId: string | undefined, view: "current" | "archived") => [...scope(projectId), "x-drafts", view] as const,
   xDraftsAll: (projectId: string | undefined) => [...scope(projectId), "x-drafts"] as const,
+  linkedInDrafts: (projectId: string | undefined, view: "current" | "archived") => [...scope(projectId), "linkedin-drafts", view] as const,
+  linkedInDraftsAll: (projectId: string | undefined) => [...scope(projectId), "linkedin-drafts"] as const,
+  redditDrafts: (projectId: string | undefined, view: "current" | "archived") => [...scope(projectId), "reddit-drafts", view] as const,
+  redditDraftsAll: (projectId: string | undefined) => [...scope(projectId), "reddit-drafts"] as const,
   searchOverview: (projectId: string | undefined) => [...scope(projectId), "search-overview"] as const,
 };

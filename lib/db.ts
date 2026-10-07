@@ -3,6 +3,35 @@ import path from "node:path";
 import fs from "node:fs";
 import { ensureXDraftColumns } from "@/lib/domain/x/xDraftStore";
 
+/** Additive columns on the linkedin_drafts table; safe to run on every startup. */
+function ensureLinkedInDraftColumns(db: Database.Database): void {
+  const cols = (db.prepare("PRAGMA table_info(linkedin_drafts)").all() as { name: string }[]).map((c) => c.name);
+  const add = (name: string, ddl: string) => {
+    if (!cols.includes(name)) db.exec(`ALTER TABLE linkedin_drafts ADD COLUMN ${name} ${ddl}`);
+  };
+  add("project_id", "TEXT");
+  add("angle", "TEXT");
+  add("why_this_works", "TEXT");
+  add("edited", "INTEGER NOT NULL DEFAULT 0");
+  add("completed_at", "TEXT");
+  add("batch_id", "TEXT");
+}
+
+/** Additive columns on the reddit_post_drafts table; safe to run on every startup. */
+function ensureRedditPostDraftColumns(db: Database.Database): void {
+  const cols = (db.prepare("PRAGMA table_info(reddit_post_drafts)").all() as { name: string }[]).map((c) => c.name);
+  const add = (name: string, ddl: string) => {
+    if (!cols.includes(name)) db.exec(`ALTER TABLE reddit_post_drafts ADD COLUMN ${name} ${ddl}`);
+  };
+  // All columns should exist from initial CREATE TABLE, but ensure idempotency
+  add("project_id", "TEXT");
+  add("angle", "TEXT");
+  add("why_this_works", "TEXT");
+  add("edited", "INTEGER NOT NULL DEFAULT 0");
+  add("batch_id", "TEXT");
+  add("completed_at", "TEXT");
+}
+
 /**
  * Local SQLite persistence — chosen over a hosted DB (Supabase/Postgres) for now:
  * zero external services, single portable file, survives restarts, and if this
@@ -86,6 +115,21 @@ function init(): Database.Database {
       topic       TEXT NOT NULL,
       body        TEXT NOT NULL,
       status      TEXT NOT NULL,
+      created_at  TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS reddit_post_drafts (
+      id          TEXT PRIMARY KEY,
+      project_id  TEXT NOT NULL,
+      subreddit   TEXT NOT NULL,
+      title       TEXT NOT NULL,
+      body        TEXT NOT NULL,
+      status      TEXT NOT NULL,
+      angle       TEXT,
+      why_this_works TEXT,
+      edited      INTEGER NOT NULL DEFAULT 0,
+      batch_id    TEXT,
+      completed_at TEXT,
       created_at  TEXT NOT NULL
     );
 
@@ -387,6 +431,8 @@ function init(): Database.Database {
  * safe to run on every startup. */
 function migrate(db: Database.Database) {
   ensureXDraftColumns(db);
+  ensureLinkedInDraftColumns(db);
+  ensureRedditPostDraftColumns(db);
 
   // Notification bookkeeping columns added while the feature was in review.
   const addMissing = (table: string, columns: Array<[string, string]>) => {

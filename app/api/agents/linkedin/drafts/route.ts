@@ -5,14 +5,15 @@ import { PLATFORM_DEFAULT_MODELS, PLATFORM_PROVIDER_KEYS } from "@/lib/llm/platf
 import { FEATURES } from "@/lib/features";
 import { getUserPlan } from "@/lib/entitlements";
 import { chargeCredits, getCreditState } from "@/lib/credits";
+import { dailyDraftBatchLimit } from "@/lib/domain/x/xDraftTypes";
 import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
 import { getActiveProjectContext } from "@/lib/domain/shared/getActiveProject";
 import { getActiveProjectContextSupabase } from "@/lib/domain/shared/getActiveProjectSupabase";
 import type { ProjectContext } from "@/lib/domain/shared/ProjectContext";
-import { buildDraftPrompt, clampVariants, isWithinLimit, parseDraftBatch } from "@/lib/domain/x/draftPost";
-import { dailyDraftBatchLimit, isXDraftStatus, type XDraftPatch, type XDraftView } from "@/lib/domain/x/xDraftTypes";
-import * as sqliteStore from "@/lib/domain/x/xDraftStore";
-import * as supabaseStore from "@/lib/domain/x/xDraftStoreSupabase";
+import { parseLinkedInBatch } from "@/lib/domain/social/draftParse.ts";
+import { isLinkedInDraftStatus, type LinkedInDraftPatch, type LinkedInDraftView } from "@/lib/domain/linkedin/linkedInDraftStore";
+import * as sqliteStore from "@/lib/domain/linkedin/linkedInDraftStore";
+import * as supabaseStore from "@/lib/domain/linkedin/linkedInDraftStoreSupabase";
 import { generateDraftBatch, type DraftGenerationPorts } from "@/lib/domain/social/draftGeneration.ts";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
@@ -21,7 +22,7 @@ export const maxDuration = 60;
 
 const NO_PROJECT = { error: "No active project." };
 
-function viewOf(req: NextRequest): XDraftView {
+function viewOf(req: NextRequest): LinkedInDraftView {
   return req.nextUrl.searchParams.get("view") === "archived" ? "archived" : "current";
 }
 
@@ -35,7 +36,6 @@ type Scope =
   | { mode: "platform"; db: ReturnType<typeof createServiceClient>; userId: string; projectId: string }
   | { mode: "selfhost"; projectId: string };
 
-/** Resolve who is asking and which project; a NextResponse means "stop here". */
 async function resolveScope(): Promise<Scope | NextResponse> {
   if (FEATURES.PLATFORM_MODE) {
     const supabase = await createClient();
@@ -62,18 +62,17 @@ export async function GET(req: NextRequest) {
   try {
     const view = viewOf(req);
     const drafts = scope.mode === "platform"
-      ? await supabaseStore.listXDrafts(scope.db, scope.userId, scope.projectId, view)
-      : sqliteStore.listXDrafts(getDb(), scope.projectId, view);
+      ? await supabaseStore.listLinkedInDrafts(scope.db, scope.userId, scope.projectId, view)
+      : sqliteStore.listLinkedInDrafts(getDb(), scope.projectId, view);
     return NextResponse.json({ drafts });
   } catch (err) {
     return fail(err);
   }
 }
 
-/** Generate a batch of 1 to 3 drafts from the project's product info. */
 export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => null)) as { variants?: number } | null;
-  const variants = clampVariants(body?.variants);
+  const variants = Math.min(3, Math.max(1, Math.floor(body?.variants ?? 1)));
   const scope = await resolveScope();
   if (scope instanceof NextResponse) return scope;
 
@@ -116,14 +115,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Connect a free Groq key in Settings, then try again." }, { status: 422 });
   }
 
-  const { system, prompt } = buildDraftPrompt({
-    name: project.name,
-    description: project.description,
-    category: project.category,
-    productInfo: project.productInfo,
-    marketingStrategy: project.marketingStrategy,
-    variants,
-  });
+  const system = `You are a B2B content marketer writing LinkedIn posts for ${project.name}.
+Write insightful, personal posts about this product — not generic advice.
+Rules:
+- Hook in the first line (LinkedIn truncates after ~2 lines).
+- Short paragraphs (1-3 sentences), generous line breaks.
+- 100-3000 characters total (hook line + body).
+- No hashtag spam (0-3 relevant tags at the end, if any).
+- No invented statistics, customer names, or quotes.
+- End with a genuine question or takeaway, not a hard sell.
+
+Reply with JSON only, no prose: {"drafts":[{"hookLine":"...","body":"...","whyThisWorks":"...","angle":"..."}]}`;
+
+  const prompt = `Write ${variants} LinkedIn post${variants === 1 ? "" : "s"} about: ${project.name}
+${project.description ? `\nDescription: ${project.description}` : ""}
+${project.category ? `\nCategory: ${project.category}` : ""}`;
 
   const ports: DraftGenerationPorts = {
     creditState: async () => scope.mode === "platform" ? getCreditState(scope.userId, "social_draft") : { billingEnabled: false, balance: 0, cost: 0 },
@@ -131,13 +137,13 @@ export async function POST(req: NextRequest) {
     limit: scope.mode === "platform" && usesPlatformKey ? dailyDraftBatchLimit(await getUserPlan(scope.userId)) : -1,
     reserveSlot: async (limit) => {
       if (scope.mode === "platform") {
-        return supabaseStore.reserveXBatch(scope.db, scope.userId, scope.projectId, limit, startOfUtcDay());
+        return supabaseStore.reserveLinkedInBatch(scope.db, scope.userId, scope.projectId, limit, startOfUtcDay());
       }
       return { ok: true, batchId: "" };
     },
     releaseSlot: async (batchId) => {
       if (scope.mode === "platform" && batchId) {
-        await supabaseStore.deleteXBatch(scope.db, scope.userId, scope.projectId, batchId).catch(() => {});
+        await supabaseStore.deleteLinkedInBatch(scope.db, scope.userId, scope.projectId, batchId).catch(() => {});
       }
     },
     callModel: async () => {
@@ -151,23 +157,21 @@ export async function POST(req: NextRequest) {
       });
       return result.text ?? "";
     },
-    parse: (text) => parseDraftBatch(text, variants),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    filterUsable: (drafts) => (drafts as any[]).filter((d) => isWithinLimit(d.text)),
+    parse: (text) => parseLinkedInBatch(text, variants),
+    filterUsable: (drafts) => drafts,
     insertDrafts: async (batchId, drafts) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const withDefaults = (drafts as any[]).map((d) => ({ ...d, angle: "General", whyThisWorks: "" }));
       if (scope.mode === "platform") {
         return batchId
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          ? await supabaseStore.fulfilXBatch(scope.db, scope.userId, scope.projectId, batchId, drafts as any)
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          : await supabaseStore.insertXDrafts(scope.db, scope.userId, scope.projectId, drafts as any);
+          ? await supabaseStore.fulfilLinkedInBatch(scope.db, scope.userId, scope.projectId, batchId, withDefaults)
+          : await supabaseStore.insertLinkedInDrafts(scope.db, scope.userId, scope.projectId, withDefaults);
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return sqliteStore.insertXDrafts(getDb(), scope.projectId, drafts as any);
+      return sqliteStore.insertLinkedInDrafts(getDb(), scope.projectId, withDefaults);
     },
     deleteBatch: async (batchId) => {
       if (scope.mode === "platform") {
-        await supabaseStore.deleteXBatch(scope.db, scope.userId, scope.projectId, batchId).catch(() => {});
+        await supabaseStore.deleteLinkedInBatch(scope.db, scope.userId, scope.projectId, batchId).catch(() => {});
       }
     },
     charge: async () => {
@@ -181,29 +185,33 @@ export async function POST(req: NextRequest) {
   return NextResponse.json(result.body, { status: result.status });
 }
 
-/** Edit the text and/or move a draft between Current and Archived. */
 export async function PUT(req: NextRequest) {
-  const body = (await req.json().catch(() => null)) as { id?: unknown; text?: unknown; status?: unknown } | null;
+  const body = (await req.json().catch(() => null)) as { id?: unknown; hookLine?: unknown; body?: unknown; status?: unknown } | null;
   if (!body || typeof body.id !== "string") return NextResponse.json({ error: "id is required." }, { status: 400 });
 
-  const patch: XDraftPatch = {};
-  if (body.text !== undefined) {
-    if (typeof body.text !== "string" || !body.text.trim()) return NextResponse.json({ error: "Text can't be empty." }, { status: 400 });
-    if (!isWithinLimit(body.text)) return NextResponse.json({ error: "Text is over the 280 character limit." }, { status: 400 });
-    patch.text = body.text.trim();
+  const patch: LinkedInDraftPatch = {};
+  if (body.hookLine !== undefined) {
+    if (typeof body.hookLine !== "string" || !body.hookLine.trim()) return NextResponse.json({ error: "Hook line can't be empty." }, { status: 400 });
+    patch.hookLine = body.hookLine.trim();
+  }
+  if (body.body !== undefined) {
+    if (typeof body.body !== "string" || !body.body.trim()) return NextResponse.json({ error: "Body can't be empty." }, { status: 400 });
+    patch.body = body.body.trim();
   }
   if (body.status !== undefined) {
-    if (!isXDraftStatus(body.status)) return NextResponse.json({ error: "Invalid status." }, { status: 400 });
+    if (!isLinkedInDraftStatus(body.status)) return NextResponse.json({ error: "Invalid status." }, { status: 400 });
     patch.status = body.status;
   }
-  if (patch.text === undefined && patch.status === undefined) return NextResponse.json({ error: "Nothing to update." }, { status: 400 });
+  if (patch.hookLine === undefined && patch.body === undefined && patch.status === undefined) {
+    return NextResponse.json({ error: "Nothing to update." }, { status: 400 });
+  }
 
   const scope = await resolveScope();
   if (scope instanceof NextResponse) return scope;
   try {
     const draft = scope.mode === "platform"
-      ? await supabaseStore.updateXDraft(scope.db, scope.userId, scope.projectId, body.id, patch)
-      : sqliteStore.updateXDraft(getDb(), scope.projectId, body.id, patch);
+      ? await supabaseStore.updateLinkedInDraft(scope.db, scope.userId, scope.projectId, body.id, patch)
+      : sqliteStore.updateLinkedInDraft(getDb(), scope.projectId, body.id, patch);
     return draft ? NextResponse.json({ draft }) : NextResponse.json({ error: "Draft not found." }, { status: 404 });
   } catch (err) {
     return fail(err);
@@ -217,8 +225,8 @@ export async function DELETE(req: NextRequest) {
   if (scope instanceof NextResponse) return scope;
   try {
     const removed = scope.mode === "platform"
-      ? await supabaseStore.deleteXDraft(scope.db, scope.userId, scope.projectId, id)
-      : sqliteStore.deleteXDraft(getDb(), scope.projectId, id);
+      ? await supabaseStore.deleteLinkedInDraft(scope.db, scope.userId, scope.projectId, id)
+      : sqliteStore.deleteLinkedInDraft(getDb(), scope.projectId, id);
     return removed ? NextResponse.json({ success: true }) : NextResponse.json({ error: "Draft not found." }, { status: 404 });
   } catch (err) {
     return fail(err);
