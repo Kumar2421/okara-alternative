@@ -3,6 +3,7 @@
 import { ChevronRight } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { qk } from "@/lib/query/keys";
+import AutomationCard from "./AutomationCard";
 import { SkeletonStats, SkeletonCard } from "@/components/shared/Skeleton";
 import { summaryTotals } from "@/lib/domain/search/summaryTotals";
 import type { NextActionCard } from "@/lib/domain/search/nextActions";
@@ -98,6 +99,8 @@ export default function SearchOverviewPanel({ projectId, onOpenFinding }: { proj
           <StatCard label="Avg. position" value={d28Totals.position.toFixed(1)} delta={positionDelta} isBetter={(v) => v > 0} />
         </div>
       </section>
+
+      <AutomationCard projectId={projectId} />
 
       {/* Week Changes */}
       {data?.weekChanges && data.weekChanges.length > 0 && (

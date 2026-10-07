@@ -11,6 +11,8 @@ const account = ["account"] as const;
 
 export const qk = {
   gmailStatus: () => [...account, "gmail-status"] as const,
+  notifications: () => [...account, "notifications"] as const,
+  notificationPrefs: () => [...account, "notification-prefs"] as const,
   project: scope,
   dashboardData: (projectId: string | undefined) => [...scope(projectId), "dashboard-data"] as const,
   audit: (projectId: string | undefined, url: string | undefined, version: number) =>
@@ -27,7 +29,10 @@ export const qk = {
   findingActions: (projectId: string | undefined, findingId: string) =>
     [...scope(projectId), "findings", findingId, "actions"] as const,
   leadProfile: (projectId: string | undefined) => [...scope(projectId), "lead-profile"] as const,
+  automation: (projectId: string | undefined) => [...scope(projectId), "automation"] as const,
   searchOpportunities: (projectId: string | undefined) => [...scope(projectId), "search-opportunities"] as const,
   githubStatus: (projectId: string | undefined) => [...scope(projectId), "github-status"] as const,
+  xDrafts: (projectId: string | undefined, view: "current" | "archived") => [...scope(projectId), "x-drafts", view] as const,
+  xDraftsAll: (projectId: string | undefined) => [...scope(projectId), "x-drafts"] as const,
   searchOverview: (projectId: string | undefined) => [...scope(projectId), "search-overview"] as const,
 };
