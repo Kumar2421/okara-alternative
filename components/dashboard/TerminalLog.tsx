@@ -23,6 +23,7 @@ import { useTerminalLog } from "@/lib/terminal-log-store";
 import { useProject } from "@/lib/project-store";
 import { useAuthUser } from "@/lib/useAuthUser";
 import { useToast } from "./Toast";
+import NotificationBell from "./notifications/NotificationBell";
 
 function useClickOutside(onOutside: () => void) {
   const ref = useRef<HTMLDivElement>(null);
@@ -377,7 +378,10 @@ export default function TerminalLog() {
             </div>
           </div>
 
-          <UserMenu />
+          <div className="flex shrink-0 items-center gap-2">
+            <NotificationBell />
+            <UserMenu />
+          </div>
         </div>
 
         {logOpen && (

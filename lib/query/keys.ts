@@ -11,6 +11,8 @@ const account = ["account"] as const;
 
 export const qk = {
   gmailStatus: () => [...account, "gmail-status"] as const,
+  notifications: () => [...account, "notifications"] as const,
+  notificationPrefs: () => [...account, "notification-prefs"] as const,
   project: scope,
   dashboardData: (projectId: string | undefined) => [...scope(projectId), "dashboard-data"] as const,
   audit: (projectId: string | undefined, url: string | undefined, version: number) =>

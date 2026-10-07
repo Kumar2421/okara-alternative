@@ -15,6 +15,7 @@ import {
   KeyRound,
   Zap,
   Puzzle,
+  Bell,
 } from "lucide-react";
 import { FEATURES } from "@/lib/features";
 
@@ -40,6 +41,7 @@ const CHAT_ITEMS = [{ href: "/settings/personalization", label: "Personalization
 
 const GENERAL_ITEMS = [
   { href: "/settings/account", label: "Account & Security", icon: Shield },
+  { href: "/settings/notifications", label: "Notifications", icon: Bell },
   { href: "/settings/devices", label: "Devices", icon: Smartphone },
 ];
 
