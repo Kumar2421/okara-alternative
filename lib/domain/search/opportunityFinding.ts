@@ -145,7 +145,7 @@ export type CreateFromSnapshot =
   | { ok: true; input: ReturnType<typeof findingForOpportunity> }
   | { ok: false; status: number; error: string };
 
-function sameHost(a: string, b: string): boolean {
+export function sameHost(a: string, b: string): boolean {
   try {
     return new URL(a).hostname.replace(/^www\./, "") === new URL(b).hostname.replace(/^www\./, "");
   } catch {
