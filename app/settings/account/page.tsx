@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuthUser } from "@/lib/useAuthUser";
 import { createClient } from "@/utils/supabase/client";
 import { useToast } from "@/components/dashboard/Toast";
@@ -13,6 +13,25 @@ export default function AccountPage() {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [saving, setSaving] = useState(false);
+  const [plan, setPlan] = useState<string | null>(null);
+  const [planLoading, setPlanLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/usage")
+      .then((r) => r.json())
+      .then((data) => {
+        // Capitalize: free -> Free, lite -> Lite, pro -> Pro
+        const tier = data.planTier || "free";
+        const capitalized = tier.charAt(0).toUpperCase() + tier.slice(1);
+        setPlan(capitalized);
+      })
+      .catch(() => {
+        setPlan("Free");
+      })
+      .finally(() => {
+        setPlanLoading(false);
+      });
+  }, []);
 
   async function handleChangePassword() {
     if (newPassword.length < 6) {
@@ -48,6 +67,13 @@ export default function AccountPage() {
         <div className="mb-1 text-[13px] font-semibold text-gray-900">Email</div>
         <div className="text-[13px] text-gray-600">
           {loading ? <Loader2 size={13} className="animate-spin" /> : user?.email || "Not signed in"}
+        </div>
+      </div>
+
+      <div className="mb-4 rounded-xl border border-gray-200 bg-white px-4 py-3">
+        <div className="mb-1 text-[13px] font-semibold text-gray-900">Plan</div>
+        <div className="text-[13px] text-gray-600">
+          {planLoading ? <Loader2 size={13} className="animate-spin" /> : plan || "Free"}
         </div>
       </div>
 

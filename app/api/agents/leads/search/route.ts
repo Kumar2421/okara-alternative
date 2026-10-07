@@ -7,6 +7,7 @@ import { getLeadProfile as getLeadProfileSupabase } from "@/lib/domain/leads/lea
 import { verifyMissingEmails } from "@/lib/domain/leads/verifyMissingEmails";
 import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
 import { FEATURES } from "@/lib/features";
+import { canFetchLeadsToday } from "@/lib/entitlements";
 import { createClient } from "@/utils/supabase/server";
 import { createServiceClient } from "@/utils/supabase/serviceClient";
 import { chargeCredits, InsufficientCreditsError } from "@/lib/credits";
@@ -132,6 +133,15 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Out of credits. Upgrade or connect your own key." }, { status: 402 });
       }
       throw err;
+    }
+
+    // Check daily leads limit before searching
+    const dailyLeadsCheck = await canFetchLeadsToday(user.id);
+    if (!dailyLeadsCheck.allowed) {
+      return NextResponse.json(
+        { error: dailyLeadsCheck.message || "Daily lead limit reached" },
+        { status: 403 }
+      );
     }
 
     try {
