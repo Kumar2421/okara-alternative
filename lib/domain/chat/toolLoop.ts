@@ -161,5 +161,5 @@ export function isTransientProviderError(err: unknown): boolean {
   const status = typeof e?.status === "number" ? e.status : NaN;
   if (status === 429 || (status >= 500 && status < 600)) return true;
   const raw = `${err instanceof Error ? err.message : String(err)} ${typeof e?.code === "string" ? e.code : ""}`;
-  return /(429|5\d\d)|rate.?limit|too many requests|overloaded|timed? ?out|timeout|ETIMEDOUT|ECONNRESET|unavailable|bad gateway/i.test(raw);
+  return /(?:^|\D)(?:429|5\d\d)(?:\D|$)|rate.?limit|too many requests|overloaded|timed? ?out|timeout|ETIMEDOUT|ECONNRESET|unavailable|bad gateway/i.test(raw);
 }
