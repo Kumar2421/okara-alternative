@@ -21,6 +21,7 @@ import { qk } from "@/lib/query/keys";
 import GoogleSourcesCard from "@/components/dashboard/search/GoogleSourcesCard";
 import GoogleSummary from "@/components/dashboard/search/GoogleSummary";
 import SearchHistoryBar from "@/components/dashboard/search/SearchHistoryBar";
+import SearchOverviewPanel from "@/components/dashboard/search/SearchOverviewPanel";
 import SearchInsightsSection from "@/components/dashboard/search/SearchInsightsSection";
 
 const TABS = ["SEO", "Links", "Technical", "GEO", "Traffic", "Findings"] as const;
@@ -568,6 +569,8 @@ export default function AnalyticsPanel({ open, onToggle }: { open: boolean; onTo
                 {trafficResult.ga4Error && (
                   <div className="mb-5 text-[11px] text-amber-600">⚠ Google Analytics: {trafficResult.ga4Error}</div>
                 )}
+
+                {project && <SearchOverviewPanel projectId={project.id} />}
 
                 <SearchInsightsSection search={trafficResult.search ?? null} topQueries={trafficResult.topQueries} />
 

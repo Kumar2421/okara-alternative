@@ -28,4 +28,5 @@ export const qk = {
     [...scope(projectId), "findings", findingId, "actions"] as const,
   leadProfile: (projectId: string | undefined) => [...scope(projectId), "lead-profile"] as const,
   searchOpportunities: (projectId: string | undefined) => [...scope(projectId), "search-opportunities"] as const,
+  searchOverview: (projectId: string | undefined) => [...scope(projectId), "search-overview"] as const,
 };
