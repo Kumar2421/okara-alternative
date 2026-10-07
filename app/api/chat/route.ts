@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getDb } from "@/lib/db";
-import { getDriver } from "@/lib/llm";
+import { getDriver, providerSupportsTools } from "@/lib/llm";
 import type { ChatMessage } from "@/lib/llm";
 import { getActiveProjectId } from "@/lib/domain/shared/getActiveProjectId";
 import { getActiveProjectContext } from "@/lib/domain/shared/getActiveProject";
 import { getActiveProjectContextSupabase } from "@/lib/domain/shared/getActiveProjectSupabase";
 import { buildProjectContextBlock } from "@/lib/domain/shared/projectContextPrompt";
+import { runChatTurn } from "@/lib/domain/chat/toolLoop";
+import { platformChatPorts, selfHostChatPorts } from "@/lib/domain/chat/chatPorts";
+import type { ChatPorts } from "@/lib/domain/chat/tools";
 import { buildTrafficContextBlock } from "@/lib/domain/shared/trafficContextPrompt";
 import { FEATURES } from "@/lib/features";
 import { createClient } from "@/utils/supabase/server";
@@ -32,8 +35,7 @@ const STYLE_INSTRUCTION = `Write in plain conversational text only — this is d
  * search. Reuses the same context block the content agents (Articles,
  * LinkedIn, Reddit, X) already ground their prompts in, plus real cached
  * Traffic data on top — nothing fabricated when either is missing. */
-function buildChatSystemPrompt(): string {
-  const activeId = getActiveProjectId();
+function buildChatSystemPrompt(activeId: string | null): string {
   if (!activeId) return STYLE_INSTRUCTION;
 
   const project = getActiveProjectContext();
@@ -47,33 +49,42 @@ function buildChatSystemPrompt(): string {
   return `${STYLE_INSTRUCTION}\n\n${block}\n${trafficBlock}`;
 }
 
-/** Platform-mode equivalent of buildChatSystemPrompt() — Supabase-scoped to
- * one user instead of the shared local SQLite file.
- *
- * TODO(platform-mode): schema gap - `traffic_checks` isn't in the documented
- * Postgres schema for this task cluster (same category of gap as
- * `seo_audits`, already flagged in app/api/project/[id]/route.ts's DELETE
- * handler and in app/api/agents/codefix/propose+apply/route.ts here). Real
- * cached Search Console/Analytics data can't be read in platform mode yet,
- * so this always falls back to the honest "not cached" message instead of
- * querying a table that isn't confirmed to exist. */
-async function buildChatSystemPromptSupabase(db: SupabaseClient, userId: string): Promise<string> {
+/** Platform-mode equivalent of buildChatSystemPrompt() � Supabase-scoped to
+ * one user instead of the shared local SQLite file. Search data comes from
+ * the chat tools (search_snapshots), so no "not cached" claim is made here. */
+async function buildChatSystemPromptSupabase(db: SupabaseClient, userId: string, activeId: string | null): Promise<string> {
+  if (!activeId) return STYLE_INSTRUCTION;
+  const project = await getActiveProjectContextSupabase(db, userId);
+  return `${STYLE_INSTRUCTION}
+
+${buildProjectContextBlock(project)}`;
+}
+
+async function activeProjectIdSupabase(db: SupabaseClient, userId: string): Promise<string | null> {
   const { data: setting } = await db
     .from("user_settings")
     .select("value")
     .eq("user_id", userId)
     .eq("key", "active_project_id")
     .maybeSingle();
-  const activeId = setting?.value;
-  if (!activeId) return STYLE_INSTRUCTION;
+  return (setting?.value as string | undefined) ?? null;
+}
 
-  const project = await getActiveProjectContextSupabase(db, userId);
-  const block = buildProjectContextBlock(project);
-
-  const trafficBlock =
-    "\nNo real Traffic data cached yet — the user hasn't opened Analytics → Traffic for this project. Don't invent traffic or ranking numbers; say so if asked.";
-
-  return `${STYLE_INSTRUCTION}\n\n${block}\n${trafficBlock}`;
+/** One chat turn: tools when there's an active project, plain driver call otherwise. */
+async function answer(args: {
+  providerId: string; apiKey: string; model: string; baseUrl?: string; system: string;
+  messages: ChatMessage[]; ports: ChatPorts | null;
+}) {
+  const driver = getDriver(args.providerId)!;
+  if (!args.ports) {
+    const result = await driver({ apiKey: args.apiKey, model: args.model, system: args.system, messages: args.messages, baseUrl: args.baseUrl });
+    return { reply: result.text, toolsUsed: [] as string[], lookedAt: [] as string[] };
+  }
+  const run = await runChatTurn({
+    driver, apiKey: args.apiKey, model: args.model, baseUrl: args.baseUrl, system: args.system,
+    messages: args.messages, ports: args.ports, supportsTools: providerSupportsTools(args.providerId),
+  });
+  return { reply: run.text, toolsUsed: run.toolsUsed, lookedAt: run.lookedAt };
 }
 
 export async function POST(req: NextRequest) {
@@ -146,15 +157,14 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-      const system = await buildChatSystemPromptSupabase(db, user.id);
-      const result = await driver({
-        apiKey,
-        model,
-        system,
+      const activeId = await activeProjectIdSupabase(db, user.id);
+      const system = await buildChatSystemPromptSupabase(db, user.id, activeId);
+      const out = await answer({
+        providerId, apiKey, model, baseUrl, system,
         messages: [...(history ?? []), { role: "user", content: message }],
-        baseUrl,
+        ports: activeId ? platformChatPorts(db, user.id, activeId) : null,
       });
-      return NextResponse.json({ reply: result.text });
+      return NextResponse.json(out);
     } catch (err) {
       // Note: credits already charged for this message — no refund path yet
       // on generation failure. Same tradeoff articles/generate makes.
@@ -175,15 +185,14 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const system = buildChatSystemPrompt();
-    const result = await driver({
-      apiKey: row.api_key,
-      model,
-      system,
+    const activeId = getActiveProjectId();
+    const out = await answer({
+      providerId, apiKey: row.api_key, model, baseUrl: row.base_url ?? undefined,
+      system: buildChatSystemPrompt(activeId),
       messages: [...(history ?? []), { role: "user", content: message }],
-      baseUrl: row.base_url ?? undefined,
+      ports: activeId ? selfHostChatPorts(activeId) : null,
     });
-    return NextResponse.json({ reply: result.text });
+    return NextResponse.json(out);
   } catch (err) {
     return NextResponse.json({ error: friendlyProviderError(providerId, err) }, { status: 502 });
   }
