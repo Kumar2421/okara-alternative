@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FEATURES } from "@/lib/features";
 import { createClient } from "@/utils/supabase/server";
+import { assertPublicHttpUrl } from "@/lib/domain/seo/SEOAgent";
 
 /** Real, live check against the WordPress REST API — same honesty pattern
  * as GitHub's validate route: never save a connection that doesn't
@@ -27,6 +28,11 @@ export async function POST(req: NextRequest) {
     normalized = new URL(siteUrl.trim().startsWith("http") ? siteUrl.trim() : `https://${siteUrl.trim()}`);
   } catch {
     return NextResponse.json({ error: "Invalid site URL." }, { status: 400 });
+  }
+  try {
+    assertPublicHttpUrl(normalized.origin);
+  } catch (err) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : "That site address can't be used." }, { status: 400 });
   }
 
   try {

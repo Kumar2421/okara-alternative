@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { Check, ExternalLink, GitPullRequest, Loader2, Wrench } from "lucide-react";
 import type { Finding } from "@/lib/domain/findings/findingTypes";
 import { classifyFinding } from "@/lib/domain/codefix/fixCatalog";
+import { CMS_LABEL, classifyForCms } from "@/lib/domain/cms/cmsFixCatalog";
 import type { FixChange } from "@/lib/domain/codefix/catalogFix";
 import { pullRequestUrlOf } from "@/lib/domain/fixes/linkPullRequest";
 import { implementationOf } from "@/lib/domain/search/actionOutcome";
@@ -12,6 +13,8 @@ import type { ActionWithOutcome } from "@/lib/domain/search/outcomeService";
 import SidePanel from "@/components/shared/SidePanel";
 import { useTerminalLog } from "@/lib/terminal-log-store";
 import { useCodeFix, useGithubStatus, type PreparedFix } from "./useCodeFix";
+import FindingCmsFix, { CmsConnectPrompt } from "./FindingCmsFix";
+import { useCmsStatus } from "./useCmsFix";
 
 type AutoFix = Extract<PreparedFix, { mode: "auto" }>;
 
@@ -136,6 +139,7 @@ function PreviewPanel({
 export default function FindingCodeFix({ finding, actions }: { finding: Finding; actions: ActionWithOutcome[] }) {
   const verdict = classifyFinding(finding);
   const status = useGithubStatus(verdict.mode === "auto");
+  const cmsStatus = useCmsStatus(verdict.mode === "auto");
   const { prepare, approve, hasModel } = useCodeFix(finding.id);
   const [fix, setFix] = useState<AutoFix | null>(null);
   const { log, logDone } = useTerminalLog();
@@ -173,11 +177,18 @@ export default function FindingCodeFix({ finding, actions }: { finding: Finding;
     );
   }
 
-  if (status.isPending) return <div className="h-12 animate-pulse rounded-xl bg-gray-100" aria-busy="true" />;
+  if (status.isPending || cmsStatus.isPending) return <div className="h-12 animate-pulse rounded-xl bg-gray-100" aria-busy="true" />;
   const gh = status.data;
-  if (status.isError || !gh || (gh.mode === "app" && !gh.configured)) return null;
+  const ghUsable = !(status.isError || !gh || (gh.mode === "app" && !gh.configured));
+  const ghConnected = ghUsable && Boolean(gh?.connected);
 
-  if (!gh.connected) {
+  // A connected CMS that can apply this exact fix directly (WordPress, Webflow): no GitHub needed.
+  const connections = cmsStatus.data?.connections ?? [];
+  const cmsFix = connections.map((c) => ({ conn: c, verdict: classifyForCms(c.cms, finding) })).find((c) => c.verdict.fixable);
+  const cmsNode = cmsFix && cmsFix.verdict.fixable ? <FindingCmsFix finding={finding} cms={cmsFix.conn.cms} cmsLabel={CMS_LABEL[cmsFix.conn.cms]} label={cmsFix.verdict.label} /> : null;
+
+  const githubPrompt = () => {
+    if (!gh || !ghUsable) return null;
     if (gh.mode === "pat") {
       return (
         <div className={box}>
@@ -203,7 +214,30 @@ export default function FindingCodeFix({ finding, actions }: { finding: Finding;
         </a>
       </div>
     );
+  };
+
+  if (!ghConnected) {
+    if (cmsNode) {
+      return (
+        <div className="space-y-2">
+          {cmsNode}
+          {githubPrompt()}
+        </div>
+      );
+    }
+    // Nothing can apply this yet: offer both ways to connect (or say why the connected CMS can't).
+    const cmsReason = connections.length > 0 ? classifyForCms(connections[0].cms, finding) : null;
+    const gp = githubPrompt();
+    if (!gp && connections.length > 0) return null;
+    return (
+      <div className="space-y-2">
+        {gp}
+        <CmsConnectPrompt note={cmsReason && !cmsReason.fixable ? cmsReason.reason : undefined} />
+      </div>
+    );
   }
+
+  if (!gh) return null;
 
   const runPrepare = () => {
     log(`Reading ${gh.repoFullName} to prepare: ${verdict.label}...`);
@@ -218,7 +252,7 @@ export default function FindingCodeFix({ finding, actions }: { finding: Finding;
     });
   };
 
-  return (
+  const githubNode = (
     <div className={box} data-testid="codefix-ready">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
@@ -242,5 +276,14 @@ export default function FindingCodeFix({ finding, actions }: { finding: Finding;
       {prepare.error && <p className="mt-2 text-[11px] text-red-600">{prepare.error.message}</p>}
       {fix && <PreviewPanel finding={finding} fix={fix} approve={approve} onClose={() => { setFix(null); approve.reset(); }} />}
     </div>
+  );
+
+  return cmsNode ? (
+    <div className="space-y-2">
+      {cmsNode}
+      {githubNode}
+    </div>
+  ) : (
+    githubNode
   );
 }

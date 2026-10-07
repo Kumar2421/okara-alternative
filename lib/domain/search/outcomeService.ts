@@ -52,7 +52,9 @@ function sameHost(a: string, b: string): boolean {
  */
 export async function implementAction(
   ports: OutcomePorts,
-  args: { actionId: string; pageUrl?: string | null; via?: ImplementationRecord["via"]; change?: ImplementationRecord["change"]; now?: Date },
+  args: { actionId: string; pageUrl?: string | null; via?: ImplementationRecord["via"]; change?: ImplementationRecord["change"]; now?: Date;
+    /** Captured by the caller BEFORE it changed the live page (a CMS publish), so the baseline is not the already-fixed page. */
+    pageBefore?: PageFingerprint | null },
 ): Promise<ServiceResult<Action>> {
   const now = args.now ?? new Date();
   const action = await ports.getAction(args.actionId);
@@ -71,7 +73,7 @@ export async function implementAction(
     }
   }
   const pageUrl = requested ?? action.target.url ?? finding.url ?? null;
-  const pageBefore = pageUrl ? await ports.fetchFingerprint(pageUrl) : null;
+  const pageBefore = args.pageBefore !== undefined ? args.pageBefore : pageUrl ? await ports.fetchFingerprint(pageUrl) : null;
 
   const implementation = buildImplementation({
     finding, snapshot: await ports.getSnapshot(), via: args.via, now, change: args.change, pageUrl, pageBefore,

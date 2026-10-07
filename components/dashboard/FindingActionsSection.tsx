@@ -47,7 +47,7 @@ function OutcomeCard({ action, outcome, onUndo, busy }: { action: ActionWithOutc
   const implementation = implementationOf(action.result);
   if (!implementation) return null;
   const canUndo = action.canUndo;
-  const via = implementation.via === "github_pr" ? "via GitHub PR" : "by you";
+  const via = implementation.via === "github_pr" ? "via GitHub PR" : implementation.via === "cms_publish" ? "via your CMS" : "by you";
   const prUrl = implementation.change?.prUrl as string | undefined;
 
   return (

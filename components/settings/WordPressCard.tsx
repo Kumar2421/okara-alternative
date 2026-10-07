@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { Lock, Check, Loader2, ExternalLink } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/components/dashboard/Toast";
+import { qk } from "@/lib/query/keys";
 
 /** Real WordPress (self-hosted) connection via Application Passwords (core
  * since WP 5.6) — no OAuth, no expiry, verified live against the site's own
@@ -14,6 +16,7 @@ import { useToast } from "@/components/dashboard/Toast";
  * publishing is a separate follow-up. */
 export default function WordPressCard() {
   const { show } = useToast();
+  const queryClient = useQueryClient();
   const [connected, setConnected] = useState(false);
   const [siteSaved, setSiteSaved] = useState("");
   const [siteUrl, setSiteUrl] = useState("");
@@ -64,6 +67,7 @@ export default function WordPressCard() {
       });
       if (!saveRes.ok) throw new Error((await saveRes.json().catch(() => ({})))?.error ?? "Failed to save");
       setConnected(true);
+      queryClient.invalidateQueries({ queryKey: qk.cmsStatus() });
       setSiteSaved(data.siteUrl);
       setSiteUrl("");
       setUsername("");
@@ -81,6 +85,7 @@ export default function WordPressCard() {
     try {
       await fetch("/api/providers?providerId=wordpress", { method: "DELETE" });
       setConnected(false);
+      queryClient.invalidateQueries({ queryKey: qk.cmsStatus() });
       setSiteSaved("");
       show("WordPress disconnected.");
     } catch (err) {

@@ -213,3 +213,18 @@ test("completing without Marlo running the action is allowed; cancelled actions 
   assert.equal(canTransitionAction("cancelled", "completed"), false);
   assert.equal(canTransitionAction("completed", "proposed"), false, "undo goes through the outcome service, not the generic machine");
 });
+
+test("a CMS publish starts outcome tracking with via cms_publish and the pre-change page as the baseline", async () => {
+  const h = harness({ fingerprints: [fp("AFTER the publish")] });
+  const res = await implementAction(h.ports, { actionId: "a1", via: "cms_publish", change: { summary: "Meta description updated in WordPress" }, pageBefore: fp("BEFORE the publish"), now: T0 });
+  assert.equal(res.ok, true);
+  const impl = implementationOf(h.state.action.result);
+  assert.equal(impl?.via, "cms_publish");
+  assert.equal(impl?.change?.summary, "Meta description updated in WordPress");
+  assert.equal(impl?.pageBefore?.title, "BEFORE the publish");
+  assert.deepEqual(h.state.fetched, [], "the live (already changed) page is not fetched as the baseline");
+  assert.equal(h.state.action.status, "completed");
+  assert.ok(h.state.moves.length > 0, "finding moves toward fixed");
+  const legacy = implementationOf({ implementation: { via: "weird", implementedAt: T0.toISOString() } });
+  assert.equal(legacy?.via, "manual", "unknown via values still read as manual");
+});
