@@ -48,6 +48,7 @@ function OutcomeCard({ action, outcome, onUndo, busy }: { action: ActionWithOutc
   if (!implementation) return null;
   const canUndo = action.canUndo;
   const via = implementation.via === "github_pr" ? "via GitHub PR" : "by you";
+  const prUrl = implementation.change?.prUrl as string | undefined;
 
   return (
     <div className="mt-2 rounded-lg border border-gray-100 bg-gray-50/60 p-2.5" data-testid="outcome-card">
@@ -58,6 +59,11 @@ function OutcomeCard({ action, outcome, onUndo, busy }: { action: ActionWithOutc
         <span className="text-[10px] text-gray-400">
           Made {new Date(implementation.implementedAt).toLocaleDateString()} {via}
         </span>
+        {prUrl && (
+          <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[9px] font-semibold text-blue-700">
+            Pull request merged
+          </span>
+        )}
         {canUndo && (
           <button type="button" onClick={onUndo} disabled={busy} className="ml-auto text-[10px] text-gray-500 hover:text-gray-800 hover:underline disabled:opacity-50">
             Undo
@@ -66,8 +72,8 @@ function OutcomeCard({ action, outcome, onUndo, busy }: { action: ActionWithOutc
       </div>
       {outcome && <p className="mt-1.5 text-[12px] leading-5 text-gray-800">{outcome.headline}</p>}
       {outcome?.pageNote && <p className="mt-1 text-[11px] leading-4 text-gray-500">{outcome.pageNote}</p>}
-      {implementation.change?.prUrl && (
-        <a href={implementation.change.prUrl} target="_blank" rel="noreferrer" className="mt-1 block text-[11px] text-blue-600 hover:underline">
+      {prUrl && (
+        <a href={prUrl} target="_blank" rel="noreferrer" className="mt-1 block text-[11px] text-blue-600 hover:underline">
           View the pull request
         </a>
       )}
