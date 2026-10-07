@@ -6,6 +6,13 @@ export type AutomationMode = "off" | "auto_approve_safe";
 
 export type AutomationSettings = { mode: AutomationMode; updatedAt: string | null };
 
+/** Per-(project, UTC day) run claim, stored as a project_documents row so no schema change is needed. */
+export const PROPOSAL_CLAIM_PREFIX = "auto_propose_claim:";
+/** Marks that the daily proposal step finished for a project on a UTC day, so the cron does not redo it every run. */
+export const PROPOSAL_DONE_PREFIX = "auto_propose_done:";
+/** A claim older than this is treated as abandoned (the run died) and may be taken over. */
+export const PROPOSAL_CLAIM_STALE_MS = 10 * 60 * 1000;
+
 export const DEFAULT_AUTOMATION: AutomationSettings = { mode: "off", updatedAt: null };
 
 /** Anything that is not exactly the opt-in value is "off", so a corrupt or old row can never turn automation on. */

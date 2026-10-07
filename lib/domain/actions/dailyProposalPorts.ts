@@ -1,13 +1,19 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getDb } from "@/lib/db";
-import { createAction, listProjectActions, transitionAction } from "@/lib/domain/actions/actionStore";
+import { createAction, listProjectActions, mergeActionParameters, transitionAction } from "@/lib/domain/actions/actionStore";
 import {
   createAction as createActionSupabase,
   listProjectActions as listProjectActionsSupabase,
+  mergeActionParameters as mergeActionParametersSupabase,
   transitionAction as transitionActionSupabase,
 } from "@/lib/domain/actions/actionStoreSupabase";
-import { getAutomationSettings } from "@/lib/domain/actions/automationSettingsStore";
-import { getAutomationSettings as getAutomationSettingsSupabase } from "@/lib/domain/actions/automationSettingsStoreSupabase";
+import { AUTO_APPROVED_KEY } from "@/lib/domain/actions/autoApprove";
+import { claimProposalRun, getAutomationSettings, releaseProposalRun } from "@/lib/domain/actions/automationSettingsStore";
+import {
+  claimProposalRun as claimProposalRunSupabase,
+  getAutomationSettings as getAutomationSettingsSupabase,
+  releaseProposalRun as releaseProposalRunSupabase,
+} from "@/lib/domain/actions/automationSettingsStoreSupabase";
 import { runDailyProposals, type DailyProposalPorts, type DailyProposalSummary } from "@/lib/domain/actions/dailyProposals";
 import { upsertFinding } from "@/lib/domain/findings/findingStore";
 import { upsertFinding as upsertFindingSupabase } from "@/lib/domain/findings/findingStoreSupabase";
@@ -26,6 +32,9 @@ export function platformProposalPorts(db: SupabaseClient, userId: string, projec
     saveFinding: (input) => upsertFindingSupabase(db, userId, input),
     createAction: (input) => createActionSupabase(db, userId, input),
     approveAction: (id) => transitionActionSupabase(db, userId, projectId, id, "approved"),
+    markAutoApproved: (id) => mergeActionParametersSupabase(db, userId, projectId, id, { [AUTO_APPROVED_KEY]: true }),
+    claimDay: (day) => claimProposalRunSupabase(db, userId, projectId, day),
+    releaseDay: (day) => releaseProposalRunSupabase(db, userId, projectId, day),
   };
 }
 
@@ -40,6 +49,9 @@ export function selfHostProposalPorts(projectId: string): DailyProposalPorts {
     saveFinding: async (input) => upsertFinding(input),
     createAction: async (input) => createAction(input),
     approveAction: async (id) => transitionAction(projectId, id, "approved"),
+    markAutoApproved: async (id) => mergeActionParameters(projectId, id, { [AUTO_APPROVED_KEY]: true }),
+    claimDay: async (day) => claimProposalRun(getDb(), projectId, day),
+    releaseDay: async (day) => releaseProposalRun(getDb(), projectId, day),
   };
 }
 

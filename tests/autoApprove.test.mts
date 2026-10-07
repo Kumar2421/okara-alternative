@@ -125,6 +125,7 @@ function fakePorts(mode: "off" | "auto_approve_safe") {
   const findings: Finding[] = [];
   const actions: Action[] = [];
   const approved: string[] = [];
+  const claims = new Set<string>();
   const ports: DailyProposalPorts = {
     getMode: async () => mode,
     getSnapshot: async () => ({ payload: snapshot() }),
@@ -145,8 +146,20 @@ function fakePorts(mode: "off" | "auto_approve_safe") {
       const a = actions.find((x) => x.id === id)!;
       a.status = "approved";
     },
+    markAutoApproved: async (id) => {
+      const a = actions.find((x) => x.id === id)!;
+      a.parameters = { ...a.parameters, autoApproved: true };
+    },
+    claimDay: async (day) => {
+      if (claims.has(day)) return false;
+      claims.add(day);
+      return true;
+    },
+    releaseDay: async (day) => {
+      claims.delete(day);
+    },
   };
-  return { ports, findings, actions, approved };
+  return { ports, findings, actions, approved, claims };
 }
 
 const PROJECT = { id: "p1", name: "Marlo", url: "https://example.com" };
@@ -186,4 +199,52 @@ test("job: a failing item is reported without secrets and does not stop the rest
   const summary = await runDailyProposals(f.ports, PROJECT, NOW);
   assert.deepEqual(summary.errors, ["db down"]);
   assert.ok(summary.proposed >= 1);
+});
+
+test("job: a held day-claim means no actions are created (overlapping run)", async () => {
+  const f = fakePorts("auto_approve_safe");
+  f.claims.add("2026-10-10");
+  const summary = await runDailyProposals(f.ports, PROJECT, NOW);
+  assert.equal(summary.proposed, 0);
+  assert.equal(f.actions.length, 0);
+});
+
+test("job: two overlapping runs create at most 3 actions and no duplicate per finding", async () => {
+  const f = fakePorts("auto_approve_safe");
+  const [a, b] = await Promise.all([runDailyProposals(f.ports, PROJECT, NOW), runDailyProposals(f.ports, PROJECT, NOW)]);
+  assert.equal(a.proposed + b.proposed, f.actions.length);
+  assert.ok(f.actions.length <= DAILY_PROPOSAL_CAP);
+  assert.equal(new Set(f.actions.map((x) => x.findingId)).size, f.actions.length);
+  assert.equal(f.claims.size, 0, "claim released");
+});
+
+test("job: cap is re-checked right before creating even if the claim was bypassed", async () => {
+  const f = fakePorts("auto_approve_safe");
+  const original = f.ports.listActions;
+  let listed = 0;
+  f.ports.listActions = async () => {
+    listed += 1;
+    // After the planning read, a concurrent run fills today's cap.
+    if (listed === 2) for (let i = 0; i < DAILY_PROPOSAL_CAP; i += 1) f.actions.push(action({ id: "x" + i, findingId: "other" + i, createdAt: NOW.toISOString() }));
+    return original();
+  };
+  const summary = await runDailyProposals(f.ports, PROJECT, NOW);
+  assert.equal(summary.proposed, 0);
+});
+
+test("job: autoApproved marker is set only after approval succeeds", async () => {
+  const f = fakePorts("auto_approve_safe");
+  f.ports.approveAction = async () => { throw new Error("approve failed"); };
+  const summary = await runDailyProposals(f.ports, PROJECT, NOW);
+  assert.ok(summary.errors.length > 0);
+  assert.ok(f.actions.length > 0);
+  for (const a of f.actions) {
+    assert.equal(a.status, "proposed");
+    assert.equal(a.parameters.autoApproved, undefined);
+  }
+});
+
+test("isLowRisk guards the real parameters: the params the job passes are allowed, a risky one is not", () => {
+  assert.equal(isLowRisk({ type: "rewrite_snippet", target: { url: "https://example.com/p" }, parameters: { autoProposed: true } }), true);
+  assert.equal(isLowRisk({ type: "rewrite_snippet", target: { url: "https://example.com/p" }, parameters: { autoProposed: true, pullRequest: 1 } }), false);
 });

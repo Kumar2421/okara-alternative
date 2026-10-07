@@ -40,6 +40,15 @@ export function isLowRisk(action: { type: ActionType; target?: Action["target"];
   return !hasRiskyKey(action.parameters);
 }
 
+/** Parameters an auto-proposed action is created with; used for both the risk check and the create call. */
+export function autoProposalParameters(): Record<string, unknown> {
+  return { [AUTO_PROPOSED_KEY]: true };
+}
+
+export function actionTarget(url: string | null | undefined): Action["target"] {
+  return url ? { url } : {};
+}
+
 export type PlannedProposal = {
   opportunity: SearchOpportunity;
   /** Finding to save, unless existingFindingId says it is already saved. */
@@ -105,7 +114,7 @@ export function planDailyProposals(args: {
       finding,
       existingFindingId: existing?.id ?? null,
       actionType,
-      approve: args.mode === "auto_approve_safe" && isLowRisk({ type: actionType, target: finding.url ? { url: finding.url } : {}, parameters: {} }),
+      approve: args.mode === "auto_approve_safe" && isLowRisk({ type: actionType, target: actionTarget(finding.url), parameters: autoProposalParameters() }),
     });
   }
 
