@@ -26,7 +26,7 @@ export function useNotificationPrefs() {
   });
 
   const sendTest = useMutation({
-    mutationFn: () => fetchJson<{ sent: boolean; to: string }>("/api/notifications/test", { method: "POST" }),
+    mutationFn: () => fetchJson<{ sent: boolean; to: string }>("/api/notifications/send-test", { method: "POST" }),
   });
 
   return { query, data: query.data, save, sendTest };
